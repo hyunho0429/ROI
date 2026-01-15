@@ -8,20 +8,22 @@ Link : https://help-morai-sim.scrollhelp.site/
 
 ```
 ├── lib                
-│    ├── define          # UDP network - Protocol configure
-│    └── network         # UDP network manager class│    
+│    ├── define          # UDP network - Protocol configuration init
+│    └── network         # UDP network manager class
 │
 ├── EgoNetwork           
 │    ├── CmdControl      # Ego Vehicle Control Command
 │    ├── Publisher       # UDP Protocol received from the MOARI SIM related to Ego
 │    └── Subscriber      # UDP Protocol send to the MOARI SIM related to Ego
 │
-├── Sensor              
+├── Sensor               # Test functions for sensor model output
+│
+├── SimulatorNetwork     # Test setup for sim-network features
 │
 └── Etc
 
 ```
 
-# Requirement
+# Requirements
 
-- python >= 3.7
+- Python >= 3.7
