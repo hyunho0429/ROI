@@ -6,4 +6,4 @@ class ControlInput:
         else:
             self.accel = 0.
             self.brake = -acc
-        self.steering = steering
+        self.front_steer = steering

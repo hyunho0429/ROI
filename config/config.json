@@ -2,10 +2,11 @@
     "common": {
         "sampling_rate": 30,
         "vehicle_length": 4,
-        "wheelbase": 2.8
+        "wheelbase": 2.8,
+        "max_steering": 36.25
     },
     "map": {
-        "name": "V_RHT_Suburb_03",
+        "name": "R_KR_PG_K-City",
         "traffic_light_control": true,
         "is_closed_path": true,
         "local_path_size": 50,

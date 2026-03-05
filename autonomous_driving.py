@@ -9,7 +9,7 @@ from .control.control_input import ControlInput
 from .config.config import Config
 from .mgeo.calc_mgeo_path import mgeo_dijkstra_path
 
-
+import numpy as np
 
 class AutonomousDriving:
     def __init__(self):
@@ -37,6 +37,7 @@ class AutonomousDriving:
         self.pure_pursuit = PurePursuit(
             wheelbase=config['common']['wheelbase'], **config['control']['pure_pursuit']
         )
+        self.max_steering = config['common']['max_steering'] / 180.0 * np.pi
 
     def execute(self, vehicle_state, dynamic_object_list, current_traffic_light):
         # 현재 위치 기반으로 local path과 planned velocity 추출
@@ -57,6 +58,6 @@ class AutonomousDriving:
         # 경로 추종을 위한 pure pursuit control
         self.pure_pursuit.path = local_path
         self.pure_pursuit.vehicle_state = vehicle_state
-        steering_cmd = self.pure_pursuit.calculate_steering_angle()
+        steering_cmd = -self.pure_pursuit.calculate_steering_angle() / self.max_steering
 
         return ControlInput(acc_cmd, steering_cmd), local_path
