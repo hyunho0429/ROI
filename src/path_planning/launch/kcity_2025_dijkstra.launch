@@ -1,0 +1,25 @@
+<launch>
+    <arg name="mgeo_dir" default="$(find path_planning)/mgeo/R_KR_PR_K-city_2025"/>
+    <arg name="start_node" default="A1256W000437"/>
+    <arg name="goal_node" default="A1256W000531"/>
+    <arg name="rviz" default="false"/>
+
+    <node pkg="path_planning" type="mgeo_json_pub.py" name="kcity_mgeo_pub" output="screen">
+        <param name="mgeo_dir" value="$(arg mgeo_dir)"/>
+        <param name="frame_id" value="map"/>
+        <param name="node_topic" value="node"/>
+        <param name="link_topic" value="link"/>
+    </node>
+
+    <node pkg="path_planning" type="global_path_kcity_dijkstra.py" name="global_path_kcity_dijkstra" output="screen">
+        <param name="mgeo_dir" value="$(arg mgeo_dir)"/>
+        <param name="frame_id" value="map"/>
+        <param name="start_node" value="$(arg start_node)"/>
+        <param name="goal_node" value="$(arg goal_node)"/>
+        <param name="topic" value="/global_path"/>
+    </node>
+
+    <group if="$(arg rviz)">
+        <node pkg="rviz" type="rviz" name="rviz" args="-d $(find auto_driving)/rviz/final.rviz"/>
+    </group>
+</launch>

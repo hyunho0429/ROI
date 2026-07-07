@@ -8,8 +8,12 @@ project(path_planning)
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
 ## is used, also find other catkin packages
 find_package(catkin REQUIRED COMPONENTS
+  geometry_msgs
+  nav_msgs
   rospy
+  sensor_msgs
   std_msgs
+  visualization_msgs
   message_generation
 )
 
@@ -69,7 +73,11 @@ find_package(catkin REQUIRED COMPONENTS
 ## Generate added messages and services with any dependencies listed here
 generate_messages(
   DEPENDENCIES
+  geometry_msgs
+  nav_msgs
+  sensor_msgs
   std_msgs
+  visualization_msgs
 )
 
 ################################################
@@ -104,7 +112,7 @@ generate_messages(
 catkin_package(
 #  INCLUDE_DIRS include
 #  LIBRARIES map_loader
-  CATKIN_DEPENDS message_runtime
+  CATKIN_DEPENDS geometry_msgs message_runtime nav_msgs rospy sensor_msgs std_msgs visualization_msgs
 #  DEPENDS system_lib
 )
 
@@ -160,6 +168,12 @@ include_directories(
 #   scripts/my_python_script
 #   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 # )
+catkin_install_python(PROGRAMS
+  src/global_path_kcity_dijkstra.py
+  src/mgeo_json_dijkstra.py
+  src/mgeo_json_pub.py
+  DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)
 
 ## Mark executables for installation
 ## See http://docs.ros.org/melodic/api/catkin/html/howto/format1/building_executables.html
