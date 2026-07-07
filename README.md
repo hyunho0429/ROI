@@ -1,3 +1,18 @@
+# My MORAI AD Module
+
+Personal autonomous-driving module workspace based on
+[MORAI-Autonomous/MORAI-ADModule](https://github.com/MORAI-Autonomous/MORAI-ADModule).
+
+## Upstream
+
+- Original repository: https://github.com/MORAI-Autonomous/MORAI-ADModule
+- Original description: MORAI Simulator open-source autonomous-driving control module example
+- Main module areas: config, control, localization, MGeo, perception, planning
+- Required integration: ROS or UDP network wrapper
+- License notices: see [docs/License.md](./docs/License.md)
+
+---
+
 # MORAI - AD Module
 
 AD (Autonomous Driving) Module is a vehicle control module for planning paths and lateral / longitudinal control the vehicle.
