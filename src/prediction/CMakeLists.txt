@@ -7,6 +7,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(catkin REQUIRED COMPONENTS
   rospy
   roscpp
+  morai_msgs
+  nav_msgs
   std_msgs
   message_generation
 )
@@ -31,7 +33,7 @@ generate_messages(
 catkin_package(
   INCLUDE_DIRS include
   LIBRARIES modules
-  CATKIN_DEPENDS message_runtime rospy roscpp std_msgs
+  CATKIN_DEPENDS message_runtime morai_msgs nav_msgs rospy roscpp std_msgs
   DEPENDS OpenCV Eigen3
 )
 
@@ -48,8 +50,11 @@ add_library(modules
   src/state_filters.cpp
   src/object_tracker.cpp
 )
+target_compile_definitions(modules PRIVATE OBJECT_TRACKER_LIBRARY_ONLY)
+add_dependencies(modules ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
 add_executable(test_node src/test.cpp)
+add_dependencies(test_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
 target_link_libraries(test_node
   modules
@@ -58,7 +63,8 @@ target_link_libraries(test_node
   ${EIGEN3_LIBRARIES}
 )
 
-add_executable(object_tracker_node src/object_tracker.cpp)
+add_executable(object_tracker_node src/object_tracker_node.cpp)
+add_dependencies(object_tracker_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
 target_link_libraries(object_tracker_node
   modules

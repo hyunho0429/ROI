@@ -320,6 +320,7 @@ void DynamicObstacleTrackerNode::run() {
 }
 
 
+#ifndef OBJECT_TRACKER_LIBRARY_ONLY
 int main(int argc, char **argv) {
     ros::init(argc, argv, "dynamic_obstacle_tracker_node");
 
@@ -328,3 +329,4 @@ int main(int argc, char **argv) {
 
     return 0;
 }
+#endif
