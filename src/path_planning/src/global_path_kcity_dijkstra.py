@@ -8,7 +8,7 @@ import rospkg
 from geometry_msgs.msg import PointStamped, PoseStamped
 from nav_msgs.msg import Odometry, Path
 
-from mgeo_json_dijkstra import MGeoJsonGraph
+from path_planning.mgeo_json_dijkstra import MGeoJsonGraph
 
 
 def _default_mgeo_dir():
