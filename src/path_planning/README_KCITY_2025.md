@@ -73,7 +73,7 @@ The node publishes:
 
 ## RViz
 
-Use `auto_driving/rviz/final.rviz`, or add these displays manually:
+Use `path_planning/rviz/kcity_2025_dijkstra.rviz`, or add these displays manually:
 
 - `PointCloud` topic `/node`, fixed frame `map`
 - `PointCloud` topic `/link`, fixed frame `map`
@@ -85,5 +85,5 @@ For a quick manual run:
 roscore
 rosrun path_planning mgeo_json_pub.py
 rosrun path_planning global_path_kcity_dijkstra.py _interactive:=true _start_node:=A1256W000437
-rviz -d $(rospack find auto_driving)/rviz/final.rviz
+rviz -d $(rospack find path_planning)/rviz/kcity_2025_dijkstra.rviz
 ```
