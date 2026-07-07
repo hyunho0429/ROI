@@ -3,6 +3,11 @@
 Personal autonomous-driving module workspace based on
 [MORAI-Autonomous/MORAI-ADModule](https://github.com/MORAI-Autonomous/MORAI-ADModule).
 
+## Homepage
+
+- Local page: [docs/index.html](./docs/index.html)
+- GitHub Pages source: `main` branch / `docs` folder
+
 ## Upstream
 
 - Original repository: https://github.com/MORAI-Autonomous/MORAI-ADModule

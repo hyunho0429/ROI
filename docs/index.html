@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="청룡열차는 MORAI AD Module 기반의 자율주행 제어 모듈 홈페이지입니다."
+    />
+    <title>청룡열차 | MORAI AD Module</title>
+    <link rel="stylesheet" href="./assets/styles.css" />
+  </head>
+  <body>
+    <header class="site-header" aria-label="주요 메뉴">
+      <a class="brand" href="#top" aria-label="청룡열차 홈">
+        <span class="brand-mark" aria-hidden="true">청</span>
+        <span>청룡열차</span>
+      </a>
+      <nav class="nav-links" aria-label="페이지 섹션">
+        <a href="#system">System</a>
+        <a href="#modules">Modules</a>
+        <a href="#start">Start</a>
+      </nav>
+    </header>
+
+    <main id="top">
+      <section class="hero" aria-labelledby="hero-title">
+        <canvas id="drive-map" aria-hidden="true"></canvas>
+        <div class="hero-shade" aria-hidden="true"></div>
+
+        <div class="hero-content">
+          <p class="eyebrow">MORAI AD Module 기반 자율주행 프로젝트</p>
+          <h1 id="hero-title">청룡열차</h1>
+          <p class="hero-copy">
+            경로 계획, 객체 인식, 위치 추정, 제어 입력을 한 흐름으로 묶어
+            시뮬레이터에서 바로 실험할 수 있는 자율주행 모듈 홈페이지입니다.
+          </p>
+          <div class="hero-actions" aria-label="주요 링크">
+            <a class="button primary" href="#start">시작하기</a>
+            <a class="button secondary" href="https://github.com/MORAI-Autonomous/MORAI-ADModule">원본 보기</a>
+          </div>
+        </div>
+
+        <aside class="telemetry" aria-label="주행 상태">
+          <div>
+            <span class="metric-label">Mode</span>
+            <strong>Autonomous</strong>
+          </div>
+          <div>
+            <span class="metric-label">Path</span>
+            <strong>K-City</strong>
+          </div>
+          <div>
+            <span class="metric-label">Control</span>
+            <strong>Pure Pursuit</strong>
+          </div>
+        </aside>
+      </section>
+
+      <section id="system" class="section system-section" aria-labelledby="system-title">
+        <div class="section-heading">
+          <p class="eyebrow">Drive Stack</p>
+          <h2 id="system-title">센서에서 조향까지 이어지는 실행 흐름</h2>
+        </div>
+
+        <div class="flow" aria-label="자율주행 실행 흐름">
+          <article>
+            <span class="step-number">01</span>
+            <h3>Localization</h3>
+            <p>현재 위치와 전역 경로를 기준으로 로컬 경로를 구성합니다.</p>
+          </article>
+          <article>
+            <span class="step-number">02</span>
+            <h3>Perception</h3>
+            <p>주행 경로 앞의 객체를 분류하고 추종 대상 여부를 판단합니다.</p>
+          </article>
+          <article>
+            <span class="step-number">03</span>
+            <h3>Planning</h3>
+            <p>Adaptive Cruise Control 로직으로 목표 속도를 계산합니다.</p>
+          </article>
+          <article>
+            <span class="step-number">04</span>
+            <h3>Control</h3>
+            <p>PID와 Pure Pursuit로 가감속과 조향 입력을 생성합니다.</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="modules" class="section modules-section" aria-labelledby="modules-title">
+        <div class="section-heading">
+          <p class="eyebrow">Repository Map</p>
+          <h2 id="modules-title">핵심 모듈</h2>
+        </div>
+
+        <div class="module-grid">
+          <article class="module-card">
+            <h3>config</h3>
+            <p>주행 파라미터와 맵 경로 데이터를 관리합니다.</p>
+            <span>config.json</span>
+          </article>
+          <article class="module-card">
+            <h3>mgeo</h3>
+            <p>HD Map 데이터 로딩과 다익스트라 경로 생성을 맡습니다.</p>
+            <span>MGeo</span>
+          </article>
+          <article class="module-card">
+            <h3>control</h3>
+            <p>종방향 PID와 횡방향 Pure Pursuit 제어를 실행합니다.</p>
+            <span>PID / PP</span>
+          </article>
+          <article class="module-card">
+            <h3>planning</h3>
+            <p>선행 객체와 목표 속도를 반영해 주행 속도를 계획합니다.</p>
+            <span>ACC</span>
+          </article>
+          <article class="module-card">
+            <h3>perception</h3>
+            <p>차량, 보행자, 신호 정보를 주행 판단에 맞게 정리합니다.</p>
+            <span>Objects</span>
+          </article>
+          <article class="module-card">
+            <h3>autonomous_driving.py</h3>
+            <p>각 모듈을 연결하는 예제 엔트리 클래스를 제공합니다.</p>
+            <span>Entry</span>
+          </article>
+        </div>
+      </section>
+
+      <section id="start" class="section start-section" aria-labelledby="start-title">
+        <div class="section-heading">
+          <p class="eyebrow">Launch</p>
+          <h2 id="start-title">GitHub Pages와 코드 저장소를 함께 운영</h2>
+        </div>
+
+        <div class="start-layout">
+          <div class="terminal-panel" aria-label="실행 명령">
+            <div class="terminal-bar" aria-hidden="true">
+              <span></span>
+              <span></span>
+              <span></span>
+            </div>
+            <pre><code>git clone --recurse-submodules &lt;your-repo-url&gt;
+cd 청룡열차
+pip install -r requirements.txt
+python autonomous_driving.py</code></pre>
+          </div>
+
+          <div class="notes">
+            <h3>Pages 설정</h3>
+            <p>
+              GitHub 저장소의 Settings > Pages에서 배포 소스를
+              <strong>main / docs</strong>로 선택하면 이 홈페이지가 공개됩니다.
+            </p>
+            <a class="text-link" href="./License.md">라이선스 고지</a>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <span>청룡열차</span>
+      <span>Based on MORAI-Autonomous/MORAI-ADModule</span>
+    </footer>
+
+    <script src="./assets/app.js"></script>
+  </body>
+</html>
