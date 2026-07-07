@@ -68,15 +68,21 @@ class MGeoJsonGraph:
         return adjacency
 
     def nearest_node(self, x, y):
-        nearest_id = None
-        nearest_cost = float("inf")
+        nearest = self.nearest_nodes(x, y, limit=1)
+        if not nearest:
+            return None, float("inf")
+        return nearest[0]
+
+    def nearest_nodes(self, x, y, limit=None):
+        ranked = []
         for node_id, node in self.nodes.items():
             point = node["point"]
             cost = (point[0] - x) * (point[0] - x) + (point[1] - y) * (point[1] - y)
-            if cost < nearest_cost:
-                nearest_id = node_id
-                nearest_cost = cost
-        return nearest_id, math.sqrt(nearest_cost)
+            ranked.append((math.sqrt(cost), node_id))
+        ranked.sort()
+        if limit is not None:
+            ranked = ranked[:limit]
+        return [(node_id, distance) for distance, node_id in ranked]
 
     def shortest_path(self, start_node, goal_node):
         if start_node not in self.nodes:
