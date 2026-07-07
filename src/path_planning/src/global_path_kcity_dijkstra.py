@@ -5,8 +5,9 @@ import os
 
 import rospy
 import rospkg
-from geometry_msgs.msg import PointStamped, PoseStamped
+from geometry_msgs.msg import Point, PointStamped, PoseStamped
 from nav_msgs.msg import Odometry, Path
+from visualization_msgs.msg import Marker
 
 from path_planning.mgeo_json_dijkstra import MGeoJsonGraph
 
@@ -55,11 +56,37 @@ def _path_msg(points, frame_id):
     return msg
 
 
+def _path_marker_msg(points, frame_id):
+    msg = Marker()
+    msg.header.frame_id = frame_id
+    msg.header.stamp = rospy.Time.now()
+    msg.ns = "kcity_dijkstra_path"
+    msg.id = 0
+    msg.type = Marker.LINE_STRIP
+    msg.action = Marker.ADD
+    msg.pose.orientation.w = 1.0
+    msg.scale.x = 2.0
+    msg.color.r = 0.0
+    msg.color.g = 1.0
+    msg.color.b = 0.05
+    msg.color.a = 1.0
+
+    for point in points:
+        marker_point = Point()
+        marker_point.x = point[0]
+        marker_point.y = point[1]
+        marker_point.z = point[2] + 3.0 if len(point) > 2 else 3.0
+        msg.points.append(marker_point)
+
+    return msg
+
+
 class KCityDijkstraPathPublisher:
     def __init__(self):
         self.frame_id = rospy.get_param("~frame_id", "map")
         self.publish_rate = float(rospy.get_param("~publish_rate", 10.0))
         self.topic = rospy.get_param("~topic", "/global_path")
+        self.marker_topic = rospy.get_param("~marker_topic", "/global_path_marker")
         self.goal_topic = rospy.get_param("~goal_topic", "/move_base_simple/goal")
         self.clicked_point_topic = rospy.get_param("~clicked_point_topic", "/clicked_point")
         self.odom_topic = rospy.get_param("~odom_topic", "/odom")
@@ -71,8 +98,12 @@ class KCityDijkstraPathPublisher:
         self.last_odom_xy = None
 
         self.publisher = rospy.Publisher(self.topic, Path, queue_size=1, latch=True)
+        self.marker_publisher = rospy.Publisher(
+            self.marker_topic, Marker, queue_size=1, latch=True
+        )
         self.path = None
         self.path_msg = _path_msg([], self.frame_id)
+        self.path_marker_msg = _path_marker_msg([], self.frame_id)
 
         if self.use_odom_start:
             rospy.Subscriber(self.odom_topic, Odometry, self._odom_callback)
@@ -200,6 +231,7 @@ class KCityDijkstraPathPublisher:
     def _set_path(self, path, source):
         self.path = path
         self.path_msg = _path_msg(path["point_path"], self.frame_id)
+        self.path_marker_msg = _path_marker_msg(path["point_path"], self.frame_id)
         rospy.loginfo(
             "K-City Dijkstra path updated from %s: %.2fm, %d nodes, %d links, %d points",
             source,
@@ -215,7 +247,9 @@ class KCityDijkstraPathPublisher:
             self.path_msg.header.stamp = rospy.Time.now()
             for pose in self.path_msg.poses:
                 pose.header = self.path_msg.header
+            self.path_marker_msg.header.stamp = self.path_msg.header.stamp
             self.publisher.publish(self.path_msg)
+            self.marker_publisher.publish(self.path_marker_msg)
             rate.sleep()
 
 

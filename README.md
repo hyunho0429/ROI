@@ -17,7 +17,8 @@ source devel/setup.bash
 roslaunch path_planning kcity_2025_dijkstra.launch use_odom_start:=false
 ```
 
-In RViz, select `2D Nav Goal` and click a destination on the map. The planner chooses a reachable MGeo node near the clicked point, computes the shortest Dijkstra path from the start node, and publishes `/global_path`.
+The launch shows a default example route from `A1256W000437` to `A1256W000531`.
+In RViz, select `2D Nav Goal` and click another destination on the map to update the route. The planner chooses a reachable MGeo node near the clicked point, computes the shortest Dijkstra path from the start node, and publishes `/global_path` and `/global_path_marker`.
 
 Useful topics:
 
@@ -25,6 +26,7 @@ Useful topics:
 rostopic echo /node
 rostopic echo /link
 rostopic echo /global_path
+rostopic echo /global_path_marker
 ```
 
 For a fixed start and goal node:

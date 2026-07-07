@@ -23,12 +23,14 @@ Run the interactive RViz launch:
 roslaunch path_planning kcity_2025_dijkstra.launch
 ```
 
+The launch first shows a default route from `A1256W000437` to `A1256W000531`.
+
 In RViz:
 
 1. Set `Fixed Frame` to `map`.
 2. Select `2D Nav Goal`.
 3. Click the desired destination on the map.
-4. The node converts the clicked destination to the nearest MGeo node, runs Dijkstra, and publishes `/global_path`.
+4. The node converts the clicked destination to the nearest MGeo node, runs Dijkstra, and publishes `/global_path` and `/global_path_marker`.
 
 The planner uses `/odom` as the start position when it is available. If `/odom` is not available, it falls back to `start_node`.
 The clicked goal is converted to nearby MGeo nodes, and the first reachable node is used.
@@ -69,7 +71,9 @@ rosrun path_planning global_path_kcity_dijkstra.py \
 The node publishes:
 
 - `/global_path` as `nav_msgs/Path`
+- `/global_path_marker` as a green `visualization_msgs/Marker`
 - `/node` and `/link` as `sensor_msgs/PointCloud` when `mgeo_json_pub.py` is running
+- `/mgeo_nodes_marker` and `/mgeo_links_marker` as `visualization_msgs/Marker`
 
 ## RViz
 
@@ -78,6 +82,7 @@ Use `path_planning/rviz/kcity_2025_dijkstra.rviz`, or add these displays manuall
 - `PointCloud` topic `/node`, fixed frame `map`
 - `PointCloud` topic `/link`, fixed frame `map`
 - `Path` topic `/global_path`, fixed frame `map`
+- `Marker` topic `/global_path_marker`, fixed frame `map`
 
 For a quick manual run:
 

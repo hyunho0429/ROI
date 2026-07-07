@@ -3,7 +3,7 @@
     <arg name="interactive" default="true"/>
     <arg name="use_odom_start" default="true"/>
     <arg name="start_node" default="A1256W000437"/>
-    <arg name="goal_node" default=""/>
+    <arg name="goal_node" default="A1256W000531"/>
     <arg name="goal_topic" default="/move_base_simple/goal"/>
     <arg name="clicked_point_topic" default="/clicked_point"/>
     <arg name="goal_search_count" default="20"/>
@@ -29,6 +29,7 @@
         <param name="goal_search_count" value="$(arg goal_search_count)"/>
         <param name="odom_topic" value="$(arg odom_topic)"/>
         <param name="topic" value="/global_path"/>
+        <param name="marker_topic" value="/global_path_marker"/>
     </node>
 
     <group if="$(arg rviz)">

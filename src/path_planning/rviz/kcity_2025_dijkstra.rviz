@@ -84,6 +84,14 @@ Visualization Manager:
       Topic: /global_path
       Unreliable: false
       Value: true
+    - Class: rviz/Marker
+      Enabled: true
+      Marker Topic: /global_path_marker
+      Name: Dijkstra Global Path Marker
+      Namespaces:
+        kcity_dijkstra_path: true
+      Queue Size: 100
+      Value: true
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48
