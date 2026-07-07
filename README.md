@@ -57,4 +57,3 @@ Also you can check our manual at [MORAI Sim manual (EN)](https://help-morai-sim-
 
 # License
 - AD Module license info:  [AD module License](./docs/License.md)
-
