@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+"""K-City MGeo node/link JSON을 RViz에서 볼 수 있는 토픽으로 발행하는 ROS 노드.
+
+이 파일은 MGeo의 전체 노드와 링크 geometry를 읽어서 `/node`, `/link` PointCloud와
+`/mgeo_nodes_marker`, `/mgeo_links_marker` Marker로 발행한다.
+"""
 
 import os
 
@@ -18,6 +23,8 @@ def _default_mgeo_dir():
 
 
 class MGeoJsonPublisher:
+    """MGeo 노드/링크 데이터를 PointCloud와 Marker 메시지로 변환해 발행한다."""
+
     def __init__(self):
         self.frame_id = rospy.get_param("~frame_id", "map")
         self.publish_rate = float(rospy.get_param("~publish_rate", 1.0))

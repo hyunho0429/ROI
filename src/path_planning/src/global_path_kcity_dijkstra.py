@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+"""K-City MGeo JSON을 읽어 Dijkstra 최단경로를 만들고 RViz용 토픽으로 발행하는 ROS 노드.
+
+이 파일은 시작 노드/목표 노드 또는 RViz에서 클릭한 목표 위치를 받아 최단 경로를 계산한다.
+계산된 경로는 `/global_path` Path와 `/global_path_marker` 초록색 Marker로 발행된다.
+"""
 
 import os
 
@@ -82,6 +87,8 @@ def _path_marker_msg(points, frame_id):
 
 
 class KCityDijkstraPathPublisher:
+    """Dijkstra 경로 계산 요청을 처리하고 RViz 시각화 토픽을 주기적으로 발행한다."""
+
     def __init__(self):
         self.frame_id = rospy.get_param("~frame_id", "map")
         self.publish_rate = float(rospy.get_param("~publish_rate", 10.0))

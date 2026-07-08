@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+"""MGeo JSON 기반 도로 그래프를 만들고 Dijkstra 최단경로를 계산하는 공통 모듈.
+
+이 파일은 `node_set.json`과 `link_set.json`을 읽어 방향 그래프를 구성한다.
+ROS 노드들이 공통으로 사용하는 `MGeoJsonGraph` 클래스와 단독 경로 계산 테스트용 CLI를 제공한다.
+"""
 
 import argparse
 import heapq
@@ -37,6 +42,8 @@ def _polyline_length(points):
 
 
 class MGeoJsonGraph:
+    """MGeo node/link 정보를 그래프로 보관하고 최단경로와 근접 노드 검색을 수행한다."""
+
     def __init__(self, mgeo_dir):
         self.mgeo_dir = os.path.abspath(mgeo_dir)
         self.nodes = {
