@@ -6,7 +6,7 @@ This branch keeps only the K-City 2025 MGeo JSON data, Dijkstra global path gene
 
 ```bash
 cd ~/catkin_ws
-source /opt/ros/noetic/setup.bash
+sb
 catkin_make
 source devel/setup.bash
 ```
