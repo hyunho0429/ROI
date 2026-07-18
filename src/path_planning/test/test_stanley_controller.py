@@ -23,6 +23,49 @@ from path_planning.stanley_controller import (
 
 
 class StanleyControllerTest(unittest.TestCase):
+    def test_loads_origin_anchored_sensor_csv_in_map_frame(self):
+        header = (
+            "x,y,z,target_speed,lat,lon,alt,origin_lat,origin_lon,origin_alt,"
+            "imu_qx,imu_qy,imu_qz,imu_qw\n"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            filename = os.path.join(directory, "provided_path.csv")
+            with open(filename, "w", encoding="utf-8") as stream:
+                stream.write(header)
+                stream.write("0,0,0,1,,,,,,,-0.86,0,0,-0.51\n")
+                stream.write(
+                    "0.380822,0.726466,0,1,37.24098833,126.77436,0,"
+                    "37.24098167,126.774355,0,0.86,0,0,0.51\n"
+                )
+            projection = MapProjection(
+                "EPSG:32652", 302595.0, 4124145.0, 0.0
+            )
+            with patch("path_planning.stanley_controller.GpsToMapEnu") as converter_type:
+                converter_type.return_value.convert.return_value = (
+                    -10.846956,
+                    -218.143576,
+                    0.0,
+                )
+                points = load_path_csv(filename, gps_projection=projection)
+
+        self.assertEqual(len(points), 2)
+        self.assertAlmostEqual(points[0].x_m, -10.846956)
+        self.assertAlmostEqual(points[0].y_m, -218.143576)
+        self.assertAlmostEqual(points[1].x_m, -10.466134)
+        self.assertAlmostEqual(points[1].y_m, -217.417110)
+        self.assertEqual(points[0].target_speed_mps, 1.0)
+        self.assertEqual(points[1].target_speed_mps, 1.0)
+
+    def test_interpolates_path_target_speed(self):
+        controller = StanleyController(
+            [
+                PathPoint(0.0, 0.0, target_speed_mps=1.0),
+                PathPoint(10.0, 0.0, target_speed_mps=3.0),
+            ]
+        )
+        result = controller.compute(5.0, 0.0, 0.0, 0.0, 1.0)
+        self.assertAlmostEqual(result.target_speed_mps, 2.0)
+
     def test_loads_morai_gps_and_imu_combined_csv_as_enu_path(self):
         origin_x, origin_y = 302595.0, 4124145.0
         latitude_1, longitude_1 = 37.1, 126.1

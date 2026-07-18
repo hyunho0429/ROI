@@ -93,6 +93,21 @@ acceleration x/y/z)은 기준 경로 생성에서는 무시한다. 과거 IMU �
 상태로 사용하면 안 되기 때문이다. 실제 경로 추종 중 현재 자세와 위치는 기존처럼
 실시간 GPS/IMU UDP와 EKF 또는 INS가 담당한다.
 
+다음처럼 `x/y/z`가 `origin_lat/origin_lon/origin_alt` 기준 상대좌표인 파일도
+자동 인식한다.
+
+```csv
+x,y,z,target_speed,lat,lon,alt,origin_lat,origin_lon,origin_alt,imu_qx,imu_qy,imu_qz,imu_qw
+0,0,0,1.0,,,,37.24098167,126.774355,0,-0.86,0,0,-0.51
+0.380822,0.726466,0,1.0,37.24098833,126.77436,0,37.24098167,126.774355,0,0.86,0,0,0.51
+```
+
+이 형식은 먼저 origin 위경도를 MGeo 원점 기준 ENU로 변환한 다음 각 행의 상대
+`x/y/z`를 더한다. 첫 행의 origin이 비어 있어도 뒤 행에서 처음 발견한 origin을
+전체 경로에 사용한다. origin은 한 파일 안에서 일정해야 한다. `target_speed`는
+m/s로 해석하고 Stanley가 현재 segment의 값을 선형 보간한다. 경로에
+`target_speed`가 없을 때만 `--target-speed-kmh`가 기본 속도로 사용된다.
+
 경로 변환은 다음과 같다.
 
 ```text

@@ -306,10 +306,13 @@ def run(arguments):
                     end_scale = max(
                         0.25, min(1.0, result.remaining_distance_m / 15.0)
                     )
-                    target_speed_mps = (
-                        arguments.target_speed_kmh
-                        * min(curve_scale, end_scale)
-                        / 3.6
+                    path_speed_mps = (
+                        arguments.target_speed_kmh / 3.6
+                        if result.target_speed_mps is None
+                        else result.target_speed_mps
+                    )
+                    target_speed_mps = path_speed_mps * min(
+                        curve_scale, end_scale
                     )
                     accel, brake = speed_controller.compute(
                         target_speed_mps, measured_speed_mps, now

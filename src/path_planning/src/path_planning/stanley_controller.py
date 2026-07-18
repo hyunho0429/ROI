@@ -14,6 +14,7 @@ class PathPoint:
     x_m: float
     y_m: float
     z_m: float = 0.0
+    target_speed_mps: float = None
 
 
 @dataclass(frozen=True)
@@ -24,6 +25,7 @@ class StanleyResult:
     segment_index: int
     remaining_distance_m: float
     goal_reached: bool
+    target_speed_mps: float = None
 
 
 def _split_sensor_line(line):
@@ -80,6 +82,101 @@ def _append_unique(points, point):
         points.append(point)
 
 
+def _target_speed(values, header, line_number):
+    speed_mps_index = _field_index(
+        header, {"targetspeed", "targetspeedmps", "speedmps"}
+    )
+    speed_kmh_index = _field_index(
+        header, {"targetspeedkmh", "targetspeedkph", "speedkmh", "speedkph"}
+    )
+    index = speed_mps_index if speed_mps_index is not None else speed_kmh_index
+    if index is None or index >= len(values) or not values[index].strip():
+        return None
+    speed = _value(values, index, line_number, "target speed")
+    if speed < 0.0:
+        raise ValueError(
+            "target speed cannot be negative at path file line {}".format(line_number)
+        )
+    return speed if speed_mps_index is not None else speed / 3.6
+
+
+def _load_origin_anchored_rows(header, rows, line_numbers, gps_projection):
+    """Load local x/y/z whose origin is supplied as latitude/longitude."""
+    x_index = _field_index(header, {"x", "localx", "enuoriginx"})
+    y_index = _field_index(header, {"y", "localy", "enuoriginy"})
+    z_index = _field_index(header, {"z", "localz", "enuoriginz"})
+    origin_latitude_index = _field_index(
+        header, {"originlat", "originlatitude", "originlatitudedeg"}
+    )
+    origin_longitude_index = _field_index(
+        header, {"originlon", "originlng", "originlongitude", "originlongitudedeg"}
+    )
+    origin_altitude_index = _field_index(
+        header, {"originalt", "originaltitude", "originaltitudem"}
+    )
+    required = (x_index, y_index, origin_latitude_index, origin_longitude_index)
+    if any(index is None for index in required):
+        return None
+    if gps_projection is None:
+        raise ValueError(
+            "origin_lat/origin_lon path requires the map MGeo projection"
+        )
+
+    origins = []
+    for values, line_number in zip(rows, line_numbers):
+        try:
+            latitude_text = values[origin_latitude_index].strip()
+            longitude_text = values[origin_longitude_index].strip()
+        except IndexError as error:
+            raise ValueError(
+                "missing origin coordinate at path file line {}".format(line_number)
+            ) from error
+        if not latitude_text and not longitude_text:
+            continue
+        if not latitude_text or not longitude_text:
+            raise ValueError(
+                "origin_lat and origin_lon must both be set at path file line {}".format(
+                    line_number
+                )
+            )
+        latitude = _value(
+            values, origin_latitude_index, line_number, "origin latitude"
+        )
+        longitude = _value(
+            values, origin_longitude_index, line_number, "origin longitude"
+        )
+        altitude = 0.0
+        if (
+            origin_altitude_index is not None
+            and origin_altitude_index < len(values)
+            and values[origin_altitude_index].strip()
+        ):
+            altitude = _value(
+                values, origin_altitude_index, line_number, "origin altitude"
+            )
+        origins.append((latitude, longitude, altitude))
+    if not origins:
+        raise ValueError("origin_lat/origin_lon path has no populated origin row")
+
+    origin = origins[0]
+    for candidate in origins[1:]:
+        if any(abs(first - second) > 1e-8 for first, second in zip(origin, candidate)):
+            raise ValueError("origin_lat/origin_lon must be constant for one path")
+
+    anchor_x, anchor_y, anchor_z = GpsToMapEnu(gps_projection).convert(*origin)
+    points = []
+    for values, line_number in zip(rows, line_numbers):
+        point = PathPoint(
+            anchor_x + _value(values, x_index, line_number, "local x"),
+            anchor_y + _value(values, y_index, line_number, "local y"),
+            anchor_z
+            + _value(values, z_index, line_number, "local z", required=False),
+            _target_speed(values, header, line_number),
+        )
+        _append_unique(points, point)
+    return points
+
+
 def _load_enu_rows(header, rows, line_numbers):
     x_index = _field_index(header, {"globalenuxm", "x"})
     y_index = _field_index(header, {"globalenuym", "y"})
@@ -93,6 +190,7 @@ def _load_enu_rows(header, rows, line_numbers):
             _value(values, x_index, line_number, "ENU x"),
             _value(values, y_index, line_number, "ENU y"),
             _value(values, z_index, line_number, "ENU z", required=False),
+            _target_speed(values, header, line_number),
         )
         _append_unique(points, point)
     return points
@@ -139,7 +237,16 @@ def _load_gps_sensor_rows(header, rows, line_numbers, gps_projection):
             if north_offset_index is None
             else _value(values, north_offset_index, line_number, "northOffset")
         )
-        records.append((latitude, longitude, altitude, east_offset, north_offset))
+        records.append(
+            (
+                latitude,
+                longitude,
+                altitude,
+                east_offset,
+                north_offset,
+                _target_speed(values, header, line_number),
+            )
+        )
 
     offsets_present = [record[3] is not None and record[4] is not None for record in records]
     if any(offsets_present) and not all(offsets_present):
@@ -164,10 +271,18 @@ def _load_gps_sensor_rows(header, rows, line_numbers, gps_projection):
         MapProjection(crs, float(origin_x), float(origin_y), float(origin_z))
     )
     points = []
-    for latitude, longitude, altitude, _east_offset, _north_offset in records:
+    for (
+        latitude,
+        longitude,
+        altitude,
+        _east_offset,
+        _north_offset,
+        target_speed_mps,
+    ) in records:
+        x_m, y_m, z_m = converter.convert(latitude, longitude, altitude)
         _append_unique(
             points,
-            PathPoint(*converter.convert(latitude, longitude, altitude)),
+            PathPoint(x_m, y_m, z_m, target_speed_mps),
         )
     return points
 
@@ -206,7 +321,11 @@ def load_path_csv(filename, gps_projection=None):
 
     rows = [values for _line_number, values in data]
     line_numbers = [line_number for line_number, _values in data]
-    points = _load_enu_rows(header, rows, line_numbers)
+    points = _load_origin_anchored_rows(
+        header, rows, line_numbers, gps_projection
+    )
+    if points is None:
+        points = _load_enu_rows(header, rows, line_numbers)
     if points is None:
         points = _load_gps_sensor_rows(
             header, rows, line_numbers, gps_projection
@@ -317,6 +436,14 @@ class StanleyController:
         end = self.points[-1]
         end_distance = math.hypot(control_x - end.x_m, control_y - end.y_m)
         goal_reached = end_distance <= self.goal_tolerance_m and remaining <= 2.0 * self.goal_tolerance_m
+        first_speed = first.target_speed_mps
+        second_speed = second.target_speed_mps
+        if first_speed is None:
+            target_speed_mps = second_speed
+        elif second_speed is None:
+            target_speed_mps = first_speed
+        else:
+            target_speed_mps = first_speed + fraction * (second_speed - first_speed)
         return StanleyResult(
             steering,
             heading_error,
@@ -324,4 +451,5 @@ class StanleyController:
             index,
             remaining,
             goal_reached,
+            target_speed_mps,
         )
