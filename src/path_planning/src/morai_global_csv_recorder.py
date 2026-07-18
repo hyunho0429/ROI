@@ -164,6 +164,7 @@ def run_udp_recorder(arguments):
             append=arguments.append,
         )
         invalid_packets = 0
+        zero_position_packets = 0
         print("MORAI Competition Status path recorder started")
         print("  listen: {}:{}".format(arguments.bind_ip, arguments.port))
         print("  sample period: {:.3f} s".format(arguments.sample_period))
@@ -184,6 +185,19 @@ def run_udp_recorder(arguments):
                 if invalid_packets <= 3 or invalid_packets % 100 == 0:
                     print("Ignored incompatible UDP packet: {}".format(error), file=sys.stderr)
                 continue
+
+            if all(abs(value) <= 1e-6 for value in status.position_m):
+                zero_position_packets += 1
+                if zero_position_packets == 3:
+                    print(
+                        "Competition Vehicle Status is reporting position (0, 0, 0); "
+                        "the competition interface appears to mask position. No zero "
+                        "position will be saved. Use morai_gps_csv_recorder.py with "
+                        "the GPS sensor destination port instead.",
+                        file=sys.stderr,
+                    )
+                continue
+            zero_position_packets = 0
 
             if recorder.add_sample(
                 status_to_sample(status, receive_time_sec), sample_clock_sec

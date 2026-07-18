@@ -31,13 +31,20 @@ rostopic echo /global_path_marker
 
 ## MORAI keyboard path CSV recording
 
-To save Competition Vehicle Status ENU coordinates once per second:
+Competition Vehicle Status may mask its position fields to `(0, 0, 0)` in the
+competition build. Configure the MORAI GPS sensor UDP Destination IP/Port and
+save its NMEA fix as K-City map-local ENU once per second:
 
 ```bash
-python3 src/path_planning/src/morai_global_csv_recorder.py --bind-ip 0.0.0.0 --port 3315
+python3 src/path_planning/src/morai_gps_csv_recorder.py \
+  --bind-ip 0.0.0.0 --port 9100 \
+  --output src/path_planning/data/morai_global_path.csv \
+  --sample-period 1.0
 ```
 
-The recorder is standalone and does not require ROS. The default output is `src/path_planning/data/morai_global_path.csv`. See `src/path_planning/README_GLOBAL_CSV_RECORDER.md` for MORAI network settings and parameters.
+The recorder is standalone and does not require ROS. It converts WGS84 GPS to
+UTM zone 52N and subtracts the K-City MGeo origin `(302595, 4124145, 0)`, so
+the resulting columns use the same ENU frame as the Stanley path tracker.
 
 ## MORAI UDP Stanley control
 
