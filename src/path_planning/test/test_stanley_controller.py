@@ -19,6 +19,7 @@ from path_planning.stanley_controller import (
     PathPoint,
     StanleyController,
     SteeringCommandFilter,
+    load_gps_path_projection,
     load_path_csv,
     load_recorded_path_origin,
 )
@@ -151,6 +152,60 @@ class StanleyControllerTest(unittest.TestCase):
         self.assertAlmostEqual(points[0].x_m, longitude_1)
         self.assertAlmostEqual(points[0].y_m, latitude_1)
         self.assertAlmostEqual(points[1].z_m, 29.0, places=3)
+
+    def test_five_column_gps_csv_uses_one_offset_for_path_and_live_gps(self):
+        latitude_1, longitude_1 = 37.24098167, 126.77435500
+        latitude_2, longitude_2 = 37.24099167, 126.77436500
+        origin_x, origin_y = 302595.0, 4124145.0
+        fallback = MapProjection("EPSG:32652", 1.0, 2.0, 20.0)
+        with tempfile.TemporaryDirectory() as directory:
+            filename = os.path.join(directory, "gps_five_columns.csv")
+            with open(filename, "w", encoding="utf-8") as stream:
+                stream.write("위도,경도,고도,동쪽 좌표,북쪽 좌표\n")
+                stream.write(
+                    "{},{},29.0,{},{}\n".format(
+                        latitude_1, longitude_1, origin_x, origin_y
+                    )
+                )
+                stream.write(
+                    "{},{},29.5,{},{}\n".format(
+                        latitude_2, longitude_2, origin_x, origin_y
+                    )
+                )
+            projection = load_gps_path_projection(filename, fallback)
+            with patch("path_planning.stanley_controller.GpsToMapEnu") as path_converter:
+                path_converter.return_value.convert.side_effect = (
+                    lambda latitude, longitude, altitude: (
+                        longitude,
+                        latitude,
+                        altitude - projection.origin_z_m,
+                    )
+                )
+                points = load_path_csv(filename, gps_projection=projection)
+                path_used_projection = path_converter.call_args.args[0]
+            # The runtime constructs its live converter with this exact
+            # projection; comparing the projection is sufficient here and
+            # keeps unit tests independent of the optional pyproj package.
+            live_position = (longitude_1, latitude_1, 9.0)
+
+        self.assertEqual(projection.crs, "EPSG:32652")
+        self.assertEqual(projection.origin_x_m, origin_x)
+        self.assertEqual(projection.origin_y_m, origin_y)
+        self.assertEqual(projection.origin_z_m, 20.0)
+        self.assertEqual(path_used_projection, projection)
+        self.assertAlmostEqual(points[0].x_m, live_position[0], places=6)
+        self.assertAlmostEqual(points[0].y_m, live_position[1], places=6)
+        self.assertAlmostEqual(points[0].z_m, 9.0, places=6)
+
+    def test_rejects_changing_gps_map_offsets(self):
+        with tempfile.TemporaryDirectory() as directory:
+            filename = os.path.join(directory, "invalid_gps_path.csv")
+            with open(filename, "w", encoding="utf-8") as stream:
+                stream.write("latitude,longitude,altitude,eastOffset,northOffset\n")
+                stream.write("37.24,126.77,29,302595,4124145\n")
+                stream.write("37.25,126.78,30,302596,4124145\n")
+            with self.assertRaisesRegex(ValueError, "must be constant"):
+                load_gps_path_projection(filename)
 
     def test_vehicle_left_of_eastbound_path_steers_right(self):
         controller = StanleyController(

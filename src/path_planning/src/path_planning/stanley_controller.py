@@ -9,6 +9,39 @@ from path_planning.coordinates import GeodeticOrigin, GpsToMapEnu, MapProjection
 from path_planning.localization import wrap_angle
 
 
+_GPS_LATITUDE_FIELDS = {
+    "latitude", "lat", "gpslatitude", "latitudedeg", "위도", "위도deg"
+}
+_GPS_LONGITUDE_FIELDS = {
+    "longitude", "lon", "lng", "gpslongitude", "longitudedeg", "경도", "경도deg"
+}
+_GPS_ALTITUDE_FIELDS = {
+    "altitude", "alt", "gpsaltitude", "altitudem", "고도", "고도m"
+}
+_GPS_EAST_OFFSET_FIELDS = {
+    "eastoffset",
+    "eastoffsetm",
+    "eastingoffset",
+    "eoffset",
+    "eastcoordinate",
+    "동쪽좌표",
+    "동쪽좌표m",
+    "동쪽오프셋",
+    "동쪽오프셋m",
+}
+_GPS_NORTH_OFFSET_FIELDS = {
+    "northoffset",
+    "northoffsetm",
+    "northingoffset",
+    "noffset",
+    "northcoordinate",
+    "북쪽좌표",
+    "북쪽좌표m",
+    "북쪽오프셋",
+    "북쪽오프셋m",
+}
+
+
 @dataclass(frozen=True)
 class PathPoint:
     x_m: float
@@ -209,22 +242,11 @@ def _load_enu_rows(header, rows, line_numbers):
 
 
 def _load_gps_sensor_rows(header, rows, line_numbers, gps_projection):
-    latitude_index = _field_index(
-        header, {"latitude", "lat", "gpslatitude", "latitudedeg"}
-    )
-    longitude_index = _field_index(
-        header,
-        {"longitude", "lon", "lng", "gpslongitude", "longitudedeg"},
-    )
-    altitude_index = _field_index(
-        header, {"altitude", "alt", "gpsaltitude", "altitudem"}
-    )
-    east_offset_index = _field_index(
-        header, {"eastoffset", "eastingoffset", "eoffset"}
-    )
-    north_offset_index = _field_index(
-        header, {"northoffset", "northingoffset", "noffset"}
-    )
+    latitude_index = _field_index(header, _GPS_LATITUDE_FIELDS)
+    longitude_index = _field_index(header, _GPS_LONGITUDE_FIELDS)
+    altitude_index = _field_index(header, _GPS_ALTITUDE_FIELDS)
+    east_offset_index = _field_index(header, _GPS_EAST_OFFSET_FIELDS)
+    north_offset_index = _field_index(header, _GPS_NORTH_OFFSET_FIELDS)
     if latitude_index is None or longitude_index is None:
         return None
     if (east_offset_index is None) != (north_offset_index is None):
@@ -350,6 +372,66 @@ def load_path_csv(filename, gps_projection=None):
     if len(points) < 2:
         raise ValueError("path CSV must contain at least two distinct points")
     return points
+
+
+def load_gps_path_projection(filename, fallback_projection=None):
+    """Return the fixed UTM origin embedded in a MORAI five-column GPS path.
+
+    The documented EastOffset/NorthOffset values are map constants, not each
+    sample's easting/northing.  Using this projection for live GPS guarantees
+    that the vehicle state and the recorded path share one map-local ENU frame.
+    """
+    filename = os.path.abspath(os.path.expanduser(filename))
+    with open(filename, encoding="utf-8-sig") as stream:
+        source_lines = [
+            (line_number, line.strip())
+            for line_number, line in enumerate(stream, start=1)
+            if line.strip() and not line.lstrip().startswith("#")
+        ]
+    if not source_lines:
+        raise ValueError("path file is empty")
+
+    parsed = [
+        (line_number, _split_sensor_line(line))
+        for line_number, line in source_lines
+    ]
+    first_values = parsed[0][1]
+    if all(_numeric(value) for value in first_values):
+        header = ["latitude", "longitude", "altitude", "eastOffset", "northOffset"]
+        data = parsed
+    else:
+        header = first_values
+        data = parsed[1:]
+
+    latitude_index = _field_index(header, _GPS_LATITUDE_FIELDS)
+    longitude_index = _field_index(header, _GPS_LONGITUDE_FIELDS)
+    east_offset_index = _field_index(header, _GPS_EAST_OFFSET_FIELDS)
+    north_offset_index = _field_index(header, _GPS_NORTH_OFFSET_FIELDS)
+    if latitude_index is None or longitude_index is None:
+        return None
+    if east_offset_index is None and north_offset_index is None:
+        return None
+    if east_offset_index is None or north_offset_index is None:
+        raise ValueError("GPS path must provide both eastOffset and northOffset")
+    if not data:
+        raise ValueError("path file contains a header but no data rows")
+
+    offsets = []
+    for line_number, values in data:
+        offsets.append(
+            (
+                _value(values, east_offset_index, line_number, "eastOffset"),
+                _value(values, north_offset_index, line_number, "northOffset"),
+            )
+        )
+    origin_x, origin_y = offsets[0]
+    for east_offset, north_offset in offsets[1:]:
+        if abs(east_offset - origin_x) > 1e-3 or abs(north_offset - origin_y) > 1e-3:
+            raise ValueError("GPS eastOffset/northOffset must be constant for one path")
+
+    crs = "EPSG:32652" if fallback_projection is None else fallback_projection.crs
+    origin_z = 0.0 if fallback_projection is None else fallback_projection.origin_z_m
+    return MapProjection(crs, origin_x, origin_y, origin_z)
 
 
 def load_recorded_path_origin(filename):

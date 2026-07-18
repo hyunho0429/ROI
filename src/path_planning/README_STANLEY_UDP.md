@@ -41,8 +41,16 @@ y = 6378137.0 * rad(lat - origin_lat)
 z = altitude - origin_alt
 ```
 
-`origin_lat/origin_lon`이 없는 공식 GPS 5열 파일은 MGeo의 UTM CRS와
-`local_origin_in_global`을 사용하는 기존 맵 원점 ENU 변환으로 처리한다.
+`origin_lat/origin_lon`이 없는 공식 GPS 5열 파일은 CSV의 `EastOffset`과
+`NorthOffset`을 맵 UTM 원점으로 사용한다. 두 값은 각 샘플의 위치가 아니라
+맵마다 고정된 상수이므로 모든 행에서 같아야 한다. 경로와 실시간 GPS 모두
+아래처럼 동일한 원점을 사용한다.
+
+```text
+x = UTM_Easting(longitude, latitude) - EastOffset
+y = UTM_Northing(longitude, latitude) - NorthOffset
+z = altitude - MGeo_origin_z
+```
 
 지원 예시는 다음과 같다.
 
@@ -55,6 +63,9 @@ x,y,z,target_speed,lat,lon,alt,origin_lat,origin_lon,origin_alt
 ```text
 latitude longitude altitude eastOffset northOffset
 ```
+
+쉼표 CSV와 공백/탭 TXT, 헤더 없는 5열 파일을 모두 지원한다. 헤더는 공식
+영문명뿐 아니라 `위도,경도,고도,동쪽 좌표,북쪽 좌표`도 인식한다.
 
 `target_speed` 열이 있더라도 주행 속도에는 사용하지 않는다. 현재 런타임은
 `--target-speed-kmh` 하나만 사용하며 기본값은 10 km/h이다.
@@ -142,7 +153,10 @@ front_steer, rear_steer`이며 사용하지 않는 후륜 조향값은 0이다. 
 이 프로그램은 ROS 토픽을 구독하지 않고 UDP 데이터그램만 사용한다. 공식
 26.R1 문서의 ROS 기본 토픽은 GPS `/gps`, IMU `/Imu`지만 UDP에서는 토픽명이
 아니라 센서 Network Setting의 Destination IP/Port가 중요하다. 현재 파서는
-공식 GPS NMEA0183 RMC/GGA, IMU 115 byte, CollisionData 181 byte 구조에 맞는다.
+공식 GPS NMEA0183 RMC/GGA, IMU 107/115 byte, CollisionData 181 byte 구조에
+맞는다. 23.R1.0 문서에서 IMU는 전체 107 byte·데이터 80 byte이며, GPS는
+RMC/GGA NMEA 문장이므로 고정된 단일 패킷 크기를 제시하지 않는다. 115 byte
+IMU는 타임스탬프가 추가된 후속 형식으로 함께 지원한다.
 `Competition Vehicle Status`는 공개 26.R1 문서에 정의가 없어, 대회 25.01에서
 관측한 181/229 byte 패킷만 엄격히 검사한다.
 

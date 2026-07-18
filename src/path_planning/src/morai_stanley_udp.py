@@ -41,6 +41,7 @@ from path_planning.morai_udp_imu import ImuPacketError, parse_imu_packet, quater
 from path_planning.stanley_controller import (
     StanleyController,
     SteeringCommandFilter,
+    load_gps_path_projection,
     load_path_csv,
     load_recorded_path_origin,
 )
@@ -188,8 +189,10 @@ def _validate(arguments):
 def run(arguments):
     _validate(arguments)
     projection = _projection_from_arguments(arguments)
+    csv_projection = load_gps_path_projection(arguments.path, projection)
+    active_projection = csv_projection or projection
     recorded_origin = load_recorded_path_origin(arguments.path)
-    points = load_path_csv(arguments.path, gps_projection=projection)
+    points = load_path_csv(arguments.path, gps_projection=active_projection)
     controller = StanleyController(
         points,
         gain=arguments.stanley_gain,
@@ -216,7 +219,7 @@ def run(arguments):
         max_brake=arguments.max_brake_pedal,
     )
     converter = (
-        GpsToMapEnu(projection)
+        GpsToMapEnu(active_projection)
         if recorded_origin is None
         else GpsToRecordedLocalEnu(recorded_origin)
     )
@@ -273,6 +276,13 @@ def run(arguments):
                 recorded_origin.latitude_deg,
                 recorded_origin.longitude_deg,
                 recorded_origin.altitude_m,
+            )
+        )
+    elif csv_projection is not None:
+        print(
+            "  coordinate frame: GPS CSV UTM origin "
+            "EastOffset={:.3f}, NorthOffset={:.3f}".format(
+                csv_projection.origin_x_m, csv_projection.origin_y_m
             )
         )
     else:
