@@ -1,4 +1,4 @@
-"""Parser for MORAI SIM: Drive 26.R1 and legacy IMU UDP packets."""
+"""Parser for MORAI SIM: Drive 107/115-byte IMU UDP packets."""
 
 import math
 import struct
@@ -22,15 +22,16 @@ class ImuMeasurement:
     orientation_xyzw: tuple
     angular_velocity_radps: tuple
     linear_acceleration_mps2: tuple
+    timestamp_sec: float = None
 
 
 def parse_imu_packet(packet):
-    """Parse an official 26.R1 115-byte or legacy 107-byte IMU datagram.
+    """Parse a timestamped 115-byte or public 107-byte IMU datagram.
 
     MORAI puts quaternion components on the wire as w, x, y, z.  The returned
     tuple is deliberately converted to the conventional x, y, z, w order.
 
-    In 26.R1, bytes 25-32 are uint32 seconds/nanoseconds and the ten doubles
+    In the timestamped form, bytes 25-32 are uint32 seconds/nanoseconds and the ten doubles
     begin at byte 33.  The legacy 107-byte format has no timestamp and begins
     the doubles at byte 25.  Some 25.01 builds report data_length 88 instead of
     80 for the 115-byte packet, so that length is accepted for compatibility.
@@ -58,6 +59,15 @@ def parse_imu_packet(packet):
     if packet[-2:] != PACKET_TAIL:
         raise ImuPacketError("unexpected IMU packet tail")
 
+    timestamp_sec = None
+    if len(packet) == EXTENDED_PACKET_SIZE:
+        seconds, nanoseconds = struct.unpack_from("<II", packet, 25)
+        if nanoseconds >= 1_000_000_000:
+            raise ImuPacketError(
+                "nanoseconds field is out of range: {}".format(nanoseconds)
+            )
+        timestamp_sec = seconds + nanoseconds * 1e-9
+
     offsets = (25,) if len(packet) == PACKET_SIZE else (33,)
     candidates = []
     for offset in offsets:
@@ -75,7 +85,9 @@ def parse_imu_packet(packet):
     _score, values, quaternion_norm = min(candidates, key=lambda item: item[0])
     orientation_wxyz = tuple(value / quaternion_norm for value in values[:4])
     w, x, y, z = orientation_wxyz
-    return ImuMeasurement((x, y, z, w), values[4:7], values[7:10])
+    return ImuMeasurement(
+        (x, y, z, w), values[4:7], values[7:10], timestamp_sec
+    )
 
 
 def quaternion_to_yaw(orientation_xyzw):

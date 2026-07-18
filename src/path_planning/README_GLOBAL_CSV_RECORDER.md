@@ -1,12 +1,15 @@
-# MORAI Ego Vehicle Status 경로 CSV 기록기
+# MORAI Ego Vehicle Status 경로 CSV 기록기 (비대회 진단용)
+
+> 대회 허용 네트워크 목록에는 `Ego Vehicle Status`가 없으므로 이 기록기는
+> 대회 경로 생성에 사용하지 않는다. UDP-only 대회 경로는
+> [README_GPS_CSV_RECORDER.md](README_GPS_CSV_RECORDER.md)의 GPS 기록기를 쓴다.
 
 `morai_global_csv_recorder.py`는 ROS나 catkin 없이 공식 181-byte `Ego Vehicle
 Status` UDP 패킷의 위치를 CSV로 저장한다. Ego Status의 `position`은 맵 원점
 기준 ENU이므로 GPS, UTM 변환이나 속도 적분이 필요하지 않다.
 
-경로 생성 단계에서는 `Ego Vehicle Status`를 사용하고, 실제 자율주행 단계에서는
-대회 규정에 맞게 `Competition Vehicle Status`, GPS, IMU를 사용한다. 두 상태
-메시지는 서로 다른 UDP 포트로 설정한다.
+이 도구는 공개 시뮬레이터의 비대회 디버깅과 좌표 대조에만 사용한다. 실제 대회
+경로 생성과 자율주행은 허용된 `Competition Vehicle Status`, GPS, IMU를 사용한다.
 
 ## MORAI 네트워크 설정
 

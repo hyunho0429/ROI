@@ -46,6 +46,11 @@ z = altitude - origin_alt
 맵마다 고정된 상수이므로 모든 행에서 같아야 한다. 경로와 실시간 GPS 모두
 아래처럼 동일한 원점을 사용한다.
 
+단, `EastOffset/NorthOffset`은 ROS `GPSMessage` 필드이고 UDP GPS의 NMEA
+RMC/GGA 문장에는 포함되지 않는다. UDP-only 실행에서는 MGeo `global_info.json`
+또는 `--utm-origin-x/--utm-origin-y`로 이 상수를 설정한다. 제공된 GPS 기록기는
+선택한 상수를 CSV 모든 행에 함께 저장하므로 이후 실행에서 자동 복원된다.
+
 ```text
 x = UTM_Easting(longitude, latitude) - EastOffset
 y = UTM_Northing(longitude, latitude) - NorthOffset
@@ -66,6 +71,19 @@ latitude longitude altitude eastOffset northOffset
 
 쉼표 CSV와 공백/탭 TXT, 헤더 없는 5열 파일을 모두 지원한다. 헤더는 공식
 영문명뿐 아니라 `위도,경도,고도,동쪽 좌표,북쪽 좌표`도 인식한다.
+
+대회 허용 네트워크만 사용하는 경로 기록 명령은 다음과 같다.
+
+```bash
+python3 src/path_planning/src/morai_gps_csv_recorder.py \
+  --port 3001 \
+  --output src/path_planning/data/morai_global_path.csv \
+  --sample-distance 0.5
+```
+
+CSV에는 `latitude/longitude/altitude`, `global_enu_x/y/z`, 고정
+`projection_crs/east_offset/north_offset/up_offset`을 함께 저장한다. 과거 IMU는
+경로 형상이 아니며 현재 위치추정에도 재사용할 수 없으므로 저장하지 않는다.
 
 `target_speed` 열이 있더라도 주행 속도에는 사용하지 않는다. 현재 런타임은
 `--target-speed-kmh` 하나만 사용하며 기본값은 10 km/h이다.
@@ -137,28 +155,50 @@ Destination/Host IP와 Port를 이 값과 일치시켜야 한다.
 | CollisionData | SIM → 코드 | 907 |
 | Ego Ctrl Cmd | 코드 → SIM | 9090 |
 
+MORAI에서 GPS/IMU/Competition Status/CollisionData의 Destination IP는 코드를
+실행하는 PC, Destination Port는 위 수신 포트로 맞춘다. `Ego-0 > Cmd Control`은
+코드가 보내는 `--control-ip/--control-port`를 수신하도록 연결한다. 차량 UI에서
+`Q`를 눌러 `AV-ExternalCtrl`로 전환하고 기어가 D인지 확인해야 한다. 코드는
+Competition Status가 mode 2와 gear 4를 회신하기 전까지 가속하지 않고 brake만
+보낸다.
+
 CollisionData 907과 Competition Status 909처럼 1024 미만 포트는 Linux에서
 권한이 필요할 수 있다.
 가능하면 MORAI와 코드 양쪽 포트를 1024 이상으로 바꾸고, 대회 설정상 909를
 유지해야 하면 실행 환경의 권한 설정을 확인한다.
 
-26.R1 `Ego Ctrl Cmd`는 59 byte, `data_length=27`으로 전송한다. payload는
-`ctrl_mode, gear, longCmdType, velocity, acceleration, accel, brake,
-front_steer, rear_steer`이며 사용하지 않는 후륜 조향값은 0이다. 실행 직후
+25.S4 기본 `Ego Ctrl Cmd`는 공개 23/24 계열과 같은 55 byte,
+`data_length=23`으로 전송한다. payload는 `ctrl_mode, gear, longCmdType,
+velocity, acceleration, accel, brake, front_steer`이다. 2026년 공식 예제의
+59 byte 후륜 조향 형식은 `--control-protocol 26r1`로만 선택한다. 실행 직후
 안전 제동 상태로 `ctrl_mode=2`,
 `gear=4` 패킷을 반복 전송한다. MORAI UI에서 기존 AutoMode로 불리던 모드는
 24.R2부터 `AV-ExternalCtrl`로 표시되므로, Competition Status가 mode 2와 D를
 회신한 뒤에만 가속을 시작한다.
 
+규정의 `longCmdType=1`에도 조향이 포함된다. `accel/brake`와 함께
+`front_steer`를 같은 패킷으로 보낼 수 있다. 공식 UDP 예제에 맞춰 명령값은
+차량 최대 조향각 대비 정규화 값 `[-1, 1]`로 보내고, Competition Status의
+조향 피드백은 degree로 읽는다.
+
 이 프로그램은 ROS 토픽을 구독하지 않고 UDP 데이터그램만 사용한다. 공식
-26.R1 문서의 ROS 기본 토픽은 GPS `/gps`, IMU `/Imu`지만 UDP에서는 토픽명이
+문서의 ROS 기본 토픽은 GPS `/gps`, IMU `/Imu`지만 UDP에서는 토픽명이
 아니라 센서 Network Setting의 Destination IP/Port가 중요하다. 현재 파서는
 공식 GPS NMEA0183 RMC/GGA, IMU 107/115 byte, CollisionData 181 byte 구조에
 맞는다. 23.R1.0 문서에서 IMU는 전체 107 byte·데이터 80 byte이며, GPS는
 RMC/GGA NMEA 문장이므로 고정된 단일 패킷 크기를 제시하지 않는다. 115 byte
-IMU는 타임스탬프가 추가된 후속 형식으로 함께 지원한다.
-`Competition Vehicle Status`는 공개 26.R1 문서에 정의가 없어, 대회 25.01에서
+IMU는 초/나노초 타임스탬프가 추가된 형식으로 함께 지원한다.
+`Competition Vehicle Status`는 공개 문서에 정의가 없어, 대회 환경에서
 관측한 181/229 byte 패킷만 엄격히 검사한다.
+
+IMU 115-byte 패킷의 센서 타임스탬프는 파싱하고 범위를 검사한다. 다만 GPS
+NMEA, Competition Status와 동일한 시간축으로 EKF 이벤트 순서를 보장하기 위해
+실시간 융합의 `dt`에는 각 UDP 데이터그램의 local monotonic 수신 시간을 쓴다.
+
+Camera와 3D LiDAR도 대회 허용 UDP지만 이 GPS/IMU INS Stanley의 필수 입력은
+아니다. 카메라는 timestamp/index/size가 붙은 분할 JPEG이고, 3D LiDAR는 선택한
+Velodyne 모델의 UDP 프로토콜을 따르므로 필요 없는 포트는 열지 않는다. 이후
+차선/장애물 인지를 추가할 때 별도 perception 모듈로 연결한다.
 
 ## 실행
 
@@ -176,6 +216,17 @@ GPS `3001`, IMU `4001`, Competition Status `909`, CollisionData `907`,
 
 `--control-ip`에는 MORAI가 실행되는 PC의 IPv4 주소를 넣는다. 같은 PC라면
 `127.0.0.1`을 사용할 수 있다.
+
+전체 주행 전에는 안전한 brake 명령과 Competition Status 피드백으로 수신을
+검증한다.
+
+```bash
+sudo "$(which python3)" src/path_planning/src/morai_udp_control_check.py
+```
+
+`PASS`가 나오면 mode 2, gear 4와 brake feedback까지 확인된 것이다. 통제된
+빈 공간에서만 `--drive-test`를 추가해 0.1 accel을 1초간 시험한다. 종료 시에는
+항상 full brake를 다섯 번 전송한다.
 
 시작 로그에는 다음 내용이 보여야 한다.
 
@@ -207,3 +258,12 @@ Cmd Control의 Host IP/Port를 점검한다. feedback에도 accel이 들어오�
 GPS/IMU/Competition Status가 stale이거나 CollisionData가 충돌을 알리거나 경로
 끝에 도달하면 즉시 brake 명령을 전송한다. `Ctrl+C` 종료 시에도 brake 패킷을
 다섯 번 전송한다.
+
+## 확인한 MORAI 공식 자료
+
+- [통신 메시지 프로토콜](https://help-morai-sim.scrollhelp.site/ko/morai-sim-drive/24.R1.0/ros-1)
+- [센서 통신 프로토콜](https://help-morai-sim.scrollhelp.site/ko/morai-sim-drive/24.R2/-35)
+- [맵 좌표계](https://help-morai-sim.scrollhelp.site/ko/morai-sim-drive/24.R2/-9)
+- [네트워크 설정 UI](https://help-morai-sim.scrollhelp.site/ko/morai-sim-drive/24.R2/ui)
+- [MORAI 공식 55-byte EgoCtrlCmd 정의](https://github.com/MORAI-Autonomous/MORAI-NetworkModule/blob/78e88558588451bdf9a10baf04d575c9aa3e8587/lib/define/EgoCtrlCmd.py)
+- [MORAI 공식 IMU timestamp 정의](https://github.com/MORAI-Autonomous/MORAI-NetworkModule/blob/78e88558588451bdf9a10baf04d575c9aa3e8587/lib/define/IMU.py)

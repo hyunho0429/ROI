@@ -31,22 +31,19 @@ rostopic echo /global_path_marker
 
 ## MORAI keyboard path CSV recording
 
-Path recording may use the documented Ego Vehicle Status interface even when
-autonomous driving is restricted to Competition Vehicle Status. Configure Ego
-Vehicle Status UDP Destination IP/Port and save its map-local ENU position once
-per second:
+Record the reference path with the competition-allowed GPS UDP sensor while
+driving manually. The recorder saves a point every 0.5 m by default:
 
 ```bash
-python3 src/path_planning/src/morai_global_csv_recorder.py \
-  --bind-ip 0.0.0.0 --port 9102 \
-  --output src/path_planning/data/morai_global_path.csv \
-  --sample-period 1.0
+python3 src/path_planning/src/morai_gps_csv_recorder.py \
+  --bind-ip 0.0.0.0 --port 3001 \
+  --output src/path_planning/data/morai_global_path.csv
 ```
 
-The recorder is standalone and does not require ROS or coordinate conversion.
-Ego Vehicle Status position is already map-local ENU, which is the frame used by
-the Stanley path tracker. `morai_gps_csv_recorder.py` remains available as a
-GPS-based fallback.
+The CSV contains raw latitude/longitude/altitude, derived map-local ENU, and the
+fixed CRS/EastOffset/NorthOffset/UpOffset used for conversion. It deliberately
+does not use Ego Vehicle Status or store historical IMU samples. See
+`src/path_planning/README_GPS_CSV_RECORDER.md`.
 
 ## MORAI UDP Stanley control
 
@@ -67,8 +64,15 @@ python3 src/path_planning/src/morai_stanley_ins_udp.py \
   --path src/path_planning/data/morai_global_path.csv
 ```
 
-See `src/path_planning/README_STANLEY_UDP.md` for the MORAI 26.R1 public protocol basis,
+See `src/path_planning/README_STANLEY_UDP.md` for the MORAI 25.S4 protocol basis,
 coordinate conversion, network settings, safety behavior, and tuning values.
+
+Before running the full controller, verify that MORAI reflects the safe brake
+command in Competition Vehicle Status:
+
+```bash
+sudo "$(which python3)" src/path_planning/src/morai_udp_control_check.py
+```
 
 For comparison, the speed-aided dead-reckoning alternative remains available:
 

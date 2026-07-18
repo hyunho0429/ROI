@@ -31,8 +31,9 @@ from path_planning.morai_udp_competition_status import (
     parse_competition_vehicle_status,
 )
 from path_planning.morai_udp_ctrl_cmd import (
+    CONTROL_PROTOCOLS,
     brake_command,
-    encode_ego_ctrl_cmd_26r1,
+    encode_ego_ctrl_cmd,
     external_control_ready,
     pedal_command,
 )
@@ -95,6 +96,9 @@ def parse_arguments(argv=None):
     parser.add_argument("--collision-port", type=int, default=COLLISION_PORT)
     parser.add_argument("--control-ip", default=CONTROL_IP)
     parser.add_argument("--control-port", type=int, default=CONTROL_PORT)
+    parser.add_argument(
+        "--control-protocol", choices=CONTROL_PROTOCOLS, default="25s4"
+    )
     parser.add_argument("--control-rate-hz", type=float, default=20.0)
     parser.add_argument("--target-speed-kmh", type=float, default=TARGET_SPEED_KMH)
     parser.add_argument("--stanley-gain", type=float, default=0.22)
@@ -244,6 +248,9 @@ def run(arguments):
 
     control_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     destination = (arguments.control_ip, arguments.control_port)
+    encode_control = lambda command: encode_ego_ctrl_cmd(
+        command, arguments.control_protocol
+    )
     period = 1.0 / arguments.control_rate_hz
     next_control = time.monotonic()
     last_log = 0.0
@@ -261,7 +268,7 @@ def run(arguments):
         CollisionPacketError,
     )
 
-    print("MORAI competition Stanley controller started (26.R1 public protocols)")
+    print("MORAI competition Stanley controller started")
     print(
         "  path: {} ({} -> {} points after spacing/smoothing)".format(
             os.path.abspath(arguments.path),
@@ -289,7 +296,14 @@ def run(arguments):
         print("  coordinate frame: MGeo map-origin ENU")
     for kind, port in receive_channels:
         print("  {} receive: {}:{}".format(kind, arguments.bind_ip, port))
-    print("  control destination: {}:{} (longCmdType 1 only)".format(*destination))
+    print(
+        "  control destination: {}:{} (protocol {}, {} bytes, longCmdType 1)".format(
+            destination[0],
+            destination[1],
+            arguments.control_protocol,
+            len(encode_control(brake_command())),
+        )
+    )
     print(
         "  Stanley: front axle {:.2f} m, no look-ahead target, "
         "fixed speed {:.1f} km/h".format(
@@ -297,7 +311,7 @@ def run(arguments):
         )
     )
     print("  requesting AV-ExternalCtrl (ctrl_mode=2) and Drive (gear=4)")
-    takeover_packet = encode_ego_ctrl_cmd_26r1(brake_command())
+    takeover_packet = encode_control(brake_command())
     for _ in range(3):
         control_socket.sendto(takeover_packet, destination)
         time.sleep(0.02)
@@ -444,7 +458,7 @@ def run(arguments):
                         target_speed_mps, measured_speed_mps, now
                     )
                     command = pedal_command(accel, brake, normalized)
-            control_socket.sendto(encode_ego_ctrl_cmd_26r1(command), destination)
+            control_socket.sendto(encode_control(command), destination)
 
             if now - last_log >= 1.0:
                 last_log = now
@@ -500,7 +514,7 @@ def run(arguments):
     except KeyboardInterrupt:
         print("\nStopping controller and applying brake...")
     finally:
-        stop_packet = encode_ego_ctrl_cmd_26r1(brake_command())
+        stop_packet = encode_control(brake_command())
         for _ in range(5):
             control_socket.sendto(stop_packet, destination)
             time.sleep(0.02)

@@ -25,10 +25,10 @@ MORAI 네트워크 포트 예시는 다음과 같다. 실제 Sensor/Network Sett
 경로 CSV가 아직 없다면 먼저 키보드로 주행해 기록한다.
 
 ```bash
-python3 src/path_planning/src/morai_global_csv_recorder.py \
-  --port 9102 \
+python3 src/path_planning/src/morai_gps_csv_recorder.py \
+  --port 3001 \
   --output src/path_planning/data/morai_global_path.csv \
-  --sample-period 1.0
+  --sample-distance 0.5
 ```
 
 공식 GPS 센서 저장 파일(`latitude, longitude, altitude, eastOffset,
@@ -125,6 +125,8 @@ GPS Blackout의 `(0,0,0)` NMEA 위치는 유효한 측정으로 사용하지 않
 4. 10 km/h에서 짧은 GPS Blackout 구간을 시험한다.
 5. INS와 DR의 터널 출구 위치 오차를 비교한 후 gain/noise를 조정한다.
 
-`Competition Vehicle Status`는 공개 `Ego Vehicle Status`와 다른 패킷이며 현재
-실제 25.01에서 확인한 181-byte 형식과 229-byte 확장 형식을 엄격히 검사한다.
+`Competition Vehicle Status`는 공개 `Ego Vehicle Status`와 다른 대회 전용
+패킷이며 현재 관측된 181-byte 형식과 229-byte 확장 형식만 엄격히 검사한다.
+25.S4 현장 패킷 길이가 다르면 안전 제동 상태로 거부하고 실제 캡처를 기준으로
+별도 레이아웃을 추가해야 한다.
 그 외 패킷 길이가 들어오면 오류 로그를 남기고 제어기는 출발하지 않는다.

@@ -276,6 +276,7 @@ class StanleyControllerTest(unittest.TestCase):
         self.assertEqual(arguments.collision_port, 907)
         self.assertEqual(arguments.control_ip, "192.168.0.170")
         self.assertEqual(arguments.control_port, 9090)
+        self.assertEqual(arguments.control_protocol, "25s4")
         self.assertEqual(arguments.control_point_offset, 3.0)
         self.assertEqual(arguments.morai_steer_sign, 1.0)
         self.assertEqual(arguments.speed_kp, 0.35)

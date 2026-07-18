@@ -1,4 +1,4 @@
-"""Strict parser for MORAI 26.R1 CollisionData UDP packets."""
+"""Strict parser for documented MORAI 181-byte CollisionData UDP packets."""
 
 import math
 import struct
@@ -37,8 +37,13 @@ class CollisionData26R1:
 
     @property
     def collided_objects(self):
-        # In the competition layout element zero is Ego; collisions start at one.
-        return tuple(item for item in self.objects[1:] if item.populated)
+        # Some builds put Ego (-1) in slot zero, while others put the first
+        # collided object there.  Filter by type instead of dropping a slot.
+        return tuple(
+            item
+            for item in self.objects
+            if item.populated and item.object_type != -1
+        )
 
     @property
     def collision_detected(self):

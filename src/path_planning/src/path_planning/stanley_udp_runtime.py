@@ -31,8 +31,9 @@ from path_planning.morai_udp_competition_status import (
     parse_competition_vehicle_status,
 )
 from path_planning.morai_udp_ctrl_cmd import (
+    CONTROL_PROTOCOLS,
     brake_command,
-    encode_ego_ctrl_cmd_26r1,
+    encode_ego_ctrl_cmd,
     external_control_ready,
     pedal_command,
 )
@@ -101,6 +102,12 @@ def argument_parser(localization_mode):
     parser.add_argument("--collision-port", type=int, default=COLLISION_PORT)
     parser.add_argument("--control-ip", default=CONTROL_IP)
     parser.add_argument("--control-port", type=int, default=CONTROL_PORT)
+    parser.add_argument(
+        "--control-protocol",
+        choices=CONTROL_PROTOCOLS,
+        default="25s4",
+        help="Ego Ctrl Cmd wire layout (25s4: 55 bytes, 26r1: 59 bytes)",
+    )
     parser.add_argument("--control-rate-hz", type=float, default=20.0)
     parser.add_argument("--target-speed-kmh", type=float, default=TARGET_SPEED_KMH)
     parser.add_argument("--stanley-gain", type=float, default=0.22)
@@ -296,6 +303,9 @@ def run(localization_mode, arguments):
         receive_sockets.append(udp_socket)
     control_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     control_destination = (arguments.control_ip, arguments.control_port)
+    encode_control = lambda command: encode_ego_ctrl_cmd(
+        command, arguments.control_protocol
+    )
 
     latest_gps_time = latest_imu_time = latest_status_time = None
     status_speed_mps = 0.0
@@ -342,7 +352,15 @@ def run(localization_mode, arguments):
         print("  coordinate frame: MGeo map-origin ENU")
     for name, port in channels:
         print("  {} receive: {}:{}".format(name, arguments.bind_ip, port))
-    print("  control: {}:{} (longCmdType 1)".format(*control_destination))
+    command_packet_size = len(encode_control(brake_command()))
+    print(
+        "  control: {}:{} (protocol {}, {} bytes, longCmdType 1)".format(
+            control_destination[0],
+            control_destination[1],
+            arguments.control_protocol,
+            command_packet_size,
+        )
+    )
     if localization_mode == "ins":
         print("  localization: GPS/IMU/status-aided 15-state error-state EKF INS")
     else:
@@ -355,7 +373,7 @@ def run(localization_mode, arguments):
     )
     print("  maximum GPS outage: {:.1f} s".format(arguments.max_gps_outage))
     print("  requesting AV-ExternalCtrl (ctrl_mode=2) and Drive (gear=4)")
-    takeover_packet = encode_ego_ctrl_cmd_26r1(brake_command())
+    takeover_packet = encode_control(brake_command())
     for _ in range(3):
         control_socket.sendto(takeover_packet, control_destination)
         time.sleep(0.02)
@@ -499,7 +517,7 @@ def run(localization_mode, arguments):
                         accel, brake, normalized_steering
                     )
             control_socket.sendto(
-                encode_ego_ctrl_cmd_26r1(command), control_destination
+                encode_control(command), control_destination
             )
 
             if now - last_log >= 1.0:
@@ -563,7 +581,7 @@ def run(localization_mode, arguments):
     except KeyboardInterrupt:
         print("\nStopping controller and applying brake...")
     finally:
-        stop_packet = encode_ego_ctrl_cmd_26r1(brake_command())
+        stop_packet = encode_control(brake_command())
         for _ in range(5):
             control_socket.sendto(stop_packet, control_destination)
             time.sleep(0.02)

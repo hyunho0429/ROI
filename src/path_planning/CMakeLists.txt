@@ -22,6 +22,8 @@ include_directories(
 catkin_install_python(PROGRAMS
   src/global_path_kcity_dijkstra.py
   src/morai_global_csv_recorder.py
+  src/morai_gps_csv_recorder.py
+  src/morai_udp_control_check.py
   src/morai_stanley_udp.py
   src/morai_stanley_ins_udp.py
   src/morai_stanley_dead_reckoning_udp.py

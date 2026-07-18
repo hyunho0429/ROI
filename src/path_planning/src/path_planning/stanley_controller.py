@@ -40,6 +40,15 @@ _GPS_NORTH_OFFSET_FIELDS = {
     "북쪽오프셋",
     "북쪽오프셋m",
 }
+_GPS_UP_OFFSET_FIELDS = {
+    "upoffset",
+    "upoffsetm",
+    "originz",
+    "originzm",
+    "maporiginz",
+    "maporiginzm",
+}
+_GPS_CRS_FIELDS = {"crs", "utmcrs", "projectioncrs"}
 
 
 @dataclass(frozen=True)
@@ -407,6 +416,8 @@ def load_gps_path_projection(filename, fallback_projection=None):
     longitude_index = _field_index(header, _GPS_LONGITUDE_FIELDS)
     east_offset_index = _field_index(header, _GPS_EAST_OFFSET_FIELDS)
     north_offset_index = _field_index(header, _GPS_NORTH_OFFSET_FIELDS)
+    up_offset_index = _field_index(header, _GPS_UP_OFFSET_FIELDS)
+    crs_index = _field_index(header, _GPS_CRS_FIELDS)
     if latitude_index is None or longitude_index is None:
         return None
     if east_offset_index is None and north_offset_index is None:
@@ -430,7 +441,33 @@ def load_gps_path_projection(filename, fallback_projection=None):
             raise ValueError("GPS eastOffset/northOffset must be constant for one path")
 
     crs = "EPSG:32652" if fallback_projection is None else fallback_projection.crs
+    if crs_index is not None:
+        crs_values = []
+        for line_number, values in data:
+            try:
+                value = values[crs_index].strip()
+            except IndexError as error:
+                raise ValueError(
+                    "missing projection CRS at path file line {}".format(line_number)
+                ) from error
+            if not value:
+                raise ValueError(
+                    "empty projection CRS at path file line {}".format(line_number)
+                )
+            crs_values.append(value)
+        if any(value != crs_values[0] for value in crs_values[1:]):
+            raise ValueError("projection CRS must be constant for one path")
+        crs = crs_values[0]
+
     origin_z = 0.0 if fallback_projection is None else fallback_projection.origin_z_m
+    if up_offset_index is not None:
+        up_offsets = [
+            _value(values, up_offset_index, line_number, "upOffset")
+            for line_number, values in data
+        ]
+        if any(abs(value - up_offsets[0]) > 1e-3 for value in up_offsets[1:]):
+            raise ValueError("GPS upOffset must be constant for one path")
+        origin_z = up_offsets[0]
     return MapProjection(crs, origin_x, origin_y, origin_z)
 
 

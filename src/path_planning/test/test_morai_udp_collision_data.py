@@ -31,6 +31,18 @@ def make_packet(collided=False):
     return bytes(packet)
 
 
+def make_first_slot_collision_packet():
+    packet = bytearray(PACKET_SIZE)
+    packet[:15] = PACKET_HEADER
+    struct.pack_into("<I", packet, 15, PACKET_DATA_LENGTH)
+    struct.pack_into("<II", packet, 31, 10, 0)
+    struct.pack_into(
+        "<hhffffff", packet, 39, 1, 99, 1, 2, 3, 300000, 4100000, 0
+    )
+    packet[-2:] = b"\r\n"
+    return bytes(packet)
+
+
 class CollisionDataTest(unittest.TestCase):
     def test_detects_second_populated_object(self):
         collision = parse_collision_data_26r1(make_packet(collided=True))
@@ -40,6 +52,11 @@ class CollisionDataTest(unittest.TestCase):
 
     def test_empty_slots_are_not_collision(self):
         self.assertFalse(parse_collision_data_26r1(make_packet()).collision_detected)
+
+    def test_detects_non_ego_collision_in_first_slot(self):
+        collision = parse_collision_data_26r1(make_first_slot_collision_packet())
+        self.assertTrue(collision.collision_detected)
+        self.assertEqual(collision.collided_objects[0].object_id, 99)
 
     def test_rejects_wrong_header(self):
         packet = bytearray(make_packet())

@@ -39,6 +39,7 @@ class MoraiUdpSensorsTest(unittest.TestCase):
         packet[-2:] = b"\r\n"
         measurement = parse_imu_packet(bytes(packet))
         self.assertAlmostEqual(quaternion_to_yaw(measurement.orientation_xyzw), yaw)
+        self.assertIsNone(measurement.timestamp_sec)
         self.assertEqual(measurement.angular_velocity_radps, (0.1, 0.2, 0.3))
         self.assertEqual(measurement.linear_acceleration_mps2, (1.0, 2.0, 3.0))
 
@@ -66,6 +67,7 @@ class MoraiUdpSensorsTest(unittest.TestCase):
         measurement = parse_imu_packet(bytes(packet))
 
         self.assertAlmostEqual(quaternion_to_yaw(measurement.orientation_xyzw), yaw)
+        self.assertAlmostEqual(measurement.timestamp_sec, 1234.5)
         self.assertEqual(measurement.angular_velocity_radps, (0.1, 0.2, 0.3))
         self.assertEqual(measurement.linear_acceleration_mps2, (1.0, 2.0, 3.0))
 
@@ -93,6 +95,7 @@ class MoraiUdpSensorsTest(unittest.TestCase):
         measurement = parse_imu_packet(bytes(packet))
 
         self.assertAlmostEqual(quaternion_to_yaw(measurement.orientation_xyzw), yaw)
+        self.assertAlmostEqual(measurement.timestamp_sec, 1234.5)
         self.assertEqual(measurement.angular_velocity_radps, (0.1, 0.2, 0.3))
         self.assertEqual(measurement.linear_acceleration_mps2, (1.0, 2.0, 3.0))
 
