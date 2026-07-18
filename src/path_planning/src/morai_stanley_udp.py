@@ -140,7 +140,8 @@ def _validate(arguments):
 
 def run(arguments):
     _validate(arguments)
-    points = load_path_csv(arguments.path)
+    projection = _projection_from_arguments(arguments)
+    points = load_path_csv(arguments.path, gps_projection=projection)
     controller = StanleyController(
         points,
         gain=arguments.stanley_gain,
@@ -154,7 +155,7 @@ def run(arguments):
         max_accel=arguments.max_accel_pedal,
         max_brake=arguments.max_brake_pedal,
     )
-    converter = GpsToMapEnu(_projection_from_arguments(arguments))
+    converter = GpsToMapEnu(projection)
     localizer = PlanarGpsImuEkf(
         gps_position_sigma_m=arguments.gps_position_sigma,
         gps_speed_sigma_mps=arguments.gps_speed_sigma,

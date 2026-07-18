@@ -183,7 +183,8 @@ def _localizer(localization_mode, arguments):
 
 def run(localization_mode, arguments):
     _validate(arguments)
-    points = load_path_csv(arguments.path)
+    projection = _projection(arguments)
+    points = load_path_csv(arguments.path, gps_projection=projection)
     stanley = StanleyController(
         points,
         gain=arguments.stanley_gain,
@@ -198,7 +199,7 @@ def run(localization_mode, arguments):
         max_brake=arguments.max_brake_pedal,
     )
     localizer = _localizer(localization_mode, arguments)
-    converter = GpsToMapEnu(_projection(arguments))
+    converter = GpsToMapEnu(projection)
 
     selector = selectors.DefaultSelector()
     receive_sockets = []

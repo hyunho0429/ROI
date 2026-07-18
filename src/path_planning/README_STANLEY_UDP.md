@@ -65,6 +65,54 @@ Python 3.8 이상에서 저장소 루트 기준으로 실행한다.
 python3 -m pip install -r src/path_planning/requirements.txt
 ```
 
+## MORAI GPS/IMU 센서 저장 파일을 경로로 사용
+
+공식 26.R1 센서 검출 데이터의 GPS 저장 형식은 다음 5개 값이다.
+
+```text
+latitude longitude altitude eastOffset northOffset
+```
+
+- `latitude`, `longitude`: WGS84 위도·경도(deg)
+- `altitude`: 고도(m)
+- `eastOffset`, `northOffset`: UTM 맵 원점의 East/North offset(m)
+
+Stanley 경로 로더는 기존 ENU CSV 외에 이 GPS 센서 파일을 자동 인식한다. 공식
+형식처럼 헤더 없이 공백으로 구분된 `.txt` 파일도 되고, 다음처럼 헤더가 있는
+CSV도 된다.
+
+```csv
+latitude,longitude,altitude,eastOffset,northOffset
+37.123456,126.123456,28.4,302595.0,4124145.0
+37.123457,126.123460,28.5,302595.0,4124145.0
+```
+
+GPS와 IMU가 합쳐진 CSV라면 위 다섯 GPS 열만 정확히 있으면 된다. 추가로 포함된
+IMU 열(`sec`, `nsec`, quaternion x/y/z/w, angular velocity x/y/z, linear
+acceleration x/y/z)은 기준 경로 생성에서는 무시한다. 과거 IMU 값을 현재 차량
+상태로 사용하면 안 되기 때문이다. 실제 경로 추종 중 현재 자세와 위치는 기존처럼
+실시간 GPS/IMU UDP와 EKF 또는 INS가 담당한다.
+
+경로 변환은 다음과 같다.
+
+```text
+UTM_easting, UTM_northing = project(longitude, latitude)
+ENU_x = UTM_easting  - eastOffset
+ENU_y = UTM_northing - northOffset
+ENU_z = altitude - MGeo origin_z
+```
+
+실행할 때 센서 파일을 그대로 `--path`에 지정한다.
+
+```bash
+python3 src/path_planning/src/morai_stanley_ins_udp.py \
+  --path /absolute/path/sensor_path.csv \
+  --global-info src/path_planning/mgeo/R_KR_PR_K-city_2025/global_info.json
+```
+
+IMU 데이터만 있는 파일에는 절대 위치가 없으므로 단독으로는 기준 경로를 만들 수
+없다. 또한 `eastOffset`과 `northOffset`은 한 경로 파일 안에서 일정해야 한다.
+
 ## 네트워크 설정
 
 아래 포트는 실행 예시일 뿐이다. MORAI Network/Sensor Settings의 Destination

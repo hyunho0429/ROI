@@ -3,7 +3,9 @@
 import math
 import os
 import sys
+import tempfile
 import unittest
+from unittest.mock import patch
 
 
 PACKAGE_SRC = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))
@@ -12,10 +14,95 @@ if PACKAGE_SRC not in sys.path:
 
 from path_planning.localization import PlanarGpsImuEkf
 from path_planning.longitudinal_controller import PedalSpeedController
-from path_planning.stanley_controller import PathPoint, StanleyController
+from path_planning.coordinates import MapProjection
+from path_planning.stanley_controller import (
+    PathPoint,
+    StanleyController,
+    load_path_csv,
+)
 
 
 class StanleyControllerTest(unittest.TestCase):
+    def test_loads_morai_gps_and_imu_combined_csv_as_enu_path(self):
+        origin_x, origin_y = 302595.0, 4124145.0
+        latitude_1, longitude_1 = 37.1, 126.1
+        latitude_2, longitude_2 = 37.2, 126.2
+        header = (
+            "latitude,longitude,altitude,eastOffset,northOffset,"
+            "imu_sec,imu_nsec,orientation_x,orientation_y,orientation_z,orientation_w,"
+            "angular_velocity_x,angular_velocity_y,angular_velocity_z,"
+            "linear_acceleration_x,linear_acceleration_y,linear_acceleration_z\n"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            filename = os.path.join(directory, "sensor_path.csv")
+            with open(filename, "w", encoding="utf-8") as stream:
+                stream.write(header)
+                stream.write(
+                    "{},{},28.0,{},{},1,0,0,0,0,1,0,0,0,0,0,9.81\n".format(
+                        latitude_1, longitude_1, origin_x, origin_y
+                    )
+                )
+                stream.write(
+                    "{},{},29.0,{},{},2,0,0,0,0,1,0,0,0,0,0,9.81\n".format(
+                        latitude_2, longitude_2, origin_x, origin_y
+                    )
+                )
+            with patch("path_planning.stanley_controller.GpsToMapEnu") as converter_type:
+                converter_type.return_value.convert.side_effect = (
+                    lambda latitude, longitude, altitude: (
+                        longitude,
+                        latitude,
+                        altitude,
+                    )
+                )
+                points = load_path_csv(
+                    filename,
+                    gps_projection=MapProjection(
+                        "EPSG:32652", origin_x, origin_y, 0.0
+                    ),
+                )
+                used_projection = converter_type.call_args.args[0]
+
+        self.assertEqual(len(points), 2)
+        self.assertAlmostEqual(points[0].x_m, longitude_1)
+        self.assertAlmostEqual(points[0].y_m, latitude_1)
+        self.assertAlmostEqual(points[0].z_m, 28.0, places=3)
+        self.assertAlmostEqual(points[1].x_m, longitude_2)
+        self.assertAlmostEqual(points[1].y_m, latitude_2)
+        self.assertEqual(used_projection.origin_x_m, origin_x)
+        self.assertEqual(used_projection.origin_y_m, origin_y)
+
+    def test_loads_documented_headerless_gps_sensor_text(self):
+        origin_x, origin_y = 302595.0, 4124145.0
+        latitude_1, longitude_1 = 37.1, 126.1
+        latitude_2, longitude_2 = 37.2, 126.2
+        with tempfile.TemporaryDirectory() as directory:
+            filename = os.path.join(directory, "gps_path.txt")
+            with open(filename, "w", encoding="utf-8") as stream:
+                stream.write(
+                    "{} {} 28.0 {} {}\n".format(
+                        latitude_1, longitude_1, origin_x, origin_y
+                    )
+                )
+                stream.write(
+                    "{} {} 29.0 {} {}\n".format(
+                        latitude_2, longitude_2, origin_x, origin_y
+                    )
+                )
+            with patch("path_planning.stanley_controller.GpsToMapEnu") as converter_type:
+                converter_type.return_value.convert.side_effect = (
+                    lambda latitude, longitude, altitude: (
+                        longitude,
+                        latitude,
+                        altitude,
+                    )
+                )
+                points = load_path_csv(filename)
+
+        self.assertAlmostEqual(points[0].x_m, longitude_1)
+        self.assertAlmostEqual(points[0].y_m, latitude_1)
+        self.assertAlmostEqual(points[1].z_m, 29.0, places=3)
+
     def test_vehicle_left_of_eastbound_path_steers_right(self):
         controller = StanleyController(
             [PathPoint(0.0, 0.0), PathPoint(20.0, 0.0)], gain=1.0

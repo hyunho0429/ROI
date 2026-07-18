@@ -25,10 +25,15 @@ MORAI 네트워크 포트 예시는 다음과 같다. 실제 Sensor/Network Sett
 
 ```bash
 python3 src/path_planning/src/morai_global_csv_recorder.py \
-  --port 3315 \
+  --port 9102 \
   --output src/path_planning/data/morai_global_path.csv \
   --sample-period 1.0
 ```
+
+공식 GPS 센서 저장 파일(`latitude, longitude, altitude, eastOffset,
+northOffset`) 또는 이 GPS 열과 IMU 열이 합쳐진 CSV를 받는 경우에는 별도 변환
+없이 그 파일을 두 실행기의 `--path`로 지정할 수 있다. 로더가 GPS 경로를 K-City
+맵 원점 기준 ENU로 변환한다.
 
 ## 1. INS error-state EKF 버전
 

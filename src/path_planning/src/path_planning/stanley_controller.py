@@ -5,6 +5,7 @@ import math
 import os
 from dataclasses import dataclass
 
+from path_planning.coordinates import GpsToMapEnu, MapProjection
 from path_planning.localization import wrap_angle
 
 
@@ -25,39 +26,196 @@ class StanleyResult:
     goal_reached: bool
 
 
-def load_path_csv(filename):
-    """Load recorder CSV columns, or a simple x/y/z CSV, as ENU points."""
-    filename = os.path.abspath(os.path.expanduser(filename))
-    with open(filename, newline="", encoding="utf-8-sig") as stream:
-        reader = csv.DictReader(stream)
-        if not reader.fieldnames:
-            raise ValueError("path CSV has no header")
-        fields = set(reader.fieldnames)
-        if {"global_enu_x_m", "global_enu_y_m"}.issubset(fields):
-            keys = ("global_enu_x_m", "global_enu_y_m", "global_enu_z_m")
-        elif {"x", "y"}.issubset(fields):
-            keys = ("x", "y", "z")
-        else:
+def _split_sensor_line(line):
+    if "," in line:
+        return next(csv.reader([line], skipinitialspace=True))
+    if "\t" in line:
+        return [value.strip() for value in line.split("\t")]
+    return line.split()
+
+
+def _normalized_name(value):
+    return "".join(character for character in value.lower() if character.isalnum())
+
+
+def _numeric(value):
+    try:
+        float(value)
+        return True
+    except (TypeError, ValueError):
+        return False
+
+
+def _field_index(header, aliases):
+    normalized = {_normalized_name(value): index for index, value in enumerate(header)}
+    for alias in aliases:
+        if alias in normalized:
+            return normalized[alias]
+    return None
+
+
+def _value(values, index, line_number, name, required=True, default=0.0):
+    if index is None:
+        if required:
+            raise ValueError("path sensor CSV is missing {}".format(name))
+        return float(default)
+    try:
+        value = float(values[index])
+    except (IndexError, TypeError, ValueError) as error:
+        raise ValueError(
+            "invalid {} at path file line {}".format(name, line_number)
+        ) from error
+    if not math.isfinite(value):
+        raise ValueError(
+            "non-finite {} at path file line {}".format(name, line_number)
+        )
+    return value
+
+
+def _append_unique(points, point):
+    if not points or math.dist(
+        (point.x_m, point.y_m, point.z_m),
+        (points[-1].x_m, points[-1].y_m, points[-1].z_m),
+    ) > 1e-6:
+        points.append(point)
+
+
+def _load_enu_rows(header, rows, line_numbers):
+    x_index = _field_index(header, {"globalenuxm", "x"})
+    y_index = _field_index(header, {"globalenuym", "y"})
+    z_index = _field_index(header, {"globalenuzm", "z"})
+    if x_index is None or y_index is None:
+        return None
+
+    points = []
+    for values, line_number in zip(rows, line_numbers):
+        point = PathPoint(
+            _value(values, x_index, line_number, "ENU x"),
+            _value(values, y_index, line_number, "ENU y"),
+            _value(values, z_index, line_number, "ENU z", required=False),
+        )
+        _append_unique(points, point)
+    return points
+
+
+def _load_gps_sensor_rows(header, rows, line_numbers, gps_projection):
+    latitude_index = _field_index(
+        header, {"latitude", "lat", "gpslatitude", "latitudedeg"}
+    )
+    longitude_index = _field_index(
+        header,
+        {"longitude", "lon", "lng", "gpslongitude", "longitudedeg"},
+    )
+    altitude_index = _field_index(
+        header, {"altitude", "alt", "gpsaltitude", "altitudem"}
+    )
+    east_offset_index = _field_index(
+        header, {"eastoffset", "eastingoffset", "eoffset"}
+    )
+    north_offset_index = _field_index(
+        header, {"northoffset", "northingoffset", "noffset"}
+    )
+    if latitude_index is None or longitude_index is None:
+        return None
+    if (east_offset_index is None) != (north_offset_index is None):
+        raise ValueError("GPS path must provide both eastOffset and northOffset")
+
+    records = []
+    for values, line_number in zip(rows, line_numbers):
+        latitude = _value(values, latitude_index, line_number, "latitude")
+        longitude = _value(values, longitude_index, line_number, "longitude")
+        altitude = _value(values, altitude_index, line_number, "altitude")
+        if not -90.0 <= latitude <= 90.0 or not -180.0 <= longitude <= 180.0:
             raise ValueError(
-                "path CSV needs global_enu_x_m/global_enu_y_m or x/y columns"
+                "invalid latitude/longitude at path file line {}".format(line_number)
             )
-        points = []
-        for line_number, row in enumerate(reader, start=2):
-            try:
-                point = PathPoint(
-                    float(row[keys[0]]),
-                    float(row[keys[1]]),
-                    float(row.get(keys[2], 0.0) or 0.0),
-                )
-            except (TypeError, ValueError, KeyError) as error:
-                raise ValueError("invalid path value at CSV line {}".format(line_number)) from error
-            if not all(math.isfinite(value) for value in (point.x_m, point.y_m, point.z_m)):
-                raise ValueError("non-finite path value at CSV line {}".format(line_number))
-            if not points or math.dist(
-                (point.x_m, point.y_m, point.z_m),
-                (points[-1].x_m, points[-1].y_m, points[-1].z_m),
-            ) > 1e-6:
-                points.append(point)
+        east_offset = (
+            None
+            if east_offset_index is None
+            else _value(values, east_offset_index, line_number, "eastOffset")
+        )
+        north_offset = (
+            None
+            if north_offset_index is None
+            else _value(values, north_offset_index, line_number, "northOffset")
+        )
+        records.append((latitude, longitude, altitude, east_offset, north_offset))
+
+    offsets_present = [record[3] is not None and record[4] is not None for record in records]
+    if any(offsets_present) and not all(offsets_present):
+        raise ValueError("eastOffset and northOffset must be present on every GPS row")
+
+    crs = "EPSG:32652" if gps_projection is None else gps_projection.crs
+    origin_z = 0.0 if gps_projection is None else gps_projection.origin_z_m
+    if all(offsets_present):
+        origin_x, origin_y = records[0][3], records[0][4]
+        for record in records[1:]:
+            if abs(record[3] - origin_x) > 1e-3 or abs(record[4] - origin_y) > 1e-3:
+                raise ValueError("GPS eastOffset/northOffset must be constant for one path")
+    elif gps_projection is not None:
+        origin_x = gps_projection.origin_x_m
+        origin_y = gps_projection.origin_y_m
+    else:
+        raise ValueError(
+            "GPS path needs eastOffset/northOffset columns or an MGeo projection"
+        )
+
+    converter = GpsToMapEnu(
+        MapProjection(crs, float(origin_x), float(origin_y), float(origin_z))
+    )
+    points = []
+    for latitude, longitude, altitude, _east_offset, _north_offset in records:
+        _append_unique(
+            points,
+            PathPoint(*converter.convert(latitude, longitude, altitude)),
+        )
+    return points
+
+
+def load_path_csv(filename, gps_projection=None):
+    """Load ENU CSV or MORAI GPS sensor-export rows as map-local ENU points.
+
+    GPS sensor rows may be a headered CSV containing latitude, longitude,
+    altitude, eastOffset and northOffset, or the documented headerless
+    five-value text format. Extra IMU columns in a combined CSV are ignored;
+    live IMU UDP remains the vehicle-state input during tracking.
+    """
+    filename = os.path.abspath(os.path.expanduser(filename))
+    with open(filename, encoding="utf-8-sig") as stream:
+        source_lines = [
+            (line_number, line.strip())
+            for line_number, line in enumerate(stream, start=1)
+            if line.strip() and not line.lstrip().startswith("#")
+        ]
+    if not source_lines:
+        raise ValueError("path file is empty")
+
+    parsed = [(line_number, _split_sensor_line(line)) for line_number, line in source_lines]
+    first_values = parsed[0][1]
+    has_header = not all(_numeric(value) for value in first_values)
+    if has_header:
+        header = first_values
+        data = parsed[1:]
+    else:
+        # Official MORAI GPS sensor save format:
+        # latitude longitude altitude eastOffset northOffset
+        header = ["latitude", "longitude", "altitude", "eastOffset", "northOffset"]
+        data = parsed
+    if not data:
+        raise ValueError("path file contains a header but no data rows")
+
+    rows = [values for _line_number, values in data]
+    line_numbers = [line_number for line_number, _values in data]
+    points = _load_enu_rows(header, rows, line_numbers)
+    if points is None:
+        points = _load_gps_sensor_rows(
+            header, rows, line_numbers, gps_projection
+        )
+    if points is None:
+        raise ValueError(
+            "path file needs ENU x/y columns or GPS latitude/longitude/altitude "
+            "with eastOffset/northOffset"
+        )
     if len(points) < 2:
         raise ValueError("path CSV must contain at least two distinct points")
     return points
