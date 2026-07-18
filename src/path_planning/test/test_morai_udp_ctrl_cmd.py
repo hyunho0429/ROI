@@ -39,6 +39,8 @@ class MoraiUdpCtrlCmdTest(unittest.TestCase):
         self.assertEqual(packet[18:30], bytes(12))
         fields = struct.unpack_from("<BBBffffff", packet, 30)
         self.assertEqual(fields[:3], (2, 4, 1))
+        self.assertEqual(fields[3], 0.0)  # velocity command is unused in type 1
+        self.assertEqual(fields[4], 0.0)  # acceleration command is unused in type 1
         self.assertAlmostEqual(fields[5], 0.3)
         self.assertAlmostEqual(fields[7], -0.25)
         self.assertEqual(fields[8], 0.0)

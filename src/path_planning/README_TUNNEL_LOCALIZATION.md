@@ -19,7 +19,7 @@ MORAI 네트워크 포트 예시는 다음과 같다. 실제 Sensor/Network Sett
 | GPS | SIM → 코드 | 3001 |
 | IMU | SIM → 코드 | 4001 |
 | Competition Vehicle Status | SIM → 코드 | 909 |
-| CollisionData | SIM → 코드 | 5678 |
+| CollisionData | SIM → 코드 | 907 |
 | Ego Ctrl Cmd | 코드 → SIM | 9090 |
 
 경로 CSV가 아직 없다면 먼저 키보드로 주행해 기록한다.

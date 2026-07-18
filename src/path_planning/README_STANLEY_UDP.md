@@ -123,10 +123,11 @@ Destination/Host IP와 Port를 이 값과 일치시켜야 한다.
 | GPS | SIM → 코드 | 3001 |
 | IMU | SIM → 코드 | 4001 |
 | Competition Vehicle Status | SIM → 코드 | 909 |
-| CollisionData | SIM → 코드 | 5678 |
+| CollisionData | SIM → 코드 | 907 |
 | Ego Ctrl Cmd | 코드 → SIM | 9090 |
 
-Competition Status의 909처럼 1024 미만 포트는 Linux에서 권한이 필요할 수 있다.
+CollisionData 907과 Competition Status 909처럼 1024 미만 포트는 Linux에서
+권한이 필요할 수 있다.
 가능하면 MORAI와 코드 양쪽 포트를 1024 이상으로 바꾸고, 대회 설정상 909를
 유지해야 하면 실행 환경의 권한 설정을 확인한다.
 
@@ -155,7 +156,7 @@ sudo "$(which python3)" src/path_planning/src/morai_stanley_ins_udp.py \
 ```
 
 위 명령에서 생략한 기본값은 코드의 `morai_competition_config.py`에 있다.
-GPS `3001`, IMU `4001`, Competition Status `909`, CollisionData `5678`,
+GPS `3001`, IMU `4001`, Competition Status `909`, CollisionData `907`,
 제어 목적지 `192.168.0.170:9090`, 목표 속도 `10 km/h`이다. 목표 속도는
 고정값이고, INS가 추정한 현재 속도와의 오차로 accel/brake를 계산한다.
 

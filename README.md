@@ -58,7 +58,7 @@ runner:
 
 The competition UDP values are defined in
 `src/path_planning/src/path_planning/morai_competition_config.py`: GPS `3001`,
-IMU `4001`, Competition Status `909`, CollisionData `5678`, control destination
+IMU `4001`, Competition Status `909`, CollisionData `907`, control destination
 `192.168.0.170:9090`, and target speed `10 km/h`. They do not need to be
 repeated on the command line.
 
