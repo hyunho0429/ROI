@@ -816,3 +816,6 @@ FodyWeavers.xsd
 # Additional files built by Visual Studio
 
 # End of https://www.toptal.com/developers/gitignore/api/python,c,c++,ros,ros2,visualstudiocode,visualstudio,macos,linux,windows,cmake,opencv,ninja
+
+# Runtime path recordings
+src/path_planning/data/*.csv
