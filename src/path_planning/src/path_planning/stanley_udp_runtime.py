@@ -12,6 +12,16 @@ from path_planning.coordinates import GpsToMapEnu, GpsToRecordedLocalEnu, MapPro
 from path_planning.localization_dead_reckoning import SpeedAidedDeadReckoning
 from path_planning.localization_ins import InsErrorStateEkf
 from path_planning.longitudinal_controller import PedalSpeedController
+from path_planning.morai_competition_config import (
+    BIND_IP,
+    COLLISION_PORT,
+    COMPETITION_STATUS_PORT,
+    CONTROL_IP,
+    CONTROL_PORT,
+    GPS_PORT,
+    IMU_PORT,
+    TARGET_SPEED_KMH,
+)
 from path_planning.morai_udp_collision_data import (
     CollisionPacketError,
     parse_collision_data_26r1,
@@ -81,15 +91,17 @@ def argument_parser(localization_mode):
     parser.add_argument(
         "--path", default=DEFAULT_PATH, help="ENU CSV or MORAI GPS sensor path file"
     )
-    parser.add_argument("--bind-ip", default="0.0.0.0")
-    parser.add_argument("--gps-port", type=int, default=3001)
-    parser.add_argument("--imu-port", type=int, default=4001)
-    parser.add_argument("--competition-status-port", type=int, default=909)
-    parser.add_argument("--collision-port", type=int, default=5678)
-    parser.add_argument("--control-ip", default="127.0.0.1")
-    parser.add_argument("--control-port", type=int, default=9090)
+    parser.add_argument("--bind-ip", default=BIND_IP)
+    parser.add_argument("--gps-port", type=int, default=GPS_PORT)
+    parser.add_argument("--imu-port", type=int, default=IMU_PORT)
+    parser.add_argument(
+        "--competition-status-port", type=int, default=COMPETITION_STATUS_PORT
+    )
+    parser.add_argument("--collision-port", type=int, default=COLLISION_PORT)
+    parser.add_argument("--control-ip", default=CONTROL_IP)
+    parser.add_argument("--control-port", type=int, default=CONTROL_PORT)
     parser.add_argument("--control-rate-hz", type=float, default=20.0)
-    parser.add_argument("--target-speed-kmh", type=float, default=10.0)
+    parser.add_argument("--target-speed-kmh", type=float, default=TARGET_SPEED_KMH)
     parser.add_argument("--stanley-gain", type=float, default=0.22)
     parser.add_argument("--softening-speed", type=float, default=3.0)
     parser.add_argument(
@@ -467,11 +479,11 @@ def run(localization_mode, arguments):
                     normalized_steering = max(
                         -1.0, min(1.0, normalized_steering)
                     )
-                    # The route CSV supplies geometry only.  Longitudinal
-                    # control tracks one explicit fixed speed.
+                    # INS estimates the current speed; the desired speed is a
+                    # separate, fixed competition setting.
                     target_speed_mps = arguments.target_speed_kmh / 3.6
                     accel, brake = speed_controller.compute(
-                        target_speed_mps, status_speed_mps, now
+                        target_speed_mps, state.speed_mps, now
                     )
                     command = pedal_command(
                         accel, brake, normalized_steering
@@ -520,7 +532,7 @@ def run(localization_mode, arguments):
                             state.x_m,
                             state.y_m,
                             state.z_m,
-                            status_speed_mps,
+                            state.speed_mps,
                             target_speed_mps,
                             math.degrees(state.yaw_rad),
                             math.degrees(result.path_yaw_rad),

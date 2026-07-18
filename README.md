@@ -56,13 +56,15 @@ ENU CSV conversion and waypoint preprocessing without its ROS dependencies.
 Install `src/path_planning/requirements.txt`, then run the recommended INS
 runner:
 
+The competition UDP values are defined in
+`src/path_planning/src/path_planning/morai_competition_config.py`: GPS `3001`,
+IMU `4001`, Competition Status `909`, CollisionData `5678`, control destination
+`192.168.0.170:9090`, and target speed `10 km/h`. They do not need to be
+repeated on the command line.
+
 ```bash
 python3 src/path_planning/src/morai_stanley_ins_udp.py \
-  --path src/path_planning/data/morai_global_path.csv \
-  --gps-port 3001 --imu-port 4001 \
-  --competition-status-port 909 --collision-port 5678 \
-  --control-ip 127.0.0.1 --control-port 9090 \
-  --target-speed-kmh 10
+  --path src/path_planning/data/morai_global_path.csv
 ```
 
 See `src/path_planning/README_STANLEY_UDP.md` for the MORAI 26.R1 public protocol basis,
@@ -72,7 +74,8 @@ For comparison, the speed-aided dead-reckoning alternative remains available:
 
 ```bash
 # Competition-speed-aided dead reckoning
-python3 src/path_planning/src/morai_stanley_dead_reckoning_udp.py --target-speed-kmh 10
+python3 src/path_planning/src/morai_stanley_dead_reckoning_udp.py \
+  --path src/path_planning/data/morai_global_path.csv
 ```
 
 Both continue through a configurable GPS outage while IMU and Competition

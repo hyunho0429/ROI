@@ -61,13 +61,6 @@ body-to-ENU quaternion, gyro bias와 accelerometer bias이고, 15상태 오차 �
 ```bash
 python3 src/path_planning/src/morai_stanley_ins_udp.py \
   --path src/path_planning/data/morai_global_path.csv \
-  --gps-port 3001 \
-  --imu-port 4001 \
-  --competition-status-port 909 \
-  --collision-port 5678 \
-  --control-ip 127.0.0.1 \
-  --control-port 9090 \
-  --target-speed-kmh 10 \
   --max-gps-outage 120
 ```
 
@@ -102,13 +95,6 @@ position_dot = R_body_to_ENU @ [vehicle_speed, 0, 0]
 ```bash
 python3 src/path_planning/src/morai_stanley_dead_reckoning_udp.py \
   --path src/path_planning/data/morai_global_path.csv \
-  --gps-port 3001 \
-  --imu-port 4001 \
-  --competition-status-port 909 \
-  --collision-port 5678 \
-  --control-ip 127.0.0.1 \
-  --control-port 9090 \
-  --target-speed-kmh 10 \
   --max-gps-outage 120
 ```
 

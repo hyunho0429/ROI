@@ -1,4 +1,4 @@
-"""Parser for MORAI SIM: Drive 26.R1 and observed 25.01 IMU UDP packets."""
+"""Parser for MORAI SIM: Drive 26.R1 and legacy IMU UDP packets."""
 
 import math
 import struct
@@ -25,16 +25,15 @@ class ImuMeasurement:
 
 
 def parse_imu_packet(packet):
-    """Parse an official 107-byte or observed 115-byte IMU datagram.
+    """Parse an official 26.R1 115-byte or legacy 107-byte IMU datagram.
 
     MORAI puts quaternion components on the wire as w, x, y, z.  The returned
     tuple is deliberately converted to the conventional x, y, z, w order.
 
-    The 25.01 competition build has been observed sending an undocumented
-    eight-byte extension.  It can occur adjacent to the ten documented
-    doubles, so both possible windows are checked and only a window containing
-    a unit quaternion is accepted.  The extension itself is intentionally
-    ignored.
+    In 26.R1, bytes 25-32 are uint32 seconds/nanoseconds and the ten doubles
+    begin at byte 33.  The legacy 107-byte format has no timestamp and begins
+    the doubles at byte 25.  Some 25.01 builds report data_length 88 instead of
+    80 for the 115-byte packet, so that length is accepted for compatibility.
     """
     if len(packet) not in (PACKET_SIZE, EXTENDED_PACKET_SIZE):
         raise ImuPacketError(
@@ -59,7 +58,7 @@ def parse_imu_packet(packet):
     if packet[-2:] != PACKET_TAIL:
         raise ImuPacketError("unexpected IMU packet tail")
 
-    offsets = (25,) if len(packet) == PACKET_SIZE else (25, 33)
+    offsets = (25,) if len(packet) == PACKET_SIZE else (33,)
     candidates = []
     for offset in offsets:
         values = struct.unpack_from("<10d", packet, offset)

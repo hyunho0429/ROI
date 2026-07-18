@@ -215,6 +215,12 @@ class StanleyControllerTest(unittest.TestCase):
     def test_ins_runtime_defaults_to_fixed_ten_kmh_strict_stanley(self):
         arguments = argument_parser("ins").parse_args([])
         self.assertEqual(arguments.target_speed_kmh, 10.0)
+        self.assertEqual(arguments.gps_port, 3001)
+        self.assertEqual(arguments.imu_port, 4001)
+        self.assertEqual(arguments.competition_status_port, 909)
+        self.assertEqual(arguments.collision_port, 5678)
+        self.assertEqual(arguments.control_ip, "192.168.0.170")
+        self.assertEqual(arguments.control_port, 9090)
         self.assertEqual(arguments.control_point_offset, 3.0)
         self.assertEqual(arguments.morai_steer_sign, 1.0)
         self.assertEqual(arguments.speed_kp, 0.35)

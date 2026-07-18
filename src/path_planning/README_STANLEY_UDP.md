@@ -13,7 +13,7 @@ GPS UDP ─┐
 IMU UDP ─┼─> 15-state EKF-INS ─> x, y, z, yaw, speed ─> Stanley
 Status ──┘                                           └─> steering
 
-Competition speed ─> PI speed control ─> accel / brake
+INS estimated speed ─> PI speed control ─> accel / brake
 CollisionData ─────────────────────────> emergency brake
 ```
 
@@ -115,8 +115,8 @@ steering = heading_gain * heading_error - cte_gain * cte_term
 
 ## 네트워크 설정
 
-아래 값은 코드 기본값이다. MORAI의 Destination/Host IP와 Port를 실행 옵션에
-맞춰야 한다.
+아래 값은 `morai_competition_config.py`에 정의된 코드 기본값이다. MORAI의
+Destination/Host IP와 Port를 이 값과 일치시켜야 한다.
 
 | UDP 항목 | 방향 | 기본 포트 |
 |---|---|---:|
@@ -130,12 +130,20 @@ Competition Status의 909처럼 1024 미만 포트는 Linux에서 권한이 필�
 가능하면 MORAI와 코드 양쪽 포트를 1024 이상으로 바꾸고, 대회 설정상 909를
 유지해야 하면 실행 환경의 권한 설정을 확인한다.
 
-표준 `Ego Ctrl Cmd`는 55 byte, `data_length=23`으로 전송한다. payload는
-`ctrl_mode, gear, longCmdType, velocity, acceleration, accel, brake, steering`이며
-후륜 조향 필드를 붙이지 않는다. 실행 직후 안전 제동 상태로 `ctrl_mode=2`,
+26.R1 `Ego Ctrl Cmd`는 59 byte, `data_length=27`으로 전송한다. payload는
+`ctrl_mode, gear, longCmdType, velocity, acceleration, accel, brake,
+front_steer, rear_steer`이며 사용하지 않는 후륜 조향값은 0이다. 실행 직후
+안전 제동 상태로 `ctrl_mode=2`,
 `gear=4` 패킷을 반복 전송한다. MORAI UI에서 기존 AutoMode로 불리던 모드는
 24.R2부터 `AV-ExternalCtrl`로 표시되므로, Competition Status가 mode 2와 D를
 회신한 뒤에만 가속을 시작한다.
+
+이 프로그램은 ROS 토픽을 구독하지 않고 UDP 데이터그램만 사용한다. 공식
+26.R1 문서의 ROS 기본 토픽은 GPS `/gps`, IMU `/Imu`지만 UDP에서는 토픽명이
+아니라 센서 Network Setting의 Destination IP/Port가 중요하다. 현재 파서는
+공식 GPS NMEA0183 RMC/GGA, IMU 115 byte, CollisionData 181 byte 구조에 맞는다.
+`Competition Vehicle Status`는 공개 26.R1 문서에 정의가 없어, 대회 25.01에서
+관측한 181/229 byte 패킷만 엄격히 검사한다.
 
 ## 실행
 
@@ -143,15 +151,13 @@ Competition Status의 909처럼 1024 미만 포트는 Linux에서 권한이 필�
 python3 -m pip install -r src/path_planning/requirements.txt
 
 sudo "$(which python3)" src/path_planning/src/morai_stanley_ins_udp.py \
-  --path src/path_planning/data/morai_global_path.csv \
-  --gps-port 3001 \
-  --imu-port 4001 \
-  --competition-status-port 909 \
-  --collision-port 5678 \
-  --control-ip 192.168.0.170 \
-  --control-port 9090 \
-  --target-speed-kmh 10
+  --path src/path_planning/data/morai_global_path.csv
 ```
+
+위 명령에서 생략한 기본값은 코드의 `morai_competition_config.py`에 있다.
+GPS `3001`, IMU `4001`, Competition Status `909`, CollisionData `5678`,
+제어 목적지 `192.168.0.170:9090`, 목표 속도 `10 km/h`이다. 목표 속도는
+고정값이고, INS가 추정한 현재 속도와의 오차로 accel/brake를 계산한다.
 
 `--control-ip`에는 MORAI가 실행되는 PC의 IPv4 주소를 넣는다. 같은 PC라면
 `127.0.0.1`을 사용할 수 있다.

@@ -6,10 +6,9 @@ from dataclasses import dataclass
 
 
 PACKET_HEADER = b"#MoraiCtrlCmd$"
-# Standard Ego Ctrl Cmd used by MORAI 25.01 and the public 23/24 protocol:
-# 3 one-byte mode fields + 5 float fields.
-PACKET_DATA_LENGTH = 23
-PACKET_SIZE = 55
+# MORAI 26.R1: 3 one-byte mode fields + 6 float fields, including rear steer.
+PACKET_DATA_LENGTH = 27
+PACKET_SIZE = 59
 PACKET_TAIL = b"\r\n"
 KEYBOARD_CTRL_MODE = 1
 EXTERNAL_CTRL_MODE = 2
@@ -28,10 +27,11 @@ class EgoCtrlCommand26R1:
     accel: float = 0.0
     brake: float = 0.0
     steering_normalized: float = 0.0
+    rear_steering_normalized: float = 0.0
 
 
 def encode_ego_ctrl_cmd_26r1(command):
-    """Encode one standard 55-byte Ego Ctrl Cmd and enforce throttle mode."""
+    """Encode one official 26.R1 59-byte command and enforce throttle mode."""
     if command.ctrl_mode not in (1, 2):
         raise ValueError("ctrl_mode must be 1 (keyboard) or 2 (auto)")
     if command.gear not in range(6):
@@ -45,6 +45,7 @@ def encode_ego_ctrl_cmd_26r1(command):
         command.accel,
         command.brake,
         command.steering_normalized,
+        command.rear_steering_normalized,
     )
     if not all(math.isfinite(value) for value in values):
         raise ValueError("control command contains a non-finite value")
@@ -54,12 +55,14 @@ def encode_ego_ctrl_cmd_26r1(command):
         raise ValueError("brake must be between 0 and 1")
     if not -1.0 <= command.steering_normalized <= 1.0:
         raise ValueError("steering_normalized must be between -1 and 1")
+    if not -1.0 <= command.rear_steering_normalized <= 1.0:
+        raise ValueError("rear_steering_normalized must be between -1 and 1")
     packet = bytearray(PACKET_SIZE)
     packet[: len(PACKET_HEADER)] = PACKET_HEADER
     struct.pack_into("<I", packet, 14, PACKET_DATA_LENGTH)
     # bytes 18:30 are the documented 12-byte auxiliary field and remain zero.
     struct.pack_into(
-        "<BBBfffff",
+        "<BBBffffff",
         packet,
         30,
         command.ctrl_mode,

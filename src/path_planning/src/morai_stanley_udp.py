@@ -12,6 +12,16 @@ import time
 from path_planning.coordinates import GpsToMapEnu, GpsToRecordedLocalEnu, MapProjection
 from path_planning.localization import PlanarGpsImuEkf
 from path_planning.longitudinal_controller import PedalSpeedController
+from path_planning.morai_competition_config import (
+    BIND_IP,
+    COLLISION_PORT,
+    COMPETITION_STATUS_PORT,
+    CONTROL_IP,
+    CONTROL_PORT,
+    GPS_PORT,
+    IMU_PORT,
+    TARGET_SPEED_KMH,
+)
 from path_planning.morai_udp_collision_data import (
     CollisionPacketError,
     parse_collision_data_26r1,
@@ -75,15 +85,17 @@ def parse_arguments(argv=None):
     parser.add_argument(
         "--path", default=DEFAULT_PATH, help="ENU CSV or MORAI GPS sensor path file"
     )
-    parser.add_argument("--bind-ip", default="0.0.0.0")
-    parser.add_argument("--gps-port", type=int, default=3001)
-    parser.add_argument("--imu-port", type=int, default=4001)
-    parser.add_argument("--competition-status-port", type=int, default=909)
-    parser.add_argument("--collision-port", type=int, default=5678)
-    parser.add_argument("--control-ip", default="127.0.0.1")
-    parser.add_argument("--control-port", type=int, default=9090)
+    parser.add_argument("--bind-ip", default=BIND_IP)
+    parser.add_argument("--gps-port", type=int, default=GPS_PORT)
+    parser.add_argument("--imu-port", type=int, default=IMU_PORT)
+    parser.add_argument(
+        "--competition-status-port", type=int, default=COMPETITION_STATUS_PORT
+    )
+    parser.add_argument("--collision-port", type=int, default=COLLISION_PORT)
+    parser.add_argument("--control-ip", default=CONTROL_IP)
+    parser.add_argument("--control-port", type=int, default=CONTROL_PORT)
     parser.add_argument("--control-rate-hz", type=float, default=20.0)
-    parser.add_argument("--target-speed-kmh", type=float, default=10.0)
+    parser.add_argument("--target-speed-kmh", type=float, default=TARGET_SPEED_KMH)
     parser.add_argument("--stanley-gain", type=float, default=0.22)
     parser.add_argument("--softening-speed", type=float, default=3.0)
     parser.add_argument("--max-steering-deg", type=float, default=21.77)

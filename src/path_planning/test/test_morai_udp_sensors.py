@@ -42,11 +42,11 @@ class MoraiUdpSensorsTest(unittest.TestCase):
         self.assertEqual(measurement.angular_velocity_radps, (0.1, 0.2, 0.3))
         self.assertEqual(measurement.linear_acceleration_mps2, (1.0, 2.0, 3.0))
 
-    def test_parses_115_byte_imu_packet_with_leading_extension(self):
+    def test_parses_official_115_byte_imu_packet_with_timestamp(self):
         yaw = math.radians(45.0)
         packet = bytearray(115)
         packet[:9] = b"#IMUData$"
-        struct.pack_into("<I", packet, 9, 88)
+        struct.pack_into("<I", packet, 9, 80)
         values = (
             math.cos(yaw / 2.0),
             0.0,
@@ -59,7 +59,7 @@ class MoraiUdpSensorsTest(unittest.TestCase):
             2.0,
             3.0,
         )
-        struct.pack_into("<d", packet, 25, 1234.5)
+        struct.pack_into("<II", packet, 25, 1234, 500000000)
         struct.pack_into("<10d", packet, 33, *values)
         packet[-2:] = b"\r\n"
 
@@ -69,7 +69,7 @@ class MoraiUdpSensorsTest(unittest.TestCase):
         self.assertEqual(measurement.angular_velocity_radps, (0.1, 0.2, 0.3))
         self.assertEqual(measurement.linear_acceleration_mps2, (1.0, 2.0, 3.0))
 
-    def test_parses_115_byte_imu_packet_with_trailing_extension(self):
+    def test_accepts_25_01_115_byte_packet_reporting_length_88(self):
         yaw = math.radians(45.0)
         packet = bytearray(115)
         packet[:9] = b"#IMUData$"
@@ -86,8 +86,8 @@ class MoraiUdpSensorsTest(unittest.TestCase):
             2.0,
             3.0,
         )
-        struct.pack_into("<10d", packet, 25, *values)
-        struct.pack_into("<d", packet, 105, 1234.5)
+        struct.pack_into("<II", packet, 25, 1234, 500000000)
+        struct.pack_into("<10d", packet, 33, *values)
         packet[-2:] = b"\r\n"
 
         measurement = parse_imu_packet(bytes(packet))
