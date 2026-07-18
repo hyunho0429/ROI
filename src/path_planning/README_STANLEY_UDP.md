@@ -1,5 +1,10 @@
 # MORAI 대회용 UDP Stanley 제어기
 
+GPS 터널 음영 주행용 INS 및 dead-reckoning 실행 방법은
+[`README_TUNNEL_LOCALIZATION.md`](README_TUNNEL_LOCALIZATION.md)를 참고한다.
+기존 `morai_stanley_udp.py`는 GPS가 오래 끊기면 제동하는 평면 EKF 기준
+실행기이며, 터널 시험에는 두 전용 실행기 중 하나를 사용한다.
+
 `morai_stanley_udp.py`는 ROS 없이 다음 대회 허용 인터페이스만 사용한다.
 
 - `[UDP] Ego Ctrl Cmd`: 조향 및 accel/brake 송신

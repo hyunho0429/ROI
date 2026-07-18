@@ -56,6 +56,19 @@ python3 src/path_planning/src/morai_stanley_udp.py \
 See `src/path_planning/README_STANLEY_UDP.md` for the MORAI 26.R1 public protocol basis,
 coordinate conversion, network settings, safety behavior, and tuning values.
 
+For GPS-denied tunnel sections, choose one of the two standalone controllers:
+
+```bash
+# 15-state strapdown INS error-state EKF
+python3 src/path_planning/src/morai_stanley_ins_udp.py --target-speed-kmh 10
+
+# Competition-speed-aided dead reckoning
+python3 src/path_planning/src/morai_stanley_dead_reckoning_udp.py --target-speed-kmh 10
+```
+
+Both continue through a configurable GPS outage while IMU and Competition
+Vehicle Status remain fresh. See `src/path_planning/README_TUNNEL_LOCALIZATION.md`.
+
 For a fixed start and goal node:
 
 ```bash

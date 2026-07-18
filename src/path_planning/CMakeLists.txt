@@ -23,6 +23,8 @@ catkin_install_python(PROGRAMS
   src/global_path_kcity_dijkstra.py
   src/morai_global_csv_recorder.py
   src/morai_stanley_udp.py
+  src/morai_stanley_ins_udp.py
+  src/morai_stanley_dead_reckoning_udp.py
   src/mgeo_json_pub.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
