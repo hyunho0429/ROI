@@ -14,6 +14,10 @@ if PACKAGE_SRC not in sys.path:
 
 from morai_global_csv_recorder import MoraiGlobalCsvRecorder, status_to_sample
 from path_planning.morai_udp_competition_status import (
+    BASE_PACKET_DATA_LENGTH,
+    BASE_PACKET_SIZE,
+    EXTENDED_PACKET_DATA_LENGTH,
+    EXTENDED_PACKET_SIZE,
     PACKET_DATA_LENGTH,
     PACKET_HEADER,
     PACKET_SIZE,
@@ -22,10 +26,15 @@ from path_planning.morai_udp_competition_status import (
 )
 
 
-def make_packet():
-    packet = bytearray(PACKET_SIZE)
+def make_packet(packet_size=EXTENDED_PACKET_SIZE):
+    data_length = (
+        BASE_PACKET_DATA_LENGTH
+        if packet_size == BASE_PACKET_SIZE
+        else EXTENDED_PACKET_DATA_LENGTH
+    )
+    packet = bytearray(packet_size)
     packet[:11] = PACKET_HEADER
-    struct.pack_into("<I", packet, 11, PACKET_DATA_LENGTH)
+    struct.pack_into("<I", packet, 11, data_length)
     struct.pack_into("<II", packet, 27, 123, 500_000_000)
     struct.pack_into("<bb", packet, 35, 2, 4)
     struct.pack_into("<f", packet, 37, 36.0)
@@ -40,12 +49,22 @@ def make_packet():
     struct.pack_into("<fff", packet, 125, 1.0, 2.0, 3.0)
     struct.pack_into("<f", packet, 137, -5.0)
     packet[141:179] = b"A123".ljust(38, b"\x00")
-    struct.pack_into("<12f", packet, 179, *[float(index) for index in range(12)])
-    packet[227:229] = b"\r\n"
+    if packet_size == EXTENDED_PACKET_SIZE:
+        struct.pack_into("<12f", packet, 179, *[float(index) for index in range(12)])
+    packet[-2:] = b"\r\n"
     return bytes(packet)
 
 
 class MoraiUdpCompetitionStatusTest(unittest.TestCase):
+    def test_parses_observed_181_byte_competition_layout(self):
+        status = parse_competition_vehicle_status(make_packet(BASE_PACKET_SIZE))
+        self.assertEqual(status.position_m, (10.0, 20.0, 3.0))
+        self.assertEqual(status.rotation_deg, (1.0, 2.0, 90.0))
+        self.assertEqual(status.link_id, "A123")
+        self.assertEqual(status.tire_lateral_force, ())
+        self.assertEqual(status.side_slip_angle, ())
+        self.assertEqual(status.tire_cornering_stiffness, ())
+
     def test_parses_exact_229_byte_competition_layout(self):
         status = parse_competition_vehicle_status(make_packet())
         self.assertAlmostEqual(status.timestamp_sec, 123.5)
@@ -64,8 +83,8 @@ class MoraiUdpCompetitionStatusTest(unittest.TestCase):
             parse_competition_vehicle_status(make_packet()[:-48])
 
     def test_recorder_converts_status_units_and_resamples_3d(self):
-        first_packet = bytearray(make_packet())
-        second_packet = bytearray(make_packet())
+        first_packet = bytearray(make_packet(BASE_PACKET_SIZE))
+        second_packet = bytearray(make_packet(BASE_PACKET_SIZE))
         struct.pack_into("<fff", first_packet, 77, 0.0, 0.0, 0.0)
         struct.pack_into("<fff", second_packet, 77, 0.0, 0.0, 1.2)
 

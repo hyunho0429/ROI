@@ -10,9 +10,18 @@ from dataclasses import dataclass
 
 
 PACKET_HEADER = b"#MoraiInfo$"
-PACKET_DATA_LENGTH = 200
-PACKET_SIZE = 229
+BASE_PACKET_DATA_LENGTH = 152
+BASE_PACKET_SIZE = 181
+EXTENDED_PACKET_DATA_LENGTH = 200
+EXTENDED_PACKET_SIZE = 229
+# Backward-compatible aliases for code that builds the extended test packet.
+PACKET_DATA_LENGTH = EXTENDED_PACKET_DATA_LENGTH
+PACKET_SIZE = EXTENDED_PACKET_SIZE
 PACKET_TAIL = b"\r\n"
+SUPPORTED_LAYOUTS = {
+    BASE_PACKET_SIZE: BASE_PACKET_DATA_LENGTH,
+    EXTENDED_PACKET_SIZE: EXTENDED_PACKET_DATA_LENGTH,
+}
 
 
 class CompetitionStatusPacketError(ValueError):
@@ -49,11 +58,12 @@ def _floats(packet, offset, count):
 
 
 def parse_competition_vehicle_status(packet):
-    """Parse one exact 229-byte Competition Vehicle Status datagram."""
-    if len(packet) != PACKET_SIZE:
+    """Parse the observed 181-byte or extended 229-byte competition packet."""
+    packet_size = len(packet)
+    if packet_size not in SUPPORTED_LAYOUTS:
         raise CompetitionStatusPacketError(
-            "expected {} bytes, received {} (header={!r})".format(
-                PACKET_SIZE, len(packet), packet[:15]
+            "expected 181 or 229 bytes, received {} (header={!r})".format(
+                packet_size, packet[:15]
             )
         )
     if packet[:11] != PACKET_HEADER:
@@ -61,10 +71,11 @@ def parse_competition_vehicle_status(packet):
             "unexpected header {!r}".format(packet[:11])
         )
     data_length = struct.unpack_from("<I", packet, 11)[0]
-    if data_length != PACKET_DATA_LENGTH:
+    expected_data_length = SUPPORTED_LAYOUTS[packet_size]
+    if data_length != expected_data_length:
         raise CompetitionStatusPacketError(
             "expected data_length {}, received {}".format(
-                PACKET_DATA_LENGTH, data_length
+                expected_data_length, data_length
             )
         )
     if packet[-2:] != PACKET_TAIL:
@@ -96,9 +107,14 @@ def parse_competition_vehicle_status(packet):
         .decode("ascii", errors="replace")
         .strip()
     )
-    tire_lateral_force = _floats(packet, 179, 4)
-    side_slip_angle = _floats(packet, 195, 4)
-    tire_cornering_stiffness = _floats(packet, 211, 4)
+    if packet_size == EXTENDED_PACKET_SIZE:
+        tire_lateral_force = _floats(packet, 179, 4)
+        side_slip_angle = _floats(packet, 195, 4)
+        tire_cornering_stiffness = _floats(packet, 211, 4)
+    else:
+        tire_lateral_force = ()
+        side_slip_angle = ()
+        tire_cornering_stiffness = ()
 
     numeric_values = (
         signed_velocity_kmh,

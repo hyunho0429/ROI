@@ -4,7 +4,8 @@
 Status` UDP 패킷의 맵 원점 기준 ENU 위치를 CSV로 저장한다. 이 인터페이스는
 공개 문서의 `Ego Vehicle Status`와 별개로 취급한다.
 
-현재 파서는 대회용 229-byte packed 형식(`data_length=200`)만 허용한다.
+현재 파서는 실제 25.01에서 확인된 181-byte 형식(`data_length=152`)과 대회용
+229-byte 확장 형식(`data_length=200`)을 지원한다.
 패킷 길이, `#MoraiInfo$` 헤더, data length 또는 CRLF tail이 다르면 좌표를
 임의로 해석해 저장하지 않고 실제 수신 길이가 포함된 오류를 출력한다.
 
