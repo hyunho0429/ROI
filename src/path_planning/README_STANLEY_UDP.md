@@ -165,9 +165,11 @@ requesting AV-ExternalCtrl (ctrl_mode=2) and Drive (gear=4)
 Competition control state: ctrl_mode=2 (AV-ExternalCtrl), gear=4 (D)
 ```
 
-주행 로그의 `cmd=(accel,steering,brake)`를 확인한다. 정지인데 accel이 0보다
-큰데도 움직이지 않으면 코드의 경로 계산보다 MORAI Cmd Control의 Host IP/Port,
-외부 제어 활성화, gear D 및 `longCmdType 1` 수신 설정을 먼저 점검한다.
+주행 로그의 `cmd=(accel,normalized steering,brake)`와 Competition Status가
+회신한 `feedback=(accel,front steer deg,brake)`를 함께 확인한다. `cmd`의 accel이
+0보다 큰데 `feedback` accel이 계속 0이면 MORAI가 제어 패킷을 받지 못한 것이므로
+Cmd Control의 Host IP/Port를 점검한다. feedback에도 accel이 들어오는데 차량이
+움직이지 않으면 gear, 충돌 상태 또는 차량 dynamics 설정을 확인한다.
 
 ## 주요 튜닝 옵션
 

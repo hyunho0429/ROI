@@ -235,6 +235,7 @@ def run(arguments):
     latest_gps_time = latest_imu_time = latest_status_time = None
     status_speed_mps = None
     status_ctrl_mode = status_gear = None
+    status_accel_pedal = status_brake_pedal = status_front_steer_deg = 0.0
     last_drive_state = None
     collision_brake_until = 0.0
     invalid_counts = {kind: 0 for kind, _port in receive_channels}
@@ -322,6 +323,9 @@ def run(arguments):
                         status_speed_mps = abs(status.signed_velocity_kmh) / 3.6
                         status_ctrl_mode = status.ctrl_mode
                         status_gear = status.gear
+                        status_accel_pedal = status.accel_pedal
+                        status_brake_pedal = status.brake_pedal
+                        status_front_steer_deg = status.front_steer_deg
                         latest_status_time = received
                         drive_state = (status_ctrl_mode, status_gear)
                         if drive_state != last_drive_state:
@@ -447,7 +451,9 @@ def run(arguments):
                         "pos=({:.2f}, {:.2f}, {:.2f}) speed={:.2f}/{:.2f}m/s "
                         "yaw/path={:+.1f}/{:+.1f}deg herr={:+.1f}deg "
                         "cte={:+.2f}m steer(raw/filt)={:+.2f}/{:+.2f}deg "
-                        "cmd=({:.2f},{:+.2f},{:.2f}) remain={:.1f}m{}".format(
+                        "cmd=({:.2f},{:+.2f},{:.2f}) "
+                        "feedback=({:.2f},{:+.2f}deg,{:.2f}) "
+                        "remain={:.1f}m{}".format(
                             state.x_m,
                             state.y_m,
                             state.z_m,
@@ -462,6 +468,9 @@ def run(arguments):
                             command.accel,
                             command.steering_normalized,
                             command.brake,
+                            status_accel_pedal,
+                            status_front_steer_deg,
+                            status_brake_pedal,
                             result.remaining_distance_m,
                             " GOAL" if result.goal_reached else "",
                         )
