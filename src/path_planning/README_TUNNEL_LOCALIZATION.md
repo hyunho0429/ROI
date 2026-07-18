@@ -1,8 +1,9 @@
 # MORAI 터널용 Stanley 위치추정 실행기
 
-이 브랜치에는 GPS 음영 구간을 통과하기 위한 두 개의 독립 실행기가 있다. 두
-실행기 모두 ROS/catkin 없이 Python과 UDP만으로 실행되며 같은 경로 CSV, Stanley
-조향기, accel/brake PI 제어기와 충돌 제동을 사용한다.
+권장 구성은 GPS 음영 구간을 통과하는 `morai_stanley_ins_udp.py`이다. 비교 시험을
+위해 dead-reckoning 실행기도 유지한다. 두 실행기 모두 ROS/catkin 없이 Python과
+UDP만으로 실행되며 같은 경로 CSV, Stanley 조향기, accel/brake PI 제어기와 충돌
+제동을 사용한다.
 
 ## 공통 준비
 
@@ -36,6 +37,12 @@ northOffset`) 또는 이 GPS 열과 IMU 열이 합쳐진 CSV를 받는 경우에
 `origin_lat/origin_lon`이 함께 있으면 로더는 기록 당시 GPS 원점 기준 로컬 ENU를
 사용하고 실시간 GPS도 같은 원점으로 변환한다. 공식 GPS 5열 파일은 기존 K-City
 MGeo 원점 기준 ENU 변환을 사용한다.
+
+경로는 AutoVehicle 방식으로 최소 0.5 m 간격과 9점 이동평균을 적용한다. 횡제어는
+Pure Pursuit 목표점이나 lookahead distance 없이 최근접 segment 접선과 전륜축
+CTE만 사용하는 Stanley이다. `target_search_window`는 waypoint 인덱스 검색 범위일
+뿐 lookahead 거리가 아니다. CSV의 `target_speed`는 무시하고 기본 10 km/h를
+`longCmdType 1`의 accel/brake PI 제어로 추종한다.
 
 ## 1. INS error-state EKF 버전
 

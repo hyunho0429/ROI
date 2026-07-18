@@ -18,9 +18,11 @@ from path_planning.coordinates import GpsToRecordedLocalEnu, MapProjection
 from path_planning.stanley_controller import (
     PathPoint,
     StanleyController,
+    SteeringCommandFilter,
     load_path_csv,
     load_recorded_path_origin,
 )
+from path_planning.stanley_udp_runtime import argument_parser
 
 
 class StanleyControllerTest(unittest.TestCase):
@@ -64,7 +66,8 @@ class StanleyControllerTest(unittest.TestCase):
             [
                 PathPoint(0.0, 0.0, target_speed_mps=1.0),
                 PathPoint(10.0, 0.0, target_speed_mps=3.0),
-            ]
+            ],
+            control_point_offset_m=0.0,
         )
         result = controller.compute(5.0, 0.0, 0.0, 0.0, 1.0)
         self.assertAlmostEqual(result.target_speed_mps, 2.0)
@@ -162,6 +165,61 @@ class StanleyControllerTest(unittest.TestCase):
         result = controller.compute(5.0, 0.0, 0.0, math.radians(10.0), 5.0)
         self.assertLess(result.heading_error_rad, 0.0)
         self.assertLess(result.steering_rad, 0.0)
+
+    def test_stanley_uses_nearest_segment_heading_without_lookahead(self):
+        controller = StanleyController(
+            [
+                PathPoint(0.0, 0.0),
+                PathPoint(10.0, 0.0),
+                PathPoint(10.0, 10.0),
+            ],
+            control_point_offset_m=0.0,
+            waypoint_smoothing_window=1,
+        )
+        result = controller.compute(8.0, 0.0, 0.0, 0.0, 2.0)
+        self.assertAlmostEqual(result.path_yaw_rad, 0.0)
+        self.assertAlmostEqual(result.heading_error_rad, 0.0)
+
+    def test_waypoint_spacing_and_smoothing_are_applied(self):
+        controller = StanleyController(
+            [
+                PathPoint(0.0, 0.0),
+                PathPoint(0.1, 0.2),
+                PathPoint(1.0, 1.0),
+                PathPoint(2.0, 0.0),
+            ],
+            minimum_waypoint_spacing_m=0.5,
+            waypoint_smoothing_window=3,
+        )
+        self.assertEqual(controller.original_point_count, 4)
+        self.assertEqual(len(controller.points), 3)
+        self.assertAlmostEqual(controller.points[1].y_m, 1.0 / 3.0)
+
+    def test_target_index_does_not_move_backward_by_default(self):
+        controller = StanleyController(
+            [PathPoint(float(x), 0.0) for x in range(0, 101, 10)],
+            control_point_offset_m=0.0,
+            waypoint_smoothing_window=1,
+        )
+        forward = controller.compute(75.0, 0.0, 0.0, 0.0, 2.0)
+        backward = controller.compute(5.0, 0.0, 0.0, 0.0, 2.0)
+        self.assertGreaterEqual(backward.segment_index, forward.segment_index)
+
+    def test_steering_filter_limits_rate_after_initial_sample(self):
+        steering_filter = SteeringCommandFilter(
+            alpha=1.0, max_rate_radps=0.4, max_abs_rad=1.0
+        )
+        self.assertEqual(steering_filter.update(0.0, 1.0), 0.0)
+        self.assertAlmostEqual(steering_filter.update(1.0, 1.1), 0.04)
+
+    def test_ins_runtime_defaults_to_fixed_ten_kmh_strict_stanley(self):
+        arguments = argument_parser("ins").parse_args([])
+        self.assertEqual(arguments.target_speed_kmh, 10.0)
+        self.assertEqual(arguments.control_point_offset, 3.0)
+        self.assertEqual(arguments.morai_steer_sign, 1.0)
+        self.assertEqual(arguments.speed_kp, 0.35)
+        self.assertFalse(hasattr(arguments, "path_yaw_lookahead"))
+        self.assertEqual(arguments.target_search_window, 50)
 
     def test_planar_filter_requires_both_gps_and_imu(self):
         ekf = PlanarGpsImuEkf()

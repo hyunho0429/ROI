@@ -25,6 +25,7 @@ class StanleyResult:
     segment_index: int
     remaining_distance_m: float
     goal_reached: bool
+    path_yaw_rad: float
     target_speed_mps: float = None
 
 
@@ -378,26 +379,114 @@ def load_recorded_path_origin(filename):
     return _recorded_origin(header, rows, line_numbers)
 
 
+class SteeringCommandFilter:
+    """AutoVehicle-style low-pass and steering-rate limiter."""
+
+    def __init__(self, alpha=0.25, max_rate_radps=0.4, max_abs_rad=math.inf):
+        self.alpha = max(0.0, min(1.0, float(alpha)))
+        self.max_rate_radps = max(0.0, float(max_rate_radps))
+        self.max_abs_rad = abs(float(max_abs_rad))
+        self._last_steering = None
+        self._last_timestamp = None
+
+    def reset(self):
+        self._last_steering = None
+        self._last_timestamp = None
+
+    def update(self, steering_rad, timestamp):
+        steering = max(
+            -self.max_abs_rad, min(self.max_abs_rad, float(steering_rad))
+        )
+        timestamp = float(timestamp)
+        if self._last_steering is None:
+            self._last_steering = steering
+            self._last_timestamp = timestamp
+            return steering
+
+        dt = max(1e-3, timestamp - self._last_timestamp)
+        filtered = (
+            self.alpha * steering + (1.0 - self.alpha) * self._last_steering
+        )
+        maximum_delta = self.max_rate_radps * dt
+        delta = max(
+            -maximum_delta,
+            min(maximum_delta, filtered - self._last_steering),
+        )
+        self._last_steering = max(
+            -self.max_abs_rad,
+            min(self.max_abs_rad, self._last_steering + delta),
+        )
+        self._last_timestamp = timestamp
+        return self._last_steering
+
+
+def _preprocess_path_points(points, minimum_spacing_m, smoothing_window):
+    """Apply AutoVehicle waypoint spacing and moving-average smoothing."""
+    spaced = []
+    for point in points:
+        if not spaced or math.hypot(
+            point.x_m - spaced[-1].x_m, point.y_m - spaced[-1].y_m
+        ) >= minimum_spacing_m:
+            spaced.append(point)
+    if len(spaced) < 2:
+        raise ValueError("path needs at least two points after spacing")
+
+    window = max(1, int(smoothing_window))
+    if window <= 1 or len(spaced) < 3:
+        return spaced
+    half_window = window // 2
+    smoothed = []
+    for index, point in enumerate(spaced):
+        if index == 0 or index == len(spaced) - 1:
+            smoothed.append(point)
+            continue
+        first = max(0, index - half_window)
+        last = min(len(spaced), index + half_window + 1)
+        neighbors = spaced[first:last]
+        smoothed.append(
+            PathPoint(
+                sum(item.x_m for item in neighbors) / len(neighbors),
+                sum(item.y_m for item in neighbors) / len(neighbors),
+                sum(item.z_m for item in neighbors) / len(neighbors),
+                point.target_speed_mps,
+            )
+        )
+    return smoothed
+
+
 class StanleyController:
     def __init__(
         self,
         points,
-        gain=1.2,
-        softening_speed_mps=1.0,
-        max_steering_deg=36.25,
-        control_point_offset_m=0.0,
+        gain=0.22,
+        softening_speed_mps=3.0,
+        max_steering_deg=21.77,
+        control_point_offset_m=3.0,
+        heading_error_gain=1.0,
+        cross_track_error_gain=0.55,
+        cross_track_deadband_m=0.05,
+        minimum_waypoint_spacing_m=0.5,
+        waypoint_smoothing_window=9,
         z_distance_weight=0.25,
-        search_back_segments=10,
-        search_forward_segments=250,
+        search_back_segments=0,
+        search_forward_segments=50,
         goal_tolerance_m=2.0,
     ):
         if len(points) < 2:
             raise ValueError("StanleyController needs at least two path points")
-        self.points = list(points)
+        self.original_point_count = len(points)
+        self.points = _preprocess_path_points(
+            list(points),
+            max(0.0, float(minimum_waypoint_spacing_m)),
+            waypoint_smoothing_window,
+        )
         self.gain = float(gain)
         self.softening_speed_mps = float(softening_speed_mps)
         self.max_steering_rad = math.radians(float(max_steering_deg))
         self.control_point_offset_m = float(control_point_offset_m)
+        self.heading_error_gain = float(heading_error_gain)
+        self.cross_track_error_gain = float(cross_track_error_gain)
+        self.cross_track_deadband_m = max(0.0, float(cross_track_deadband_m))
         self.z_distance_weight = float(z_distance_weight)
         self.search_back_segments = int(search_back_segments)
         self.search_forward_segments = int(search_forward_segments)
@@ -453,6 +542,10 @@ class StanleyController:
         dx, dy = second.x_m - first.x_m, second.y_m - first.y_m
         length_xy = math.hypot(dx, dy)
         tangent_x, tangent_y = dx / length_xy, dy / length_xy
+        segment_3d = self._cumulative[index + 1] - self._cumulative[index]
+        progress = self._cumulative[index] + fraction * segment_3d
+        # Strict Stanley: the nearest path segment supplies the desired
+        # heading.  No Pure Pursuit-style look-ahead target is used.
         path_yaw = math.atan2(tangent_y, tangent_x)
         heading_error = wrap_angle(path_yaw - yaw_rad)
         # Positive means the control point is to the left of the directed path.
@@ -460,16 +553,25 @@ class StanleyController:
             -(control_x - projected_x) * tangent_y
             + (control_y - projected_y) * tangent_x
         )
+        if abs(cross_track_error) <= self.cross_track_deadband_m:
+            cross_track_error = 0.0
+        else:
+            cross_track_error = math.copysign(
+                abs(cross_track_error) - self.cross_track_deadband_m,
+                cross_track_error,
+            )
         correction = math.atan2(
             self.gain * cross_track_error,
             max(0.0, speed_mps) + self.softening_speed_mps,
         )
         steering = max(
             -self.max_steering_rad,
-            min(self.max_steering_rad, heading_error - correction),
+            min(
+                self.max_steering_rad,
+                self.heading_error_gain * heading_error
+                - self.cross_track_error_gain * correction,
+            ),
         )
-        segment_3d = self._cumulative[index + 1] - self._cumulative[index]
-        progress = self._cumulative[index] + fraction * segment_3d
         remaining = max(0.0, self._cumulative[-1] - progress)
         end = self.points[-1]
         end_distance = math.hypot(control_x - end.x_m, control_y - end.y_m)
@@ -489,5 +591,6 @@ class StanleyController:
             index,
             remaining,
             goal_reached,
+            path_yaw,
             target_speed_mps,
         )

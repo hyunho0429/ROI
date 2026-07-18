@@ -1,192 +1,177 @@
-# MORAI 대회용 UDP Stanley 제어기
+# MORAI UDP Stanley + EKF-INS 제어기
 
-GPS 터널 음영 주행용 INS 및 dead-reckoning 실행 방법은
-[`README_TUNNEL_LOCALIZATION.md`](README_TUNNEL_LOCALIZATION.md)를 참고한다.
-기존 `morai_stanley_udp.py`는 GPS가 오래 끊기면 제동하는 평면 EKF 기준
-실행기이며, 터널 시험에는 두 전용 실행기 중 하나를 사용한다.
+권장 실행기는 `morai_stanley_ins_udp.py`이다. ROS/catkin 없이 MORAI UDP만
+사용하며, 경로 좌표 처리와 waypoint 전처리는
+[AutoVehicle](https://github.com/shinejihun1227/AutoVehicle/tree/main/ros_ws/src)의
+방식을 독립 Python 구조로 이식했다. 위치추정은 이 저장소의 15상태 error-state
+EKF-INS, 횡제어는 Stanley, 종제어는 대회 규정의 `longCmdType = 1`이다.
 
-`morai_stanley_udp.py`는 ROS 없이 다음 대회 허용 인터페이스만 사용한다.
+## 전체 데이터 흐름
 
-- `[UDP] Ego Ctrl Cmd`: 조향 및 accel/brake 송신
-- `[UDP] CollisionData`: 충돌 시 3초간 제동
-- `[UDP] Competition Vehicle Status`: 실제 속도 피드백
-- `[UDP] GPS`: NMEA RMC/GGA 위치·속도
-- `[UDP] IMU`: quaternion yaw와 yaw rate
+```text
+GPS UDP ─┐
+IMU UDP ─┼─> 15-state EKF-INS ─> x, y, z, yaw, speed ─> Stanley
+Status ──┘                                           └─> steering
 
-Camera와 3D LiDAR도 허용 센서지만, 미리 기록한 경로를 Stanley로 추종하는
-기본 기능에는 필요하지 않아 이 프로그램에서는 열지 않는다. 향후 차선·장애물
-인식 기능을 붙일 때 별도 perception 모듈로 연결하는 편이 안전하다.
-
-## 대회 규정과 26.R1 기준 핵심 사항
-
-대회 규정에 따라 `Ego Ctrl Cmd`는 항상 `longCmdType = 1`을 전송한다. 목표
-속도와 현재 속도의 차이를 PI 제어기로 accel 또는 brake 값으로 바꾸며, 두
-페달을 동시에 명령하지 않는다. 속도 제어 모드인 `longCmdType = 2`를 지정하면
-인코더가 오류를 발생시키므로 실수로 규정을 어길 수 없다.
-
-위치추정은 Competition Status의 위치·yaw를 사용하지 않는다. 노이즈가 적용된
-GPS와 IMU를 `[x, y, vx, vy, yaw, gyro bias]` EKF로 융합한다. Competition
-Status는 종방향 페달 제어를 위한 signed velocity만 사용하며, 상태 패킷이
-잠시 끊기면 GPS RMC 속도를 대신 사용한다.
-
-기존 OpenIMU용 `alignment`, strapdown `mechanization`, Earth-frame
-`system_dynamics`는 사용하지 않는다. MORAI IMU가 절대 quaternion을 제공하고
-Stanley에는 수평 위치·yaw·속도만 필요하므로, 이 전체 INS를 그대로 쓰면 중복
-적분과 좌표계 오류가 생긴다. Z는 GPS 고도를 지도 원점 기준으로 바꾼 뒤 저역
-통과 필터링한다. Z가 매번 변해야 경로를 저장하거나 추종하는 조건은 아니다.
-
-## 패킷과 좌표
-
-공식 [26.R1 센서 통신 프로토콜](https://help-morai-sim.scrollhelp.site/ko/morai-sim-drive/26.R1/-35)은
-GPS UDP가 UTM x/y가 아닌 NMEA0183 RMC/GGA 위도·경도·고도라고 명시한다.
-따라서 `pyproj`로 WGS84를 MGeo의 `global_coordinate_system`으로 투영하고,
-`global_info.json`의 `local_origin_in_global`을 빼서 경로 CSV와 같은 맵 원점
-ENU 좌표로 만든다. 기본 K-City 데이터는 EPSG:32652이다.
-
-공식 IMU UDP는 107 byte이며 quaternion 순서는 wire 기준 **w, x, y, z**이다.
-각속도는 rad/s, 선가속도는 m/s²이다. 수신기는 길이, `#IMUData$`, data size
-80, tail을 모두 검사하고 내부에서는 x,y,z,w 순서로 변환한다.
-
-공식 [26.R1 UDP 프로토콜](https://help-morai-sim.scrollhelp.site/ko/morai-sim-drive/26.R1/udp-1)을
-기준으로 `Ego Ctrl Cmd`는 59 byte, `CollisionData`는 181 byte로 처리한다.
-제어 패킷은 앞·뒤 조향 필드를 모두 포함하며 뒤 조향은 0으로 둔다.
-
-`Competition Vehicle Status`는 `Ego Vehicle Status`와 별개다. 전용 공개 규격을
-확인할 수 없어 별도 파서로 분리했다. 실제 25.01 환경에서 확인된 181-byte
-형식(`data_length=152`)과 타이어 정보가 추가된 229-byte 확장 형식
-(`data_length=200`)을 모두 지원한다. 그 외 길이·헤더·data length는 임의로
-해석하지 않고 오류 로그에 실제 값을 출력한다.
-
-## 설치
-
-Python 3.8 이상에서 저장소 루트 기준으로 실행한다.
-
-```bash
-python3 -m pip install -r src/path_planning/requirements.txt
+Competition speed ─> PI speed control ─> accel / brake
+CollisionData ─────────────────────────> emergency brake
 ```
 
-## MORAI GPS/IMU 센서 저장 파일을 경로로 사용
+경로 CSV에 기록된 과거 IMU·가속도·각속도는 현재 차량 위치추정에 사용하지
+않는다. 현재 차량은 실시간 GPS/IMU/Competition Status로 추정한다. CSV에서는
+경로의 `x/y/z` 또는 GPS 열과 고정 원점만 읽는다.
 
-공식 26.R1 센서 검출 데이터의 GPS 저장 형식은 다음 5개 값이다.
+## AutoVehicle에서 가져온 경로 처리
+
+- `origin_lat/origin_lon/origin_alt`가 있는 CSV는 기록 당시 원점 기준 로컬 ENU
+- 실시간 GPS도 CSV에 기록된 같은 원점으로 변환
+- 0.5 m 미만으로 붙은 waypoint 제거
+- 9개 waypoint 이동평균으로 경로 노이즈 완화
+- 최근 target 뒤쪽으로 되돌아가지 않는 진행 방향 검색
+- 한 제어 주기에서 최대 50개 segment만 검색
+- 전륜축 제어점 기본 오프셋 3.0 m
+- CTE 0.05 m deadband
+- 조향 저역통과 필터와 최대 변화율 0.4 rad/s
+
+로컬 ENU 변환은 AutoVehicle과 동일한 근거리 식이다.
+
+```text
+x = 6378137.0 * rad(lon - origin_lon) * cos(rad(origin_lat))
+y = 6378137.0 * rad(lat - origin_lat)
+z = altitude - origin_alt
+```
+
+`origin_lat/origin_lon`이 없는 공식 GPS 5열 파일은 MGeo의 UTM CRS와
+`local_origin_in_global`을 사용하는 기존 맵 원점 ENU 변환으로 처리한다.
+
+지원 예시는 다음과 같다.
+
+```csv
+x,y,z,target_speed,lat,lon,alt,origin_lat,origin_lon,origin_alt
+0,0,0,1.0,,,,37.24098167,126.774355,0
+0.380822,0.726466,0,1.0,37.24098833,126.774360,0,37.24098167,126.774355,0
+```
 
 ```text
 latitude longitude altitude eastOffset northOffset
 ```
 
-- `latitude`, `longitude`: WGS84 위도·경도(deg)
-- `altitude`: 고도(m)
-- `eastOffset`, `northOffset`: UTM 맵 원점의 East/North offset(m)
+`target_speed` 열이 있더라도 주행 속도에는 사용하지 않는다. 현재 런타임은
+`--target-speed-kmh` 하나만 사용하며 기본값은 10 km/h이다.
 
-Stanley 경로 로더는 기존 ENU CSV 외에 이 GPS 센서 파일을 자동 인식한다. 공식
-형식처럼 헤더 없이 공백으로 구분된 `.txt` 파일도 되고, 다음처럼 헤더가 있는
-CSV도 된다.
+## 순수 Stanley 조향
 
-```csv
-latitude,longitude,altitude,eastOffset,northOffset
-37.123456,126.123456,28.4,302595.0,4124145.0
-37.123457,126.123460,28.5,302595.0,4124145.0
-```
-
-GPS와 IMU가 합쳐진 CSV라면 위 다섯 GPS 열만 정확히 있으면 된다. 추가로 포함된
-IMU 열(`sec`, `nsec`, quaternion x/y/z/w, angular velocity x/y/z, linear
-acceleration x/y/z)은 기준 경로 생성에서는 무시한다. 과거 IMU 값을 현재 차량
-상태로 사용하면 안 되기 때문이다. 실제 경로 추종 중 현재 자세와 위치는 기존처럼
-실시간 GPS/IMU UDP와 EKF 또는 INS가 담당한다.
-
-다음처럼 `x/y/z`가 `origin_lat/origin_lon/origin_alt` 기준 상대좌표인 파일도
-자동 인식한다.
-
-```csv
-x,y,z,target_speed,lat,lon,alt,origin_lat,origin_lon,origin_alt,imu_qx,imu_qy,imu_qz,imu_qw
-0,0,0,1.0,,,,37.24098167,126.774355,0,-0.86,0,0,-0.51
-0.380822,0.726466,0,1.0,37.24098833,126.77436,0,37.24098167,126.774355,0,0.86,0,0,0.51
-```
-
-이 형식은 [AutoVehicle](https://github.com/shinejihun1227/AutoVehicle/tree/main/ros_ws/src)의
-GPS 경로 재생 방식과 동일하게 CSV의 `x/y/z`를 기록 당시 GPS 원점 기준 로컬
-ENU로 그대로 사용한다. 실시간 GPS도 CSV의 `origin_lat/origin_lon/origin_alt`를
-자동으로 읽어 같은 좌표계로 변환한다. 첫 행의 origin이 비어 있어도 뒤 행에서
-처음 발견한 origin을 전체 경로에 사용하며, origin은 한 파일 안에서 일정해야
-한다. 이 변경은 경로 로딩과 GPS 좌표 변환에만 적용되고 Stanley 제어식은
-변경하지 않는다. `target_speed`는 m/s로 해석하고 Stanley가 현재 segment의 값을
-선형 보간한다. 경로에 `target_speed`가 없을 때만 `--target-speed-kmh`가 기본
-속도로 사용된다.
-
-경로 변환은 다음과 같다.
+Pure Pursuit처럼 전방 목표점을 고르는 lookahead distance를 사용하지 않는다.
+전륜축 제어점과 가장 가까운 경로 segment의 접선각 및 횡오차를 사용한다.
 
 ```text
-ENU_x = 6378137.0 * rad(longitude - origin_lon) * cos(rad(origin_lat))
-ENU_y = 6378137.0 * rad(latitude  - origin_lat)
-ENU_z = altitude - origin_alt
+front_x = x + front_axle_offset * cos(yaw)
+front_y = y + front_axle_offset * sin(yaw)
+
+heading_error = wrap(path_yaw - yaw)
+cte_term = atan2(k * cte, speed + softening)
+steering = heading_gain * heading_error - cte_gain * cte_term
 ```
 
-`origin_lat/origin_lon`이 없는 공식 GPS 5열 파일이나 map-origin ENU 파일은 기존
-MGeo/UTM 변환을 계속 사용한다.
+여기서 `path_yaw`는 최근접 segment의 접선각이다. `target-search-window=50`은
+계산량을 제한하는 인덱스 검색 범위이며 lookahead distance가 아니다.
 
-실행할 때 센서 파일을 그대로 `--path`에 지정한다.
+기본 튜닝값은 AutoVehicle 설정을 따른다.
 
-```bash
-python3 src/path_planning/src/morai_stanley_ins_udp.py \
-  --path /absolute/path/sensor_path.csv \
-  --global-info src/path_planning/mgeo/R_KR_PR_K-city_2025/global_info.json
+| 항목 | 기본값 |
+|---|---:|
+| front axle offset | 3.0 m |
+| Stanley gain | 0.22 |
+| softening | 3.0 m/s |
+| heading error gain | 1.0 |
+| cross-track error gain | 0.55 |
+| controller steering limit | 21.77° |
+| MORAI physical steering limit | 36.25° |
+| waypoint spacing | 0.5 m |
+| smoothing window | 9 |
+
+공개 UDP 문서에는 GPS/차량 position 기준점이 앞차축인지 명시되어 있지 않다.
+기본 3.0 m는 AutoVehicle 구현을 재현한 값이다. 실제 차량 기준점이 rear axle이
+아니면 `--control-point-offset`을 실측값으로 바꿔야 한다.
+
+## EKF-INS
+
+권장 실행기는 다음 15상태 오차 벡터를 사용한다.
+
+```text
+[position error(3), velocity error(3), attitude error(3),
+ gyro bias(3), accelerometer bias(3)]
 ```
 
-IMU 데이터만 있는 파일에는 절대 위치가 없으므로 단독으로는 기준 경로를 만들 수
-없다. 또한 `eastOffset`과 `northOffset`은 한 경로 파일 안에서 일정해야 한다.
+- IMU 각속도와 specific force로 3-D strapdown 예측
+- GPS 위치·고도·RMC 속도로 위치/속도 오차 보정
+- IMU quaternion으로 자세 오차 보정
+- Competition Status의 signed speed와 non-holonomic constraint 적용
+- 정지 시 gyro/accelerometer bias 초기 보정
+- GPS 음영 중 IMU + 차량 속도로 계속 예측, GPS 복구 시 재보정
+
+상세 내용은 [README_TUNNEL_LOCALIZATION.md](README_TUNNEL_LOCALIZATION.md)를
+참고한다.
 
 ## 네트워크 설정
 
-아래 포트는 실행 예시일 뿐이다. MORAI Network/Sensor Settings의 Destination
-Port와 명령행 옵션을 반드시 동일하게 맞춘다.
+아래 값은 코드 기본값이다. MORAI의 Destination/Host IP와 Port를 실행 옵션에
+맞춰야 한다.
 
-| 항목 | 방향 | 기본 포트 |
+| UDP 항목 | 방향 | 기본 포트 |
 |---|---|---:|
-| GPS | SIM → 프로그램 | 3001 |
-| IMU | SIM → 프로그램 | 4001 |
-| Competition Vehicle Status | SIM → 프로그램 | 909 |
-| CollisionData | SIM → 프로그램 | 5678 |
-| Ego Ctrl Cmd | 프로그램 → SIM | 9090 |
+| GPS | SIM → 코드 | 3001 |
+| IMU | SIM → 코드 | 4001 |
+| Competition Vehicle Status | SIM → 코드 | 909 |
+| CollisionData | SIM → 코드 | 5678 |
+| Ego Ctrl Cmd | 코드 → SIM | 9090 |
 
-한 PC에서 실행하면 센서와 Publisher의 Destination IP, Ctrl Cmd의 Host IP를
-보통 `127.0.0.1`로 둔다. 다른 PC/VM/WSL이면 프로그램이 실행되는 PC의 실제
-IPv4 주소를 Destination IP로 사용한다. 네 수신 포트는 서로 달라야 한다.
+Competition Status의 909처럼 1024 미만 포트는 Linux에서 권한이 필요할 수 있다.
+가능하면 MORAI와 코드 양쪽 포트를 1024 이상으로 바꾸고, 대회 설정상 909를
+유지해야 하면 실행 환경의 권한 설정을 확인한다.
 
 ## 실행
 
 ```bash
-python3 src/path_planning/src/morai_stanley_udp.py \
+python3 -m pip install -r src/path_planning/requirements.txt
+
+sudo "$(which python3)" src/path_planning/src/morai_stanley_ins_udp.py \
   --path src/path_planning/data/morai_global_path.csv \
   --gps-port 3001 \
   --imu-port 4001 \
   --competition-status-port 909 \
   --collision-port 5678 \
-  --control-ip 127.0.0.1 \
+  --control-ip 192.168.0.170 \
   --control-port 9090 \
-  --target-speed-kmh 20
+  --target-speed-kmh 10
 ```
 
-다른 맵이면 그 맵의 MGeo 설정을 넘긴다.
+`--control-ip`에는 MORAI가 실행되는 PC의 IPv4 주소를 넣는다. 같은 PC라면
+`127.0.0.1`을 사용할 수 있다.
 
-```bash
-python3 src/path_planning/src/morai_stanley_udp.py \
-  --path /absolute/path/run.csv \
-  --global-info /absolute/path/mgeo/global_info.json
+시작 로그에는 다음 내용이 보여야 한다.
+
+```text
+localization: GPS/IMU/status-aided 15-state error-state EKF INS
+Stanley: front axle 3.00 m, no look-ahead target, fixed speed 10.0 km/h
 ```
 
-GPS 또는 IMU가 timeout을 넘겨 끊기거나, 위치가 예측치에서 15 m 이상 튀거나,
-충돌이 감지되거나, 목적지에 도달하거나, `Ctrl+C`가 입력되면 brake 명령을
-보낸다.
+주행 로그의 `cmd=(accel,steering,brake)`를 확인한다. 정지인데 accel이 0보다
+큰데도 움직이지 않으면 코드의 경로 계산보다 MORAI Cmd Control의 Host IP/Port,
+외부 제어 활성화, gear D 및 `longCmdType 1` 수신 설정을 먼저 점검한다.
 
-## 현장에서 먼저 확인할 값
+## 주요 튜닝 옵션
 
-- `--max-steering-deg`: 선택 차량의 최대 앞바퀴 조향각. 기본값은 36.25°이다.
-- `--morai-steer-sign`: 매우 낮은 속도에서 좌/우가 맞는지 확인한다. 반대면 1을 쓴다.
-- `--control-point-offset`: 기본 0 m. GPS 센서 장착 위치에서 앞차축 중심까지의
-  차량 전방 오프셋을 실측했을 때만 설정한다.
-- `--imu-yaw-offset-deg`: 센서가 차량 정면과 돌아가 장착된 경우에만 보정한다.
-- `--speed-kp`, `--speed-ki`, `--max-accel-pedal`, `--max-brake-pedal`: 먼저
-  5–10 km/h에서 튜닝한다.
-- `--stanley-gain`: 커지면 횡오차를 빠르게 줄이지만 GPS 노이즈에서 진동할 수 있다.
+- `--control-point-offset`: 위치 기준점에서 전륜축 제어점까지 전방 거리
+- `--stanley-gain`, `--cross-track-error-gain`: 횡오차 복귀 강도
+- `--heading-error-gain`: 경로 heading 정렬 강도
+- `--max-steering-deg`: Stanley가 낼 수 있는 조향각 제한
+- `--vehicle-max-steering-deg`: MORAI normalized steering ±1의 실제 조향각
+- `--steering-filter-alpha`: 작을수록 조향이 부드럽지만 반응이 느림
+- `--max-steering-rate-radps`: 초당 조향각 변화 제한
+- `--minimum-waypoint-spacing`, `--waypoint-smoothing-window`: 경로 전처리
+- `--morai-steer-sign`: 좌우가 반대일 때 `1` 또는 `-1`로 변경
 
-차량 위치 또는 GPS가 앞차축 중심인지 MORAI 공개 UDP 문서에는 명시되어 있지
-않다. 따라서 wheelbase만으로 임의 보정하지 않는다.
+GPS/IMU/Competition Status가 stale이거나 CollisionData가 충돌을 알리거나 경로
+끝에 도달하면 즉시 brake 명령을 전송한다. `Ctrl+C` 종료 시에도 brake 패킷을
+다섯 번 전송한다.

@@ -50,27 +50,27 @@ GPS-based fallback.
 
 ## MORAI UDP Stanley control
 
-The `dev/stanley` branch adds a standalone Stanley controller with noisy
-GPS/IMU sensor fusion and the documented MORAI UDP control packet. Install
-`src/path_planning/requirements.txt`, then run:
+The `dev/stanley` branch adds a standalone strict Stanley controller with a
+15-state GPS/IMU/Competition-speed-aided EKF-INS. It ports AutoVehicle's local
+ENU CSV conversion and waypoint preprocessing without its ROS dependencies.
+Install `src/path_planning/requirements.txt`, then run the recommended INS
+runner:
 
 ```bash
-python3 src/path_planning/src/morai_stanley_udp.py \
+python3 src/path_planning/src/morai_stanley_ins_udp.py \
   --path src/path_planning/data/morai_global_path.csv \
-  --gps-port 9100 --imu-port 9101 \
-  --competition-status-port 3315 --collision-port 5678 \
-  --control-ip 127.0.0.1 --control-port 9090
+  --gps-port 3001 --imu-port 4001 \
+  --competition-status-port 909 --collision-port 5678 \
+  --control-ip 127.0.0.1 --control-port 9090 \
+  --target-speed-kmh 10
 ```
 
 See `src/path_planning/README_STANLEY_UDP.md` for the MORAI 26.R1 public protocol basis,
 coordinate conversion, network settings, safety behavior, and tuning values.
 
-For GPS-denied tunnel sections, choose one of the two standalone controllers:
+For comparison, the speed-aided dead-reckoning alternative remains available:
 
 ```bash
-# 15-state strapdown INS error-state EKF
-python3 src/path_planning/src/morai_stanley_ins_udp.py --target-speed-kmh 10
-
 # Competition-speed-aided dead reckoning
 python3 src/path_planning/src/morai_stanley_dead_reckoning_udp.py --target-speed-kmh 10
 ```

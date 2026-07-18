@@ -29,6 +29,7 @@ from path_planning.morai_udp_gps import GpsPacketError, parse_nmea_datagram
 from path_planning.morai_udp_imu import ImuPacketError, parse_imu_packet
 from path_planning.stanley_controller import (
     StanleyController,
+    SteeringCommandFilter,
     load_path_csv,
     load_recorded_path_origin,
 )
@@ -76,7 +77,9 @@ def argument_parser(localization_mode):
             )
         )
     )
-    parser.add_argument("--path", default=DEFAULT_PATH, help="map-origin ENU path CSV")
+    parser.add_argument(
+        "--path", default=DEFAULT_PATH, help="ENU CSV or MORAI GPS sensor path file"
+    )
     parser.add_argument("--bind-ip", default="0.0.0.0")
     parser.add_argument("--gps-port", type=int, default=3001)
     parser.add_argument("--imu-port", type=int, default=4001)
@@ -85,13 +88,37 @@ def argument_parser(localization_mode):
     parser.add_argument("--control-ip", default="127.0.0.1")
     parser.add_argument("--control-port", type=int, default=9090)
     parser.add_argument("--control-rate-hz", type=float, default=20.0)
-    parser.add_argument("--target-speed-kmh", type=float, default=15.0)
-    parser.add_argument("--stanley-gain", type=float, default=1.2)
-    parser.add_argument("--softening-speed", type=float, default=1.0)
-    parser.add_argument("--max-steering-deg", type=float, default=36.25)
-    parser.add_argument("--control-point-offset", type=float, default=0.0)
+    parser.add_argument("--target-speed-kmh", type=float, default=10.0)
+    parser.add_argument("--stanley-gain", type=float, default=0.22)
+    parser.add_argument("--softening-speed", type=float, default=3.0)
     parser.add_argument(
-        "--morai-steer-sign", type=float, choices=(-1.0, 1.0), default=-1.0
+        "--max-steering-deg",
+        type=float,
+        default=21.77,
+        help="Stanley controller steering limit in degrees",
+    )
+    parser.add_argument(
+        "--vehicle-max-steering-deg",
+        type=float,
+        default=36.25,
+        help="physical steering angle represented by MORAI command +/-1",
+    )
+    parser.add_argument("--control-point-offset", type=float, default=3.0)
+    parser.add_argument("--heading-error-gain", type=float, default=1.0)
+    parser.add_argument("--cross-track-error-gain", type=float, default=0.55)
+    parser.add_argument("--cross-track-deadband", type=float, default=0.05)
+    parser.add_argument("--minimum-waypoint-spacing", type=float, default=0.5)
+    parser.add_argument("--waypoint-smoothing-window", type=int, default=9)
+    parser.add_argument("--target-search-window", type=int, default=50)
+    parser.add_argument(
+        "--allow-target-backtrack",
+        action="store_true",
+        help="allow the nearest segment search to move up to five segments backward",
+    )
+    parser.add_argument("--steering-filter-alpha", type=float, default=0.25)
+    parser.add_argument("--max-steering-rate-radps", type=float, default=0.4)
+    parser.add_argument(
+        "--morai-steer-sign", type=float, choices=(-1.0, 1.0), default=1.0
     )
     parser.add_argument("--imu-timeout", type=float, default=0.5)
     parser.add_argument("--status-timeout", type=float, default=0.5)
@@ -107,10 +134,10 @@ def argument_parser(localization_mode):
     parser.add_argument("--gps-speed-sigma", type=float, default=0.8)
     parser.add_argument("--imu-orientation-sigma-deg", type=float, default=4.0)
     parser.add_argument("--vehicle-speed-sigma", type=float, default=0.25)
-    parser.add_argument("--speed-kp", type=float, default=0.12)
+    parser.add_argument("--speed-kp", type=float, default=0.35)
     parser.add_argument("--speed-ki", type=float, default=0.04)
-    parser.add_argument("--max-accel-pedal", type=float, default=0.65)
-    parser.add_argument("--max-brake-pedal", type=float, default=0.8)
+    parser.add_argument("--max-accel-pedal", type=float, default=1.0)
+    parser.add_argument("--max-brake-pedal", type=float, default=1.0)
     parser.add_argument("--global-info", default=DEFAULT_GLOBAL_INFO)
     parser.add_argument("--utm-crs", default=None)
     parser.add_argument("--utm-origin-x", type=float, default=None)
@@ -150,12 +177,29 @@ def _validate(arguments):
         "gps_position_sigma",
         "gps_altitude_sigma",
         "vehicle_speed_sigma",
+        "max_steering_deg",
+        "vehicle_max_steering_deg",
+        "softening_speed",
     )
     for name in positive_names:
         if getattr(arguments, name) <= 0.0:
             raise ValueError("{} must be positive".format(name))
     if arguments.target_speed_kmh < 0.0:
         raise ValueError("target-speed-kmh cannot be negative")
+    for name in (
+        "control_point_offset",
+        "cross_track_deadband",
+        "minimum_waypoint_spacing",
+        "max_steering_rate_radps",
+    ):
+        if getattr(arguments, name) < 0.0:
+            raise ValueError("{} cannot be negative".format(name))
+    if not 0.0 <= arguments.steering_filter_alpha <= 1.0:
+        raise ValueError("steering-filter-alpha must be between 0 and 1")
+    if arguments.waypoint_smoothing_window < 1:
+        raise ValueError("waypoint-smoothing-window must be at least 1")
+    if arguments.target_search_window < 1:
+        raise ValueError("target-search-window must be at least 1")
     for name in ("max_accel_pedal", "max_brake_pedal"):
         if not 0.0 <= getattr(arguments, name) <= 1.0:
             raise ValueError("{} must be between 0 and 1".format(name))
@@ -196,6 +240,18 @@ def run(localization_mode, arguments):
         softening_speed_mps=arguments.softening_speed,
         max_steering_deg=arguments.max_steering_deg,
         control_point_offset_m=arguments.control_point_offset,
+        heading_error_gain=arguments.heading_error_gain,
+        cross_track_error_gain=arguments.cross_track_error_gain,
+        cross_track_deadband_m=arguments.cross_track_deadband,
+        minimum_waypoint_spacing_m=arguments.minimum_waypoint_spacing,
+        waypoint_smoothing_window=arguments.waypoint_smoothing_window,
+        search_back_segments=5 if arguments.allow_target_backtrack else 0,
+        search_forward_segments=arguments.target_search_window,
+    )
+    steering_filter = SteeringCommandFilter(
+        alpha=arguments.steering_filter_alpha,
+        max_rate_radps=arguments.max_steering_rate_radps,
+        max_abs_rad=stanley.max_steering_rad,
     )
     speed_controller = PedalSpeedController(
         kp=arguments.speed_kp,
@@ -240,7 +296,13 @@ def run(localization_mode, arguments):
     last_log = 0.0
 
     print("MORAI Stanley {} controller started".format(localization_mode.upper()))
-    print("  path: {} ({} points)".format(os.path.abspath(arguments.path), len(points)))
+    print(
+        "  path: {} ({} -> {} points after spacing/smoothing)".format(
+            os.path.abspath(arguments.path),
+            stanley.original_point_count,
+            len(stanley.points),
+        )
+    )
     if recorded_origin is not None:
         print(
             "  coordinate frame: recorded GPS origin "
@@ -255,6 +317,16 @@ def run(localization_mode, arguments):
     for name, port in channels:
         print("  {} receive: {}:{}".format(name, arguments.bind_ip, port))
     print("  control: {}:{} (longCmdType 1)".format(*control_destination))
+    if localization_mode == "ins":
+        print("  localization: GPS/IMU/status-aided 15-state error-state EKF INS")
+    else:
+        print("  localization: GPS/IMU/status-aided dead reckoning")
+    print(
+        "  Stanley: front axle {:.2f} m, no look-ahead target, "
+        "fixed speed {:.1f} km/h".format(
+            arguments.control_point_offset, arguments.target_speed_kmh
+        )
+    )
     print("  maximum GPS outage: {:.1f} s".format(arguments.max_gps_outage))
 
     try:
@@ -335,37 +407,44 @@ def run(localization_mode, arguments):
 
             if state is None or collision_active:
                 speed_controller.reset()
+                steering_filter.reset()
                 command = brake_command()
                 result = None
                 target_speed_mps = 0.0
+                raw_steering_rad = filtered_steering_rad = 0.0
+                normalized_steering = 0.0
             else:
                 result = stanley.compute(
                     state.x_m, state.y_m, state.z_m, state.yaw_rad, state.speed_mps
                 )
                 if result.goal_reached:
                     speed_controller.reset()
+                    steering_filter.reset()
                     command = brake_command()
                     target_speed_mps = 0.0
+                    raw_steering_rad = filtered_steering_rad = 0.0
+                    normalized_steering = 0.0
                 else:
-                    normalized = arguments.morai_steer_sign * (
-                        result.steering_rad / stanley.max_steering_rad
+                    raw_steering_rad = result.steering_rad
+                    filtered_steering_rad = steering_filter.update(
+                        raw_steering_rad, now
                     )
-                    curve_scale = max(0.35, 1.0 - 0.55 * abs(normalized))
-                    end_scale = max(
-                        0.25, min(1.0, result.remaining_distance_m / 15.0)
+                    normalized_steering = arguments.morai_steer_sign * (
+                        filtered_steering_rad
+                        / math.radians(arguments.vehicle_max_steering_deg)
                     )
-                    path_speed_mps = (
-                        arguments.target_speed_kmh / 3.6
-                        if result.target_speed_mps is None
-                        else result.target_speed_mps
+                    normalized_steering = max(
+                        -1.0, min(1.0, normalized_steering)
                     )
-                    target_speed_mps = path_speed_mps * min(
-                        curve_scale, end_scale
-                    )
+                    # The route CSV supplies geometry only.  Longitudinal
+                    # control tracks one explicit fixed speed.
+                    target_speed_mps = arguments.target_speed_kmh / 3.6
                     accel, brake = speed_controller.compute(
                         target_speed_mps, status_speed_mps, now
                     )
-                    command = pedal_command(accel, brake, normalized)
+                    command = pedal_command(
+                        accel, brake, normalized_steering
+                    )
             control_socket.sendto(
                 encode_ego_ctrl_cmd_26r1(command), control_destination
             )
@@ -393,16 +472,26 @@ def run(localization_mode, arguments):
                     )
                     print(
                         "{} pos=({:.2f},{:.2f},{:.2f}) speed={:.2f}/{:.2f} "
-                        "cte={:+.2f} steer={:+.2f}deg remain={:.1f}m".format(
+                        "yaw/path={:+.1f}/{:+.1f}deg herr={:+.1f}deg "
+                        "cte={:+.2f}m steer(raw/filt)={:+.2f}/{:+.2f}deg "
+                        "cmd=({:.2f},{:+.2f},{:.2f}) remain={:.1f}m{}".format(
                             gps_label,
                             state.x_m,
                             state.y_m,
                             state.z_m,
                             status_speed_mps,
                             target_speed_mps,
+                            math.degrees(state.yaw_rad),
+                            math.degrees(result.path_yaw_rad),
+                            math.degrees(result.heading_error_rad),
                             result.cross_track_error_m,
-                            math.degrees(result.steering_rad),
+                            math.degrees(raw_steering_rad),
+                            math.degrees(filtered_steering_rad),
+                            command.accel,
+                            command.steering_normalized,
+                            command.brake,
                             result.remaining_distance_m,
+                            " GOAL" if result.goal_reached else "",
                         )
                     )
     except KeyboardInterrupt:
