@@ -13,6 +13,10 @@ if PACKAGE_SRC not in sys.path:
     sys.path.insert(0, PACKAGE_SRC)
 
 from morai_global_csv_recorder import MoraiGlobalCsvRecorder, status_to_sample
+from path_planning.morai_udp_ego_status import (
+    EgoVehicleStatusPacketError,
+    parse_ego_vehicle_status,
+)
 from path_planning.morai_udp_competition_status import (
     BASE_PACKET_DATA_LENGTH,
     BASE_PACKET_SIZE,
@@ -56,6 +60,14 @@ def make_packet(packet_size=EXTENDED_PACKET_SIZE):
 
 
 class MoraiUdpCompetitionStatusTest(unittest.TestCase):
+    def test_parses_documented_181_byte_ego_status(self):
+        status = parse_ego_vehicle_status(make_packet(BASE_PACKET_SIZE))
+        self.assertEqual(status.position_m, (10.0, 20.0, 3.0))
+
+    def test_ego_status_rejects_competition_extension(self):
+        with self.assertRaises(EgoVehicleStatusPacketError):
+            parse_ego_vehicle_status(make_packet(EXTENDED_PACKET_SIZE))
+
     def test_parses_observed_181_byte_competition_layout(self):
         status = parse_competition_vehicle_status(make_packet(BASE_PACKET_SIZE))
         self.assertEqual(status.position_m, (10.0, 20.0, 3.0))
@@ -98,7 +110,7 @@ class MoraiUdpCompetitionStatusTest(unittest.TestCase):
                 (middle_packet, 100.5),
                 (second_packet, 101.0),
             ):
-                status = parse_competition_vehicle_status(bytes(packet))
+                status = parse_ego_vehicle_status(bytes(packet))
                 recorder.add_sample(status_to_sample(status, receive_time))
             recorder.close()
             with open(output_file, newline="", encoding="utf-8") as stream:
