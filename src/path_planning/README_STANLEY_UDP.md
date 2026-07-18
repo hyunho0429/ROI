@@ -102,20 +102,26 @@ x,y,z,target_speed,lat,lon,alt,origin_lat,origin_lon,origin_alt,imu_qx,imu_qy,im
 0.380822,0.726466,0,1.0,37.24098833,126.77436,0,37.24098167,126.774355,0,0.86,0,0,0.51
 ```
 
-이 형식은 먼저 origin 위경도를 MGeo 원점 기준 ENU로 변환한 다음 각 행의 상대
-`x/y/z`를 더한다. 첫 행의 origin이 비어 있어도 뒤 행에서 처음 발견한 origin을
-전체 경로에 사용한다. origin은 한 파일 안에서 일정해야 한다. `target_speed`는
-m/s로 해석하고 Stanley가 현재 segment의 값을 선형 보간한다. 경로에
-`target_speed`가 없을 때만 `--target-speed-kmh`가 기본 속도로 사용된다.
+이 형식은 [AutoVehicle](https://github.com/shinejihun1227/AutoVehicle/tree/main/ros_ws/src)의
+GPS 경로 재생 방식과 동일하게 CSV의 `x/y/z`를 기록 당시 GPS 원점 기준 로컬
+ENU로 그대로 사용한다. 실시간 GPS도 CSV의 `origin_lat/origin_lon/origin_alt`를
+자동으로 읽어 같은 좌표계로 변환한다. 첫 행의 origin이 비어 있어도 뒤 행에서
+처음 발견한 origin을 전체 경로에 사용하며, origin은 한 파일 안에서 일정해야
+한다. 이 변경은 경로 로딩과 GPS 좌표 변환에만 적용되고 Stanley 제어식은
+변경하지 않는다. `target_speed`는 m/s로 해석하고 Stanley가 현재 segment의 값을
+선형 보간한다. 경로에 `target_speed`가 없을 때만 `--target-speed-kmh`가 기본
+속도로 사용된다.
 
 경로 변환은 다음과 같다.
 
 ```text
-UTM_easting, UTM_northing = project(longitude, latitude)
-ENU_x = UTM_easting  - eastOffset
-ENU_y = UTM_northing - northOffset
-ENU_z = altitude - MGeo origin_z
+ENU_x = 6378137.0 * rad(longitude - origin_lon) * cos(rad(origin_lat))
+ENU_y = 6378137.0 * rad(latitude  - origin_lat)
+ENU_z = altitude - origin_alt
 ```
+
+`origin_lat/origin_lon`이 없는 공식 GPS 5열 파일이나 map-origin ENU 파일은 기존
+MGeo/UTM 변환을 계속 사용한다.
 
 실행할 때 센서 파일을 그대로 `--path`에 지정한다.
 

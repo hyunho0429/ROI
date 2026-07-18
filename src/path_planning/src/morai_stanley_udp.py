@@ -9,7 +9,7 @@ import socket
 import sys
 import time
 
-from path_planning.coordinates import GpsToMapEnu, MapProjection
+from path_planning.coordinates import GpsToMapEnu, GpsToRecordedLocalEnu, MapProjection
 from path_planning.localization import PlanarGpsImuEkf
 from path_planning.longitudinal_controller import PedalSpeedController
 from path_planning.morai_udp_collision_data import (
@@ -27,7 +27,11 @@ from path_planning.morai_udp_ctrl_cmd import (
 )
 from path_planning.morai_udp_gps import GpsPacketError, parse_nmea_datagram
 from path_planning.morai_udp_imu import ImuPacketError, parse_imu_packet, quaternion_to_yaw
-from path_planning.stanley_controller import StanleyController, load_path_csv
+from path_planning.stanley_controller import (
+    StanleyController,
+    load_path_csv,
+    load_recorded_path_origin,
+)
 
 
 PACKAGE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -141,6 +145,7 @@ def _validate(arguments):
 def run(arguments):
     _validate(arguments)
     projection = _projection_from_arguments(arguments)
+    recorded_origin = load_recorded_path_origin(arguments.path)
     points = load_path_csv(arguments.path, gps_projection=projection)
     controller = StanleyController(
         points,
@@ -155,7 +160,11 @@ def run(arguments):
         max_accel=arguments.max_accel_pedal,
         max_brake=arguments.max_brake_pedal,
     )
-    converter = GpsToMapEnu(projection)
+    converter = (
+        GpsToMapEnu(projection)
+        if recorded_origin is None
+        else GpsToRecordedLocalEnu(recorded_origin)
+    )
     localizer = PlanarGpsImuEkf(
         gps_position_sigma_m=arguments.gps_position_sigma,
         gps_speed_sigma_mps=arguments.gps_speed_sigma,
@@ -193,6 +202,17 @@ def run(arguments):
 
     print("MORAI competition Stanley controller started (26.R1 public protocols)")
     print("  path: {} ({} points)".format(os.path.abspath(arguments.path), len(points)))
+    if recorded_origin is not None:
+        print(
+            "  coordinate frame: recorded GPS origin "
+            "lat={:.8f}, lon={:.8f}, alt={:.3f}".format(
+                recorded_origin.latitude_deg,
+                recorded_origin.longitude_deg,
+                recorded_origin.altitude_m,
+            )
+        )
+    else:
+        print("  coordinate frame: MGeo map-origin ENU")
     for kind, port in receive_channels:
         print("  {} receive: {}:{}".format(kind, arguments.bind_ip, port))
     print("  control destination: {}:{} (longCmdType 1 only)".format(*destination))

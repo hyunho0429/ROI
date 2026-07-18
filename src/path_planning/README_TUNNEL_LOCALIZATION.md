@@ -32,8 +32,10 @@ python3 src/path_planning/src/morai_global_csv_recorder.py \
 
 공식 GPS 센서 저장 파일(`latitude, longitude, altitude, eastOffset,
 northOffset`) 또는 이 GPS 열과 IMU 열이 합쳐진 CSV를 받는 경우에는 별도 변환
-없이 그 파일을 두 실행기의 `--path`로 지정할 수 있다. 로더가 GPS 경로를 K-City
-맵 원점 기준 ENU로 변환한다.
+없이 그 파일을 두 실행기의 `--path`로 지정할 수 있다. `x/y/z`와
+`origin_lat/origin_lon`이 함께 있으면 로더는 기록 당시 GPS 원점 기준 로컬 ENU를
+사용하고 실시간 GPS도 같은 원점으로 변환한다. 공식 GPS 5열 파일은 기존 K-City
+MGeo 원점 기준 ENU 변환을 사용한다.
 
 ## 1. INS error-state EKF 버전
 

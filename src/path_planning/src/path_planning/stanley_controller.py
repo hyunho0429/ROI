@@ -5,7 +5,7 @@ import math
 import os
 from dataclasses import dataclass
 
-from path_planning.coordinates import GpsToMapEnu, MapProjection
+from path_planning.coordinates import GeodeticOrigin, GpsToMapEnu, MapProjection
 from path_planning.localization import wrap_angle
 
 
@@ -100,11 +100,8 @@ def _target_speed(values, header, line_number):
     return speed if speed_mps_index is not None else speed / 3.6
 
 
-def _load_origin_anchored_rows(header, rows, line_numbers, gps_projection):
-    """Load local x/y/z whose origin is supplied as latitude/longitude."""
-    x_index = _field_index(header, {"x", "localx", "enuoriginx"})
-    y_index = _field_index(header, {"y", "localy", "enuoriginy"})
-    z_index = _field_index(header, {"z", "localz", "enuoriginz"})
+def _recorded_origin(header, rows, line_numbers):
+    """Read the fixed GPS origin stored in an AutoVehicle-style path CSV."""
     origin_latitude_index = _field_index(
         header, {"originlat", "originlatitude", "originlatitudedeg"}
     )
@@ -114,13 +111,8 @@ def _load_origin_anchored_rows(header, rows, line_numbers, gps_projection):
     origin_altitude_index = _field_index(
         header, {"originalt", "originaltitude", "originaltitudem"}
     )
-    required = (x_index, y_index, origin_latitude_index, origin_longitude_index)
-    if any(index is None for index in required):
+    if origin_latitude_index is None or origin_longitude_index is None:
         return None
-    if gps_projection is None:
-        raise ValueError(
-            "origin_lat/origin_lon path requires the map MGeo projection"
-        )
 
     origins = []
     for values, line_number in zip(rows, line_numbers):
@@ -145,6 +137,12 @@ def _load_origin_anchored_rows(header, rows, line_numbers, gps_projection):
         longitude = _value(
             values, origin_longitude_index, line_number, "origin longitude"
         )
+        if not -90.0 <= latitude <= 90.0 or not -180.0 <= longitude <= 180.0:
+            raise ValueError(
+                "invalid origin latitude/longitude at path file line {}".format(
+                    line_number
+                )
+            )
         altitude = 0.0
         if (
             origin_altitude_index is not None
@@ -154,23 +152,36 @@ def _load_origin_anchored_rows(header, rows, line_numbers, gps_projection):
             altitude = _value(
                 values, origin_altitude_index, line_number, "origin altitude"
             )
-        origins.append((latitude, longitude, altitude))
+        origins.append(GeodeticOrigin(latitude, longitude, altitude))
     if not origins:
         raise ValueError("origin_lat/origin_lon path has no populated origin row")
 
     origin = origins[0]
     for candidate in origins[1:]:
-        if any(abs(first - second) > 1e-8 for first, second in zip(origin, candidate)):
+        if (
+            abs(candidate.latitude_deg - origin.latitude_deg) > 1e-8
+            or abs(candidate.longitude_deg - origin.longitude_deg) > 1e-8
+            or abs(candidate.altitude_m - origin.altitude_m) > 1e-8
+        ):
             raise ValueError("origin_lat/origin_lon must be constant for one path")
+    return origin
 
-    anchor_x, anchor_y, anchor_z = GpsToMapEnu(gps_projection).convert(*origin)
+
+def _load_origin_anchored_rows(header, rows, line_numbers, _gps_projection):
+    """Load x/y/z directly in the GPS origin frame used while recording."""
+    x_index = _field_index(header, {"x", "localx", "enuoriginx"})
+    y_index = _field_index(header, {"y", "localy", "enuoriginy"})
+    z_index = _field_index(header, {"z", "localz", "enuoriginz"})
+    if x_index is None or y_index is None:
+        return None
+    if _recorded_origin(header, rows, line_numbers) is None:
+        return None
     points = []
     for values, line_number in zip(rows, line_numbers):
         point = PathPoint(
-            anchor_x + _value(values, x_index, line_number, "local x"),
-            anchor_y + _value(values, y_index, line_number, "local y"),
-            anchor_z
-            + _value(values, z_index, line_number, "local z", required=False),
+            _value(values, x_index, line_number, "local x"),
+            _value(values, y_index, line_number, "local y"),
+            _value(values, z_index, line_number, "local z", required=False),
             _target_speed(values, header, line_number),
         )
         _append_unique(points, point)
@@ -338,6 +349,33 @@ def load_path_csv(filename, gps_projection=None):
     if len(points) < 2:
         raise ValueError("path CSV must contain at least two distinct points")
     return points
+
+
+def load_recorded_path_origin(filename):
+    """Return a recorded CSV's fixed GPS origin, or None for other formats."""
+    filename = os.path.abspath(os.path.expanduser(filename))
+    with open(filename, encoding="utf-8-sig") as stream:
+        source_lines = [
+            (line_number, line.strip())
+            for line_number, line in enumerate(stream, start=1)
+            if line.strip() and not line.lstrip().startswith("#")
+        ]
+    if not source_lines:
+        raise ValueError("path file is empty")
+    parsed = [
+        (line_number, _split_sensor_line(line))
+        for line_number, line in source_lines
+    ]
+    header = parsed[0][1]
+    if all(_numeric(value) for value in header):
+        return None
+    x_index = _field_index(header, {"x", "localx", "enuoriginx"})
+    y_index = _field_index(header, {"y", "localy", "enuoriginy"})
+    if x_index is None or y_index is None or len(parsed) < 2:
+        return None
+    rows = [values for _line_number, values in parsed[1:]]
+    line_numbers = [line_number for line_number, _values in parsed[1:]]
+    return _recorded_origin(header, rows, line_numbers)
 
 
 class StanleyController:

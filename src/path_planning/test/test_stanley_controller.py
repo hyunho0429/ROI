@@ -14,16 +14,17 @@ if PACKAGE_SRC not in sys.path:
 
 from path_planning.localization import PlanarGpsImuEkf
 from path_planning.longitudinal_controller import PedalSpeedController
-from path_planning.coordinates import MapProjection
+from path_planning.coordinates import GpsToRecordedLocalEnu, MapProjection
 from path_planning.stanley_controller import (
     PathPoint,
     StanleyController,
     load_path_csv,
+    load_recorded_path_origin,
 )
 
 
 class StanleyControllerTest(unittest.TestCase):
-    def test_loads_origin_anchored_sensor_csv_in_map_frame(self):
+    def test_loads_origin_anchored_sensor_csv_in_recorded_local_frame(self):
         header = (
             "x,y,z,target_speed,lat,lon,alt,origin_lat,origin_lon,origin_alt,"
             "imu_qx,imu_qy,imu_qz,imu_qw\n"
@@ -37,24 +38,26 @@ class StanleyControllerTest(unittest.TestCase):
                     "0.380822,0.726466,0,1,37.24098833,126.77436,0,"
                     "37.24098167,126.774355,0,0.86,0,0,0.51\n"
                 )
-            projection = MapProjection(
-                "EPSG:32652", 302595.0, 4124145.0, 0.0
-            )
-            with patch("path_planning.stanley_controller.GpsToMapEnu") as converter_type:
-                converter_type.return_value.convert.return_value = (
-                    -10.846956,
-                    -218.143576,
-                    0.0,
-                )
-                points = load_path_csv(filename, gps_projection=projection)
+            points = load_path_csv(filename)
+            origin = load_recorded_path_origin(filename)
 
         self.assertEqual(len(points), 2)
-        self.assertAlmostEqual(points[0].x_m, -10.846956)
-        self.assertAlmostEqual(points[0].y_m, -218.143576)
-        self.assertAlmostEqual(points[1].x_m, -10.466134)
-        self.assertAlmostEqual(points[1].y_m, -217.417110)
+        self.assertAlmostEqual(points[0].x_m, 0.0)
+        self.assertAlmostEqual(points[0].y_m, 0.0)
+        self.assertAlmostEqual(points[1].x_m, 0.380822)
+        self.assertAlmostEqual(points[1].y_m, 0.726466)
         self.assertEqual(points[0].target_speed_mps, 1.0)
         self.assertEqual(points[1].target_speed_mps, 1.0)
+        self.assertAlmostEqual(origin.latitude_deg, 37.24098167)
+        self.assertAlmostEqual(origin.longitude_deg, 126.774355)
+        self.assertAlmostEqual(origin.altitude_m, 0.0)
+
+        live_x, live_y, live_z = GpsToRecordedLocalEnu(origin).convert(
+            37.24098833, 126.77436, 0.0
+        )
+        self.assertAlmostEqual(live_x, points[1].x_m, delta=0.1)
+        self.assertAlmostEqual(live_y, points[1].y_m, delta=0.1)
+        self.assertAlmostEqual(live_z, points[1].z_m)
 
     def test_interpolates_path_target_speed(self):
         controller = StanleyController(

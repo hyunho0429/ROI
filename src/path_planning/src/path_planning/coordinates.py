@@ -1,6 +1,7 @@
 """Coordinate conversion helpers for MORAI GPS and local ENU map paths."""
 
 import json
+import math
 import os
 from dataclasses import dataclass
 
@@ -48,3 +49,40 @@ class GpsToMapEnu:
             northing - self._projection.origin_y_m,
             z_m,
         )
+
+
+@dataclass(frozen=True)
+class GeodeticOrigin:
+    latitude_deg: float
+    longitude_deg: float
+    altitude_m: float = 0.0
+
+
+class GpsToRecordedLocalEnu:
+    """Match AutoVehicle's GPS-origin local ENU conversion for recorded CSVs."""
+
+    EARTH_RADIUS_M = 6378137.0
+
+    def __init__(self, origin):
+        self.origin = origin
+        self._origin_latitude_rad = math.radians(origin.latitude_deg)
+
+    def convert(self, latitude_deg, longitude_deg, altitude_m=None):
+        delta_latitude_rad = math.radians(
+            float(latitude_deg) - self.origin.latitude_deg
+        )
+        delta_longitude_rad = math.radians(
+            float(longitude_deg) - self.origin.longitude_deg
+        )
+        x_east_m = (
+            self.EARTH_RADIUS_M
+            * delta_longitude_rad
+            * math.cos(self._origin_latitude_rad)
+        )
+        y_north_m = self.EARTH_RADIUS_M * delta_latitude_rad
+        z_up_m = (
+            0.0
+            if altitude_m is None
+            else float(altitude_m) - self.origin.altitude_m
+        )
+        return x_east_m, y_north_m, z_up_m
