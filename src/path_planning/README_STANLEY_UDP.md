@@ -130,6 +130,13 @@ Competition Status의 909처럼 1024 미만 포트는 Linux에서 권한이 필�
 가능하면 MORAI와 코드 양쪽 포트를 1024 이상으로 바꾸고, 대회 설정상 909를
 유지해야 하면 실행 환경의 권한 설정을 확인한다.
 
+표준 `Ego Ctrl Cmd`는 55 byte, `data_length=23`으로 전송한다. payload는
+`ctrl_mode, gear, longCmdType, velocity, acceleration, accel, brake, steering`이며
+후륜 조향 필드를 붙이지 않는다. 실행 직후 안전 제동 상태로 `ctrl_mode=2`,
+`gear=4` 패킷을 반복 전송한다. MORAI UI에서 기존 AutoMode로 불리던 모드는
+24.R2부터 `AV-ExternalCtrl`로 표시되므로, Competition Status가 mode 2와 D를
+회신한 뒤에만 가속을 시작한다.
+
 ## 실행
 
 ```bash
@@ -154,6 +161,8 @@ sudo "$(which python3)" src/path_planning/src/morai_stanley_ins_udp.py \
 ```text
 localization: GPS/IMU/status-aided 15-state error-state EKF INS
 Stanley: front axle 3.00 m, no look-ahead target, fixed speed 10.0 km/h
+requesting AV-ExternalCtrl (ctrl_mode=2) and Drive (gear=4)
+Competition control state: ctrl_mode=2 (AV-ExternalCtrl), gear=4 (D)
 ```
 
 주행 로그의 `cmd=(accel,steering,brake)`를 확인한다. 정지인데 accel이 0보다

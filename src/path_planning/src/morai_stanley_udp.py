@@ -23,6 +23,7 @@ from path_planning.morai_udp_competition_status import (
 from path_planning.morai_udp_ctrl_cmd import (
     brake_command,
     encode_ego_ctrl_cmd_26r1,
+    external_control_ready,
     pedal_command,
 )
 from path_planning.morai_udp_gps import GpsPacketError, parse_nmea_datagram
@@ -233,6 +234,8 @@ def run(arguments):
     last_log = 0.0
     latest_gps_time = latest_imu_time = latest_status_time = None
     status_speed_mps = None
+    status_ctrl_mode = status_gear = None
+    last_drive_state = None
     collision_brake_until = 0.0
     invalid_counts = {kind: 0 for kind, _port in receive_channels}
     packet_errors = (
@@ -270,6 +273,11 @@ def run(arguments):
             arguments.control_point_offset, arguments.target_speed_kmh
         )
     )
+    print("  requesting AV-ExternalCtrl (ctrl_mode=2) and Drive (gear=4)")
+    takeover_packet = encode_ego_ctrl_cmd_26r1(brake_command())
+    for _ in range(3):
+        control_socket.sendto(takeover_packet, destination)
+        time.sleep(0.02)
 
     try:
         while True:
@@ -312,7 +320,23 @@ def run(arguments):
                         # Competition Status position/yaw are intentionally not
                         # used: localization must still reflect GPS/IMU noise.
                         status_speed_mps = abs(status.signed_velocity_kmh) / 3.6
+                        status_ctrl_mode = status.ctrl_mode
+                        status_gear = status.gear
                         latest_status_time = received
+                        drive_state = (status_ctrl_mode, status_gear)
+                        if drive_state != last_drive_state:
+                            print(
+                                "Competition control state: ctrl_mode={} {}, "
+                                "gear={} {}".format(
+                                    status_ctrl_mode,
+                                    "(AV-ExternalCtrl)"
+                                    if status_ctrl_mode == 2
+                                    else "(not external)",
+                                    status_gear,
+                                    "(D)" if status_gear == 4 else "(not D)",
+                                )
+                            )
+                            last_drive_state = drive_state
                     else:
                         collision = parse_collision_data_26r1(packet)
                         if collision.collision_detected:
@@ -350,8 +374,11 @@ def run(arguments):
             )
             state = localizer.state_at(now) if localization_fresh else None
             collision_active = now < collision_brake_until
+            drive_control_ready = external_control_ready(
+                status_ctrl_mode, status_gear
+            )
 
-            if state is None or collision_active:
+            if state is None or collision_active or not drive_control_ready:
                 speed_controller.reset()
                 steering_filter.reset()
                 command = brake_command()
@@ -397,6 +424,14 @@ def run(arguments):
                 last_log = now
                 if collision_active:
                     print("Collision brake active")
+                elif state is not None and not drive_control_ready:
+                    print(
+                        "Requesting AV-ExternalCtrl/D: current ctrl_mode={}, "
+                        "gear={}; takeover brake command is being sent".format(
+                            "never" if status_ctrl_mode is None else status_ctrl_mode,
+                            "never" if status_gear is None else status_gear,
+                        )
+                    )
                 elif state is None:
                     print(
                         "Waiting/stale sensors: GPS={}, IMU={} "
