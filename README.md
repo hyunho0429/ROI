@@ -39,6 +39,22 @@ python3 src/path_planning/src/morai_global_csv_recorder.py --bind-ip 0.0.0.0 --p
 
 The recorder is standalone and does not require ROS. The default output is `src/path_planning/data/morai_global_path.csv`. See `src/path_planning/README_GLOBAL_CSV_RECORDER.md` for MORAI network settings and parameters.
 
+## MORAI UDP Stanley control
+
+The `dev/stanley` branch adds a standalone Stanley controller with noisy
+GPS/IMU sensor fusion and the documented MORAI UDP control packet. Install
+`src/path_planning/requirements.txt`, then run:
+
+```bash
+python3 src/path_planning/src/morai_stanley_udp.py \
+  --path src/path_planning/data/morai_global_path.csv \
+  --gps-port 9100 --imu-port 9101 \
+  --control-ip 127.0.0.1 --control-port 9090
+```
+
+See `src/path_planning/README_STANLEY_UDP.md` for the MORAI version boundary,
+coordinate conversion, network settings, safety behavior, and tuning values.
+
 For a fixed start and goal node:
 
 ```bash
