@@ -20,13 +20,13 @@ python3 src/path_planning/src/morai_global_csv_recorder.py \
   --bind-ip 0.0.0.0 \
   --port 3315 \
   --output src/path_planning/data/morai_global_path.csv \
-  --sample-distance 0.5
+  --sample-period 1.0
 ```
 
-첫 위치는 즉시 저장한다. 이후에는 수신 시간이나 차량 속도와 무관하게 누적
-3차원 거리 `sqrt(dx² + dy² + dz²)`를 기준으로 0.5 m 간격의 점을 선형
-보간해 저장한다. 평지에서는 XY 이동으로 저장되고 경사 구간에서는 Z도 거리
-계산에 반영된다. Z가 일정량 이상 변해야 저장되는 방식은 아니다.
+첫 위치는 즉시 저장하고 이후에는 차량의 이동거리와 관계없이 기본 1초마다 당시
+Competition Status의 위치를 저장한다. 차량이 정지해 있거나 Z가 변하지 않아도
+1초가 지나면 새 행이 추가된다. 주기를 바꾸려면 `--sample-period 0.5`처럼 초
+단위로 지정한다.
 
 주요 열은 다음과 같다.
 

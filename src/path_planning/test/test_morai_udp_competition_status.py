@@ -82,25 +82,40 @@ class MoraiUdpCompetitionStatusTest(unittest.TestCase):
         with self.assertRaises(CompetitionStatusPacketError):
             parse_competition_vehicle_status(make_packet()[:-48])
 
-    def test_recorder_converts_status_units_and_resamples_3d(self):
+    def test_recorder_converts_units_and_samples_once_per_second(self):
         first_packet = bytearray(make_packet(BASE_PACKET_SIZE))
+        middle_packet = bytearray(make_packet(BASE_PACKET_SIZE))
         second_packet = bytearray(make_packet(BASE_PACKET_SIZE))
         struct.pack_into("<fff", first_packet, 77, 0.0, 0.0, 0.0)
+        struct.pack_into("<fff", middle_packet, 77, 0.0, 0.0, 0.6)
         struct.pack_into("<fff", second_packet, 77, 0.0, 0.0, 1.2)
 
         with tempfile.TemporaryDirectory() as directory:
             output_file = os.path.join(directory, "udp_path.csv")
-            recorder = MoraiGlobalCsvRecorder(output_file, sample_distance=0.5)
-            for packet, receive_time in ((first_packet, 100.0), (second_packet, 101.0)):
+            recorder = MoraiGlobalCsvRecorder(output_file, sample_period=1.0)
+            for packet, receive_time in (
+                (first_packet, 100.0),
+                (middle_packet, 100.5),
+                (second_packet, 101.0),
+            ):
                 status = parse_competition_vehicle_status(bytes(packet))
                 recorder.add_sample(status_to_sample(status, receive_time))
             recorder.close()
             with open(output_file, newline="", encoding="utf-8") as stream:
                 rows = list(csv.DictReader(stream))
 
-        self.assertEqual(len(rows), 3)
-        self.assertEqual([float(row["global_enu_z_m"]) for row in rows], [0.0, 0.5, 1.0])
+        self.assertEqual(len(rows), 2)
+        saved_z = [float(row["global_enu_z_m"]) for row in rows]
+        self.assertAlmostEqual(saved_z[0], 0.0)
+        self.assertAlmostEqual(saved_z[1], 1.2)
         self.assertAlmostEqual(float(rows[0]["velocity_x_mps"]), 10.0)
+
+    def test_recorder_rejects_nonpositive_sample_period(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaises(ValueError):
+                MoraiGlobalCsvRecorder(
+                    os.path.join(directory, "bad.csv"), sample_period=0.0
+                )
 
 
 if __name__ == "__main__":

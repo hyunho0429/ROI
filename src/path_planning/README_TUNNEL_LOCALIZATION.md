@@ -26,7 +26,8 @@ MORAI 네트워크 포트 예시는 다음과 같다. 실제 Sensor/Network Sett
 ```bash
 python3 src/path_planning/src/morai_global_csv_recorder.py \
   --port 3315 \
-  --output src/path_planning/data/morai_global_path.csv
+  --output src/path_planning/data/morai_global_path.csv \
+  --sample-period 1.0
 ```
 
 ## 1. INS error-state EKF 버전

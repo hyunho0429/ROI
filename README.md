@@ -31,7 +31,7 @@ rostopic echo /global_path_marker
 
 ## MORAI keyboard path CSV recording
 
-To save Competition Vehicle Status ENU coordinates at uniform 0.5 m 3-D intervals:
+To save Competition Vehicle Status ENU coordinates once per second:
 
 ```bash
 python3 src/path_planning/src/morai_global_csv_recorder.py --bind-ip 0.0.0.0 --port 3315

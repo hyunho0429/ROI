@@ -10,7 +10,7 @@ import sys
 import threading
 import time
 
-from path_planning.csv_path_writer import CsvPathWriter, resample_segment
+from path_planning.csv_path_writer import CsvPathWriter
 from path_planning.morai_udp_competition_status import (
     CompetitionStatusPacketError,
     parse_competition_vehicle_status,
@@ -44,61 +44,44 @@ def status_to_sample(status, receive_time_sec):
 
 
 class MoraiGlobalCsvRecorder:
-    def __init__(self, output_file, sample_distance=0.5, append=False):
-        if not math.isfinite(sample_distance) or sample_distance <= 0.0:
-            raise ValueError("sample_distance must be a finite value greater than zero")
+    def __init__(self, output_file, sample_period=1.0, append=False):
+        if not math.isfinite(sample_period) or sample_period <= 0.0:
+            raise ValueError("sample_period must be a finite value greater than zero")
 
         self.output_file = os.path.abspath(os.path.expanduser(output_file))
-        self.sample_distance = float(sample_distance)
+        self.sample_period = float(sample_period)
         self._lock = threading.RLock()
-        self._previous_sample = None
-        self._distance_to_next = self.sample_distance
+        self._last_sample_clock = None
         self._sequence = 0
         self._closed = False
         self._writer = CsvPathWriter(self.output_file, append=append)
 
-    def add_sample(self, sample):
+    @property
+    def written_count(self):
+        return self._sequence
+
+    def add_sample(self, sample, sample_clock_sec=None):
+        """Write the first sample immediately, then at fixed time intervals."""
         with self._lock:
             if self._closed:
-                return
-            if self._previous_sample is None:
-                self._write_sample(sample)
-                self._previous_sample = sample
-                return
-
-            fractions, self._distance_to_next = resample_segment(
-                self._previous_sample["enu"],
-                sample["enu"],
-                self._distance_to_next,
-                self.sample_distance,
+                return False
+            clock = (
+                float(sample["receive_time_sec"])
+                if sample_clock_sec is None
+                else float(sample_clock_sec)
             )
-            for fraction in fractions:
-                self._write_sample(self._interpolate(self._previous_sample, sample, fraction))
-            self._previous_sample = sample
-
-    @staticmethod
-    def _interpolate(start, end, fraction):
-        def lerp(first, second):
-            return first + (second - first) * fraction
-
-        def lerp_angle(first, second):
-            delta = (second - first + 180.0) % 360.0 - 180.0
-            return first + delta * fraction
-
-        interpolated = dict(end)
-        interpolated.update(
-            {
-                "receive_time_sec": lerp(start["receive_time_sec"], end["receive_time_sec"]),
-                "message_time_sec": lerp(start["message_time_sec"], end["message_time_sec"]),
-                "enu": tuple(lerp(a, b) for a, b in zip(start["enu"], end["enu"])),
-                "roll_deg": lerp_angle(start["roll_deg"], end["roll_deg"]),
-                "pitch_deg": lerp_angle(start["pitch_deg"], end["pitch_deg"]),
-                "heading_deg": lerp_angle(start["heading_deg"], end["heading_deg"]) % 360.0,
-                "velocity": tuple(lerp(a, b) for a, b in zip(start["velocity"], end["velocity"])),
-                "signed_speed_mps": lerp(start["signed_speed_mps"], end["signed_speed_mps"]),
-            }
-        )
-        return interpolated
+            if not math.isfinite(clock):
+                raise ValueError("sample clock must be finite")
+            elapsed = (
+                None
+                if self._last_sample_clock is None
+                else clock - self._last_sample_clock
+            )
+            if elapsed is not None and 0.0 <= elapsed < self.sample_period:
+                return False
+            self._write_sample(sample)
+            self._last_sample_clock = clock
+            return True
 
     def _write_sample(self, sample):
         enu = sample["enu"]
@@ -146,7 +129,13 @@ def parse_arguments(argv=None):
     parser.add_argument("--bind-ip", default="0.0.0.0", help="Local interface to bind")
     parser.add_argument("--port", type=int, default=3315, help="Competition Status destination port")
     parser.add_argument("--output", default=DEFAULT_OUTPUT_FILE, help="Output CSV path")
-    parser.add_argument("--sample-distance", type=float, default=0.5, help="3-D waypoint spacing in metres")
+    parser.add_argument("--sample-period", type=float, default=1.0, help="CSV sampling period in seconds")
+    parser.add_argument(
+        "--sample-distance",
+        type=float,
+        default=None,
+        help=argparse.SUPPRESS,
+    )
     parser.add_argument("--append", action="store_true", help="Append only when the CSV header matches")
     return parser.parse_args(argv)
 
@@ -163,15 +152,21 @@ def run_udp_recorder(arguments):
 
     recorder = None
     try:
+        if arguments.sample_distance is not None:
+            print(
+                "Warning: --sample-distance is deprecated and ignored; "
+                "using --sample-period {:.3f} s".format(arguments.sample_period),
+                file=sys.stderr,
+            )
         recorder = MoraiGlobalCsvRecorder(
             arguments.output,
-            sample_distance=arguments.sample_distance,
+            sample_period=arguments.sample_period,
             append=arguments.append,
         )
         invalid_packets = 0
         print("MORAI Competition Status path recorder started")
         print("  listen: {}:{}".format(arguments.bind_ip, arguments.port))
-        print("  3-D sample distance: {:.3f} m".format(arguments.sample_distance))
+        print("  sample period: {:.3f} s".format(arguments.sample_period))
         print("  output: {}".format(recorder.output_file))
 
         while True:
@@ -181,6 +176,7 @@ def run_udp_recorder(arguments):
                 continue
 
             receive_time_sec = time.time()
+            sample_clock_sec = time.monotonic()
             try:
                 status = parse_competition_vehicle_status(packet)
             except CompetitionStatusPacketError as error:
@@ -189,7 +185,14 @@ def run_udp_recorder(arguments):
                     print("Ignored incompatible UDP packet: {}".format(error), file=sys.stderr)
                 continue
 
-            recorder.add_sample(status_to_sample(status, receive_time_sec))
+            if recorder.add_sample(
+                status_to_sample(status, receive_time_sec), sample_clock_sec
+            ):
+                print(
+                    "  saved #{:d}: ({:.3f}, {:.3f}, {:.3f})".format(
+                        recorder.written_count, *status.position_m
+                    )
+                )
     except KeyboardInterrupt:
         print("\nStopping recorder...")
     finally:
