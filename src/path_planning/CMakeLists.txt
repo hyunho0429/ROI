@@ -3,7 +3,6 @@ project(path_planning)
 
 find_package(catkin REQUIRED COMPONENTS
   geometry_msgs
-  morai_msgs
   nav_msgs
   rospy
   sensor_msgs
@@ -13,7 +12,7 @@ find_package(catkin REQUIRED COMPONENTS
 catkin_python_setup()
 
 catkin_package(
-  CATKIN_DEPENDS geometry_msgs morai_msgs nav_msgs rospy sensor_msgs visualization_msgs
+  CATKIN_DEPENDS geometry_msgs nav_msgs rospy sensor_msgs visualization_msgs
 )
 
 include_directories(

@@ -59,6 +59,15 @@ class CsvPathWriterTest(unittest.TestCase):
             self.assertEqual(rows[0]["sequence"], "1")
             self.assertEqual(rows[0]["global_enu_x_m"], "10.000000000")
 
+    def test_append_rejects_an_old_or_incompatible_header(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output_file = os.path.join(directory, "old_path.csv")
+            with open(output_file, "w", newline="", encoding="utf-8") as stream:
+                stream.write("x,y,z\n")
+
+            with self.assertRaises(ValueError):
+                CsvPathWriter(output_file, append=True)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,69 +1,76 @@
-# MORAI 전역 ENU 경로 CSV 기록기
+# MORAI 24.R1 UDP 전역 ENU 경로 CSV 기록기
 
-키보드로 MORAI Ego 차량을 주행하면 `/Ego_topic`의 `position`을 CSV 경로로 저장한다.
+MORAI Ego 차량의 **UDP Ego Vehicle Status** 패킷을 직접 수신해 경로 CSV를 만든다. ROS, `roscore`, `rospy`, `morai_msgs`가 필요하지 않다.
 
-시간 주기 대신 차량이 **3차원 공간에서 0.5 m 이동할 때마다** waypoint를 만든다. 토픽 수신 사이에 0.5 m보다 많이 이동해도 선형 보간하므로 저장 간격이 일정하다. 이 방식은 속도에 따라 점 간격이 크게 달라지는 시간 기반 저장보다 Stanley 경로 추종용 기준 경로에 적합하다.
+이 구현은 [MORAI SIM: Drive 24.R1.0 Ego Vehicle Status UDP 프로토콜](https://help-morai-sim.scrollhelp.site/ko/morai-sim-drive/24.R1.0/ros-1#id-(24.R1.0-ko)%ED%86%B5%EC%8B%A0%EB%A9%94%EC%8B%9C%EC%A7%80%ED%94%84%EB%A1%9C%ED%86%A0%EC%BD%9C-EgoVehicleStatus.1)의 181 byte 패킷만 허용한다.
 
-좌표는 별도 변환하지 않는다. MORAI 문서에 따라 `position.x/y/z`를 맵 원점 기준 ENU(`x=east`, `y=north`, `z=up`)로 그대로 기록한다. UTM offset은 임의로 더하지 않는다.
+- Header: `#MoraiInfo$`
+- `data_length`: 152
+- 전체 패킷: 181 byte
+- Timestamp: seconds 4 byte + nanoseconds 4 byte
+- Tail: `0x0D 0x0A`
 
-## 빌드 전 확인
+다른 버전의 패킷은 잘못된 좌표로 저장하지 않고 오류 메시지와 함께 무시한다.
 
-ROS 1에서 `morai_msgs`가 보이는지 확인한다.
+## MORAI 설정
 
-```bash
-rosmsg show morai_msgs/EgoVehicleStatus
-```
+MORAI의 `Network Settings → Ego Network → UDP → Publisher`에서 `Ego Vehicle Status`를 활성화한다.
 
-메시지 패키지가 없다면 catkin workspace의 `src` 아래에 MORAI 공식 메시지 저장소를 설치한 뒤 빌드한다.
+- Destination IP: 기록기를 실행하는 PC의 IP
+- Destination Port: 기록기의 `--port`와 동일한 값(예: `909`)
+- 동일 PC에서 실행하면 IP로 `127.0.0.1` 사용 가능
+- 다른 PC, VM 또는 WSL이면 `hostname -I`로 실제 수신 IP 확인
 
-```bash
-cd ~/my-morai-admodule/src
-git clone https://github.com/MORAI-Autonomous/MORAI-ROS_morai_msgs.git
-
-cd ~/my-morai-admodule
-source /opt/ros/noetic/setup.bash
-catkin_make
-source devel/setup.bash
-```
-
-MORAI Network Settings에서 `/Ego_topic`이 발행되도록 설정하고 수신을 확인한다.
+포트에 패킷이 들어오는지는 다음처럼 확인할 수 있다.
 
 ```bash
-rostopic echo -n 1 /Ego_topic
+sudo tcpdump -ni any udp port 909
 ```
 
 ## 실행
 
+저장소 최상위 폴더에서 실행한다.
+
 ```bash
-roslaunch path_planning morai_global_csv_recorder.launch
+python3 src/path_planning/src/morai_global_csv_recorder.py \
+  --bind-ip 0.0.0.0 \
+  --port 909
 ```
 
-기본 출력 파일은 다음과 같다.
+기본 출력 파일:
 
 ```text
 src/path_planning/data/morai_global_path.csv
 ```
 
-첫 메시지는 즉시 저장하고, 이후 누적 3차원 이동거리 `sqrt(dx^2 + dy^2 + dz^2)`가 0.5 m가 될 때마다 보간점을 저장한다. 정지 중에는 중복 행을 만들지 않는다. 모든 행은 즉시 flush하므로 실행 중에도 CSV에 반영된다.
-
-간격이나 파일명을 바꾸려면 다음처럼 실행한다.
+출력 파일과 waypoint 간격을 지정할 수도 있다.
 
 ```bash
-roslaunch path_planning morai_global_csv_recorder.launch \
-  output_file:=/home/ubuntu/path/run_01.csv \
-  sample_distance:=0.5
+python3 src/path_planning/src/morai_global_csv_recorder.py \
+  --bind-ip 0.0.0.0 \
+  --port 909 \
+  --output ~/morai_paths/run_01.csv \
+  --sample-distance 0.5
 ```
 
-기존 CSV 뒤에 이어 쓰려면 `append:=true`를 지정한다.
+종료는 `Ctrl+C`를 사용한다. 기존 CSV에 이어 쓰려면 `--append`를 추가한다. 열 구성이 다른 과거 ROS CSV에는 실수로 이어 쓰지 못하도록 차단한다.
 
-## 주요 CSV 열
+## 저장 방식
+
+첫 위치는 즉시 저장한다. 이후 누적 3차원 이동거리 `sqrt(dx^2 + dy^2 + dz^2)`가 0.5 m가 될 때마다 선형 보간점을 저장한다. 평지에서는 XY 이동만으로 저장되고, 오르막·내리막에서는 Z 변화도 전체 이동거리에 포함된다.
+
+UDP 패킷의 `Velocity_XYZ`와 signed velocity는 문서상 km/h이므로 CSV에는 m/s로 변환해 기록한다.
+
+주요 CSV 열:
 
 - `global_enu_x_m`, `global_enu_y_m`, `global_enu_z_m`: MORAI 맵 원점 기준 ENU 위치
-- `heading_deg`: 차량 heading
-- `velocity_x_mps`, `velocity_y_mps`, `velocity_z_mps`, `speed_mps`: 차량 속도
+- `roll_deg`, `pitch_deg`, `heading_deg`: UDP 차량 회전 정보
+- `velocity_x_mps`, `velocity_y_mps`, `velocity_z_mps`, `speed_mps`: m/s 변환 속도
+- `wheelbase_m`, `overhang_m`, `rear_overhang_m`: UDP 차량 제원
+- `ctrl_mode`, `gear`, `map_data_id`, `link_id`: UDP 상태 정보
 
-`z`는 단순 보관만 하는 것이 아니라 waypoint 간격 계산에도 포함된다. 고저차가 있거나 서로 겹치는 도로의 최근접 경로점을 찾을 때 활용할 수 있다.
+`message_time_sec`은 UDP 패킷 timestamp다. MORAI 문서에 따르면 일반 모드에서는 Unix timestamp이고 Sync Mode에서는 시뮬레이터 시작 시간 기준이다. `receive_time_sec`은 기록기 PC에서 패킷을 받은 Unix 시간이다.
 
-## 차량 위치 기준점에 관한 제한
+## 차량 위치 기준점 제한
 
-MORAI 26.R1 UDP 문서는 `posX`, `posY`, `posZ`를 단지 "차량의 위치"라고 설명한다. 앞차축 중심, 뒷차축 중심, 차량 무게중심 중 어느 기준인지 명시하지 않으므로 이 기록기는 임의의 축간거리 보정을 적용하지 않는다. Stanley 제어에서 앞차축 위치가 필요하면 차량 모델의 기준점이 확인된 뒤 wheelbase와 heading으로 별도 계산해야 한다.
+24.R1 문서는 `posX`, `posY`, `posZ`를 차량 위치라고 설명하지만 앞차축·뒷차축·무게중심 중 어느 기준인지는 명시하지 않는다. 따라서 wheelbase가 패킷에 포함되어도 임의의 앞차축 보정은 적용하지 않는다.

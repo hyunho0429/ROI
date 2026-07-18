@@ -9,17 +9,26 @@ import os
 CSV_FIELDNAMES = [
     "sequence",
     "recorded_at_utc",
-    "ros_time_sec",
+    "receive_time_sec",
     "message_time_sec",
-    "unique_id",
     "global_enu_x_m",
     "global_enu_y_m",
     "global_enu_z_m",
+    "roll_deg",
+    "pitch_deg",
     "heading_deg",
     "velocity_x_mps",
     "velocity_y_mps",
     "velocity_z_mps",
     "speed_mps",
+    "signed_speed_mps",
+    "ctrl_mode",
+    "gear",
+    "map_data_id",
+    "wheelbase_m",
+    "overhang_m",
+    "rear_overhang_m",
+    "link_id",
 ]
 
 
@@ -70,6 +79,11 @@ class CsvPathWriter:
         os.makedirs(output_dir, exist_ok=True)
 
         has_content = append and os.path.exists(self.output_file) and os.path.getsize(self.output_file) > 0
+        if has_content:
+            with open(self.output_file, newline="", encoding="utf-8") as existing_stream:
+                existing_header = next(csv.reader(existing_stream), [])
+            if existing_header != CSV_FIELDNAMES:
+                raise ValueError("cannot append because the existing CSV header does not match")
         mode = "a" if append else "w"
         self._stream = open(self.output_file, mode, newline="", encoding="utf-8")
         self._writer = csv.DictWriter(self._stream, fieldnames=CSV_FIELDNAMES)

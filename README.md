@@ -31,13 +31,13 @@ rostopic echo /global_path_marker
 
 ## MORAI keyboard path CSV recording
 
-To save the Ego vehicle's global ENU coordinates to CSV at uniform 0.5 m 3-D intervals:
+To save MORAI 24.R1 UDP Ego Vehicle Status coordinates to CSV at uniform 0.5 m 3-D intervals:
 
 ```bash
-roslaunch path_planning morai_global_csv_recorder.launch
+python3 src/path_planning/src/morai_global_csv_recorder.py --bind-ip 0.0.0.0 --port 909
 ```
 
-The default output is `src/path_planning/data/morai_global_path.csv`. See `src/path_planning/README_GLOBAL_CSV_RECORDER.md` for the documented map-origin ENU coordinate definition and parameters.
+The recorder is standalone and does not require ROS. The default output is `src/path_planning/data/morai_global_path.csv`. See `src/path_planning/README_GLOBAL_CSV_RECORDER.md` for MORAI network settings and parameters.
 
 For a fixed start and goal node:
 

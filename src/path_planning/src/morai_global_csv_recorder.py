@@ -1,79 +1,60 @@
 #!/usr/bin/env python3
-"""Record the MORAI ego vehicle's ENU path at uniform 3-D intervals."""
+"""Record MORAI 24.R1 UDP Ego Vehicle Status positions to a path CSV."""
 
+import argparse
 import datetime
 import math
 import os
+import socket
+import sys
 import threading
-
-import rospy
-from morai_msgs.msg import EgoVehicleStatus
+import time
 
 from path_planning.csv_path_writer import CsvPathWriter, resample_segment
+from path_planning.morai_udp_ego_status import UdpPacketError, parse_ego_vehicle_status_24r1
 
 
-def _as_bool(value):
-    if isinstance(value, str):
-        return value.strip().lower() in ("1", "true", "yes", "on")
-    return bool(value)
+DEFAULT_OUTPUT_FILE = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "data", "morai_global_path.csv")
+)
+
+
+def status_to_sample(status, receive_time_sec):
+    """Convert documented UDP units to the recorder's SI-unit sample."""
+    return {
+        "receive_time_sec": float(receive_time_sec),
+        "message_time_sec": status.timestamp_sec,
+        "enu": status.position_m,
+        "roll_deg": status.rotation_deg[0],
+        "pitch_deg": status.rotation_deg[1],
+        "heading_deg": status.rotation_deg[2],
+        "velocity": tuple(value / 3.6 for value in status.velocity_kmh),
+        "signed_speed_mps": status.signed_velocity_kmh / 3.6,
+        "ctrl_mode": status.ctrl_mode,
+        "gear": status.gear,
+        "map_data_id": status.map_data_id,
+        "wheelbase_m": status.wheelbase_m,
+        "overhang_m": status.overhang_m,
+        "rear_overhang_m": status.rear_overhang_m,
+        "link_id": status.link_id,
+    }
 
 
 class MoraiGlobalCsvRecorder:
-    def __init__(self):
-        self._topic = rospy.get_param("~ego_topic", "/Ego_topic")
-        self._sample_distance = float(rospy.get_param("~sample_distance", 0.5))
-        self._append = _as_bool(rospy.get_param("~append", False))
-        self._output_file = os.path.abspath(
-            os.path.expanduser(
-                rospy.get_param(
-                    "~output_file",
-                    "~/morai_paths/morai_global_path.csv",
-                )
-            )
-        )
+    def __init__(self, output_file, sample_distance=0.5, append=False):
+        if not math.isfinite(sample_distance) or sample_distance <= 0.0:
+            raise ValueError("sample_distance must be a finite value greater than zero")
 
-        if self._sample_distance <= 0.0:
-            raise ValueError("~sample_distance must be greater than zero")
-
+        self.output_file = os.path.abspath(os.path.expanduser(output_file))
+        self.sample_distance = float(sample_distance)
         self._lock = threading.RLock()
         self._previous_sample = None
-        self._distance_to_next = self._sample_distance
+        self._distance_to_next = self.sample_distance
         self._sequence = 0
         self._closed = False
+        self._writer = CsvPathWriter(self.output_file, append=append)
 
-        self._writer = CsvPathWriter(self._output_file, append=self._append)
-        rospy.on_shutdown(self.close)
-        self._subscriber = rospy.Subscriber(
-            self._topic,
-            EgoVehicleStatus,
-            self._status_callback,
-            queue_size=1,
-        )
-        rospy.loginfo("MORAI global path CSV recorder started")
-        rospy.loginfo("  ego topic: %s", self._topic)
-        rospy.loginfo("  3-D sample distance: %.3f m", self._sample_distance)
-        rospy.loginfo("  output file: %s", self._output_file)
-
-    def _status_callback(self, message):
-        message_time = message.header.stamp.to_sec()
-        if message_time <= 0.0:
-            message_time = rospy.Time.now().to_sec()
-
-        sample = {
-            "message_time_sec": message_time,
-            "unique_id": message.unique_id,
-            "enu": (
-                float(message.position.x),
-                float(message.position.y),
-                float(message.position.z),
-            ),
-            "heading_deg": float(message.heading),
-            "velocity": (
-                float(message.velocity.x),
-                float(message.velocity.y),
-                float(message.velocity.z),
-            ),
-        }
+    def add_sample(self, sample):
         with self._lock:
             if self._closed:
                 return
@@ -86,7 +67,7 @@ class MoraiGlobalCsvRecorder:
                 self._previous_sample["enu"],
                 sample["enu"],
                 self._distance_to_next,
-                self._sample_distance,
+                self.sample_distance,
             )
             for fraction in fractions:
                 self._write_sample(self._interpolate(self._previous_sample, sample, fraction))
@@ -97,44 +78,54 @@ class MoraiGlobalCsvRecorder:
         def lerp(first, second):
             return first + (second - first) * fraction
 
-        heading_delta = (end["heading_deg"] - start["heading_deg"] + 180.0) % 360.0 - 180.0
-        return {
-            "message_time_sec": lerp(start["message_time_sec"], end["message_time_sec"]),
-            "unique_id": end["unique_id"],
-            "enu": tuple(lerp(a, b) for a, b in zip(start["enu"], end["enu"])),
-            "heading_deg": (start["heading_deg"] + heading_delta * fraction) % 360.0,
-            "velocity": tuple(lerp(a, b) for a, b in zip(start["velocity"], end["velocity"])),
-        }
+        def lerp_angle(first, second):
+            delta = (second - first + 180.0) % 360.0 - 180.0
+            return first + delta * fraction
+
+        interpolated = dict(end)
+        interpolated.update(
+            {
+                "receive_time_sec": lerp(start["receive_time_sec"], end["receive_time_sec"]),
+                "message_time_sec": lerp(start["message_time_sec"], end["message_time_sec"]),
+                "enu": tuple(lerp(a, b) for a, b in zip(start["enu"], end["enu"])),
+                "roll_deg": lerp_angle(start["roll_deg"], end["roll_deg"]),
+                "pitch_deg": lerp_angle(start["pitch_deg"], end["pitch_deg"]),
+                "heading_deg": lerp_angle(start["heading_deg"], end["heading_deg"]) % 360.0,
+                "velocity": tuple(lerp(a, b) for a, b in zip(start["velocity"], end["velocity"])),
+                "signed_speed_mps": lerp(start["signed_speed_mps"], end["signed_speed_mps"]),
+            }
+        )
+        return interpolated
 
     def _write_sample(self, sample):
         enu = sample["enu"]
         velocity = sample["velocity"]
-        now = rospy.Time.now().to_sec()
         self._sequence += 1
-
-        row = {
-            "sequence": self._sequence,
-            "recorded_at_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-            "ros_time_sec": "{:.9f}".format(now),
-            "message_time_sec": "{:.9f}".format(sample["message_time_sec"]),
-            "unique_id": sample["unique_id"],
-            "global_enu_x_m": "{:.9f}".format(enu[0]),
-            "global_enu_y_m": "{:.9f}".format(enu[1]),
-            "global_enu_z_m": "{:.9f}".format(enu[2]),
-            "heading_deg": "{:.6f}".format(sample["heading_deg"]),
-            "velocity_x_mps": "{:.6f}".format(velocity[0]),
-            "velocity_y_mps": "{:.6f}".format(velocity[1]),
-            "velocity_z_mps": "{:.6f}".format(velocity[2]),
-            "speed_mps": "{:.6f}".format(math.sqrt(sum(value * value for value in velocity))),
-        }
-
-        self._writer.write(row)
-        rospy.logdebug(
-            "Saved point %d: ENU=(%.3f, %.3f, %.3f)",
-            self._sequence,
-            enu[0],
-            enu[1],
-            enu[2],
+        self._writer.write(
+            {
+                "sequence": self._sequence,
+                "recorded_at_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                "receive_time_sec": "{:.9f}".format(sample["receive_time_sec"]),
+                "message_time_sec": "{:.9f}".format(sample["message_time_sec"]),
+                "global_enu_x_m": "{:.9f}".format(enu[0]),
+                "global_enu_y_m": "{:.9f}".format(enu[1]),
+                "global_enu_z_m": "{:.9f}".format(enu[2]),
+                "roll_deg": "{:.6f}".format(sample["roll_deg"]),
+                "pitch_deg": "{:.6f}".format(sample["pitch_deg"]),
+                "heading_deg": "{:.6f}".format(sample["heading_deg"]),
+                "velocity_x_mps": "{:.6f}".format(velocity[0]),
+                "velocity_y_mps": "{:.6f}".format(velocity[1]),
+                "velocity_z_mps": "{:.6f}".format(velocity[2]),
+                "speed_mps": "{:.6f}".format(math.sqrt(sum(value * value for value in velocity))),
+                "signed_speed_mps": "{:.6f}".format(sample["signed_speed_mps"]),
+                "ctrl_mode": sample["ctrl_mode"],
+                "gear": sample["gear"],
+                "map_data_id": sample["map_data_id"],
+                "wheelbase_m": "{:.6f}".format(sample["wheelbase_m"]),
+                "overhang_m": "{:.6f}".format(sample["overhang_m"]),
+                "rear_overhang_m": "{:.6f}".format(sample["rear_overhang_m"]),
+                "link_id": sample["link_id"],
+            }
         )
 
     def close(self):
@@ -142,18 +133,72 @@ class MoraiGlobalCsvRecorder:
             if self._closed:
                 return
             self._closed = True
-            if hasattr(self, "_writer"):
-                self._writer.close()
-        rospy.loginfo("CSV saved: %s", self._output_file)
+            self._writer.close()
 
 
-def main():
-    rospy.init_node("morai_global_csv_recorder", anonymous=False)
-    recorder = MoraiGlobalCsvRecorder()
+def parse_arguments(argv=None):
+    parser = argparse.ArgumentParser(
+        description="Record MORAI 24.R1 Ego Vehicle Status UDP packets to CSV."
+    )
+    parser.add_argument("--bind-ip", default="0.0.0.0", help="Local interface to bind")
+    parser.add_argument("--port", type=int, default=909, help="MORAI destination UDP port")
+    parser.add_argument("--output", default=DEFAULT_OUTPUT_FILE, help="Output CSV path")
+    parser.add_argument("--sample-distance", type=float, default=0.5, help="3-D waypoint spacing in metres")
+    parser.add_argument("--append", action="store_true", help="Append only when the CSV header matches")
+    return parser.parse_args(argv)
+
+
+def run_udp_recorder(arguments):
+    if not 1 <= arguments.port <= 65535:
+        raise ValueError("port must be between 1 and 65535")
+
+    udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1024 * 1024)
+    udp_socket.bind((arguments.bind_ip, arguments.port))
+    udp_socket.settimeout(1.0)
+
+    recorder = None
     try:
-        rospy.spin()
+        recorder = MoraiGlobalCsvRecorder(
+            arguments.output,
+            sample_distance=arguments.sample_distance,
+            append=arguments.append,
+        )
+        invalid_packets = 0
+        print("MORAI 24.R1 UDP path recorder started")
+        print("  listen: {}:{}".format(arguments.bind_ip, arguments.port))
+        print("  3-D sample distance: {:.3f} m".format(arguments.sample_distance))
+        print("  output: {}".format(recorder.output_file))
+
+        while True:
+            try:
+                packet, _sender = udp_socket.recvfrom(65535)
+            except socket.timeout:
+                continue
+
+            receive_time_sec = time.time()
+            try:
+                status = parse_ego_vehicle_status_24r1(packet)
+            except UdpPacketError as error:
+                invalid_packets += 1
+                if invalid_packets <= 3 or invalid_packets % 100 == 0:
+                    print("Ignored incompatible UDP packet: {}".format(error), file=sys.stderr)
+                continue
+
+            recorder.add_sample(status_to_sample(status, receive_time_sec))
+    except KeyboardInterrupt:
+        print("\nStopping recorder...")
     finally:
-        recorder.close()
+        if recorder is not None:
+            recorder.close()
+        udp_socket.close()
+        if recorder is not None:
+            print("CSV saved: {}".format(recorder.output_file))
+
+
+def main(argv=None):
+    run_udp_recorder(parse_arguments(argv))
 
 
 if __name__ == "__main__":
