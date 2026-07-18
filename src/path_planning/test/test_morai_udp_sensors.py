@@ -42,6 +42,60 @@ class MoraiUdpSensorsTest(unittest.TestCase):
         self.assertEqual(measurement.angular_velocity_radps, (0.1, 0.2, 0.3))
         self.assertEqual(measurement.linear_acceleration_mps2, (1.0, 2.0, 3.0))
 
+    def test_parses_115_byte_imu_packet_with_leading_extension(self):
+        yaw = math.radians(45.0)
+        packet = bytearray(115)
+        packet[:9] = b"#IMUData$"
+        struct.pack_into("<I", packet, 9, 88)
+        values = (
+            math.cos(yaw / 2.0),
+            0.0,
+            0.0,
+            math.sin(yaw / 2.0),
+            0.1,
+            0.2,
+            0.3,
+            1.0,
+            2.0,
+            3.0,
+        )
+        struct.pack_into("<d", packet, 25, 1234.5)
+        struct.pack_into("<10d", packet, 33, *values)
+        packet[-2:] = b"\r\n"
+
+        measurement = parse_imu_packet(bytes(packet))
+
+        self.assertAlmostEqual(quaternion_to_yaw(measurement.orientation_xyzw), yaw)
+        self.assertEqual(measurement.angular_velocity_radps, (0.1, 0.2, 0.3))
+        self.assertEqual(measurement.linear_acceleration_mps2, (1.0, 2.0, 3.0))
+
+    def test_parses_115_byte_imu_packet_with_trailing_extension(self):
+        yaw = math.radians(45.0)
+        packet = bytearray(115)
+        packet[:9] = b"#IMUData$"
+        struct.pack_into("<I", packet, 9, 88)
+        values = (
+            math.cos(yaw / 2.0),
+            0.0,
+            0.0,
+            math.sin(yaw / 2.0),
+            0.1,
+            0.2,
+            0.3,
+            1.0,
+            2.0,
+            3.0,
+        )
+        struct.pack_into("<10d", packet, 25, *values)
+        struct.pack_into("<d", packet, 105, 1234.5)
+        packet[-2:] = b"\r\n"
+
+        measurement = parse_imu_packet(bytes(packet))
+
+        self.assertAlmostEqual(quaternion_to_yaw(measurement.orientation_xyzw), yaw)
+        self.assertEqual(measurement.angular_velocity_radps, (0.1, 0.2, 0.3))
+        self.assertEqual(measurement.linear_acceleration_mps2, (1.0, 2.0, 3.0))
+
 
 if __name__ == "__main__":
     unittest.main()

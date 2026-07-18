@@ -1,4 +1,4 @@
-"""Parser for the MORAI IMU UDP format used by SIM: Drive 26.R1."""
+"""Parser for MORAI SIM: Drive 26.R1 and observed 25.01 IMU UDP packets."""
 
 import math
 import struct
@@ -8,6 +8,8 @@ from dataclasses import dataclass
 PACKET_HEADER = b"#IMUData$"
 PACKET_DATA_LENGTH = 80
 PACKET_SIZE = 107
+EXTENDED_PACKET_DATA_LENGTH = 88
+EXTENDED_PACKET_SIZE = 115
 PACKET_TAIL = b"\r\n"
 
 
@@ -23,27 +25,55 @@ class ImuMeasurement:
 
 
 def parse_imu_packet(packet):
-    """Parse the official 107-byte IMU datagram.
+    """Parse an official 107-byte or observed 115-byte IMU datagram.
 
     MORAI puts quaternion components on the wire as w, x, y, z.  The returned
     tuple is deliberately converted to the conventional x, y, z, w order.
+
+    The 25.01 competition build has been observed sending an undocumented
+    eight-byte extension.  It can occur adjacent to the ten documented
+    doubles, so both possible windows are checked and only a window containing
+    a unit quaternion is accepted.  The extension itself is intentionally
+    ignored.
     """
-    if len(packet) != PACKET_SIZE:
-        raise ImuPacketError("expected {} bytes, received {}".format(PACKET_SIZE, len(packet)))
+    if len(packet) not in (PACKET_SIZE, EXTENDED_PACKET_SIZE):
+        raise ImuPacketError(
+            "expected {} or {} bytes, received {}".format(
+                PACKET_SIZE, EXTENDED_PACKET_SIZE, len(packet)
+            )
+        )
     if packet[:9] != PACKET_HEADER:
         raise ImuPacketError("unexpected IMU header {!r}".format(packet[:9]))
     data_length = struct.unpack_from("<I", packet, 9)[0]
-    if data_length != PACKET_DATA_LENGTH:
-        raise ImuPacketError("expected data_length 80, received {}".format(data_length))
+    expected_lengths = (
+        (PACKET_DATA_LENGTH,)
+        if len(packet) == PACKET_SIZE
+        else (PACKET_DATA_LENGTH, EXTENDED_PACKET_DATA_LENGTH)
+    )
+    if data_length not in expected_lengths:
+        raise ImuPacketError(
+            "expected data_length {}, received {}".format(
+                " or ".join(str(value) for value in expected_lengths), data_length
+            )
+        )
     if packet[-2:] != PACKET_TAIL:
         raise ImuPacketError("unexpected IMU packet tail")
 
-    values = struct.unpack_from("<10d", packet, 25)
-    if not all(math.isfinite(value) for value in values):
-        raise ImuPacketError("IMU packet contains a non-finite value")
-    quaternion_norm = math.sqrt(sum(value * value for value in values[:4]))
-    if quaternion_norm < 1e-8:
-        raise ImuPacketError("IMU orientation quaternion has zero norm")
+    offsets = (25,) if len(packet) == PACKET_SIZE else (25, 33)
+    candidates = []
+    for offset in offsets:
+        values = struct.unpack_from("<10d", packet, offset)
+        if not all(math.isfinite(value) for value in values):
+            continue
+        quaternion_norm = math.sqrt(sum(value * value for value in values[:4]))
+        if 0.8 <= quaternion_norm <= 1.2:
+            candidates.append((abs(quaternion_norm - 1.0), values, quaternion_norm))
+    if not candidates:
+        raise ImuPacketError(
+            "IMU packet does not contain a valid unit orientation quaternion"
+        )
+
+    _score, values, quaternion_norm = min(candidates, key=lambda item: item[0])
     orientation_wxyz = tuple(value / quaternion_norm for value in values[:4])
     w, x, y, z = orientation_wxyz
     return ImuMeasurement((x, y, z, w), values[4:7], values[7:10])
