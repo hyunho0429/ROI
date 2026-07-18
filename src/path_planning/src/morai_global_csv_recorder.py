@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Record MORAI 24.R1 UDP Ego Vehicle Status positions to a path CSV."""
+"""Record MORAI Competition Vehicle Status ENU positions to CSV."""
 
 import argparse
 import datetime
@@ -11,7 +11,10 @@ import threading
 import time
 
 from path_planning.csv_path_writer import CsvPathWriter, resample_segment
-from path_planning.morai_udp_ego_status import UdpPacketError, parse_ego_vehicle_status_24r1
+from path_planning.morai_udp_competition_status import (
+    CompetitionStatusPacketError,
+    parse_competition_vehicle_status,
+)
 
 
 DEFAULT_OUTPUT_FILE = os.path.abspath(
@@ -20,7 +23,7 @@ DEFAULT_OUTPUT_FILE = os.path.abspath(
 
 
 def status_to_sample(status, receive_time_sec):
-    """Convert documented UDP units to the recorder's SI-unit sample."""
+    """Convert Competition Status packet units to an SI-unit sample."""
     return {
         "receive_time_sec": float(receive_time_sec),
         "message_time_sec": status.timestamp_sec,
@@ -138,10 +141,10 @@ class MoraiGlobalCsvRecorder:
 
 def parse_arguments(argv=None):
     parser = argparse.ArgumentParser(
-        description="Record MORAI 24.R1 Ego Vehicle Status UDP packets to CSV."
+        description="Record MORAI Competition Vehicle Status to CSV."
     )
     parser.add_argument("--bind-ip", default="0.0.0.0", help="Local interface to bind")
-    parser.add_argument("--port", type=int, default=909, help="MORAI destination UDP port")
+    parser.add_argument("--port", type=int, default=3315, help="Competition Status destination port")
     parser.add_argument("--output", default=DEFAULT_OUTPUT_FILE, help="Output CSV path")
     parser.add_argument("--sample-distance", type=float, default=0.5, help="3-D waypoint spacing in metres")
     parser.add_argument("--append", action="store_true", help="Append only when the CSV header matches")
@@ -166,7 +169,7 @@ def run_udp_recorder(arguments):
             append=arguments.append,
         )
         invalid_packets = 0
-        print("MORAI 24.R1 UDP path recorder started")
+        print("MORAI Competition Status path recorder started")
         print("  listen: {}:{}".format(arguments.bind_ip, arguments.port))
         print("  3-D sample distance: {:.3f} m".format(arguments.sample_distance))
         print("  output: {}".format(recorder.output_file))
@@ -179,8 +182,8 @@ def run_udp_recorder(arguments):
 
             receive_time_sec = time.time()
             try:
-                status = parse_ego_vehicle_status_24r1(packet)
-            except UdpPacketError as error:
+                status = parse_competition_vehicle_status(packet)
+            except CompetitionStatusPacketError as error:
                 invalid_packets += 1
                 if invalid_packets <= 3 or invalid_packets % 100 == 0:
                     print("Ignored incompatible UDP packet: {}".format(error), file=sys.stderr)

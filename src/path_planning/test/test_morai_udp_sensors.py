@@ -29,12 +29,12 @@ class MoraiUdpSensorsTest(unittest.TestCase):
         self.assertAlmostEqual(measurement.speed_mps, 5.1444444444)
         self.assertAlmostEqual(measurement.course_deg, 90.0)
 
-    def test_parses_documented_107_byte_imu_packet(self):
+    def test_parses_documented_wxyz_107_byte_imu_packet(self):
         yaw = math.radians(45.0)
         packet = bytearray(107)
         packet[:9] = b"#IMUData$"
         struct.pack_into("<I", packet, 9, 80)
-        values = (0.0, 0.0, math.sin(yaw / 2.0), math.cos(yaw / 2.0), 0.1, 0.2, 0.3, 1.0, 2.0, 3.0)
+        values = (math.cos(yaw / 2.0), 0.0, 0.0, math.sin(yaw / 2.0), 0.1, 0.2, 0.3, 1.0, 2.0, 3.0)
         struct.pack_into("<10d", packet, 25, *values)
         packet[-2:] = b"\r\n"
         measurement = parse_imu_packet(bytes(packet))

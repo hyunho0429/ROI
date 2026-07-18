@@ -13,12 +13,12 @@ if PACKAGE_SRC not in sys.path:
     sys.path.insert(0, PACKAGE_SRC)
 
 from morai_global_csv_recorder import MoraiGlobalCsvRecorder, status_to_sample
-from path_planning.morai_udp_ego_status import (
+from path_planning.morai_udp_competition_status import (
     PACKET_DATA_LENGTH,
     PACKET_HEADER,
     PACKET_SIZE,
-    UdpPacketError,
-    parse_ego_vehicle_status_24r1,
+    CompetitionStatusPacketError,
+    parse_competition_vehicle_status,
 )
 
 
@@ -27,7 +27,7 @@ def make_packet():
     packet[:11] = PACKET_HEADER
     struct.pack_into("<I", packet, 11, PACKET_DATA_LENGTH)
     struct.pack_into("<II", packet, 27, 123, 500_000_000)
-    struct.pack_into("<BB", packet, 35, 1, 4)
+    struct.pack_into("<bb", packet, 35, 2, 4)
     struct.pack_into("<f", packet, 37, 36.0)
     struct.pack_into("<i", packet, 41, 10001)
     struct.pack_into("<ff", packet, 45, 0.2, 0.0)
@@ -40,43 +40,30 @@ def make_packet():
     struct.pack_into("<fff", packet, 125, 1.0, 2.0, 3.0)
     struct.pack_into("<f", packet, 137, -5.0)
     packet[141:179] = b"A123".ljust(38, b"\x00")
-    packet[179:181] = b"\r\n"
+    struct.pack_into("<12f", packet, 179, *[float(index) for index in range(12)])
+    packet[227:229] = b"\r\n"
     return bytes(packet)
 
 
-class MoraiUdpEgoStatusTest(unittest.TestCase):
-    def test_parses_documented_24r1_packet_offsets(self):
-        status = parse_ego_vehicle_status_24r1(make_packet())
-
+class MoraiUdpCompetitionStatusTest(unittest.TestCase):
+    def test_parses_exact_229_byte_competition_layout(self):
+        status = parse_competition_vehicle_status(make_packet())
         self.assertAlmostEqual(status.timestamp_sec, 123.5)
-        self.assertEqual(status.ctrl_mode, 1)
+        self.assertEqual(status.ctrl_mode, 2)
         self.assertEqual(status.gear, 4)
-        self.assertEqual(status.map_data_id, 10001)
         self.assertEqual(status.position_m, (10.0, 20.0, 3.0))
         self.assertEqual(status.rotation_deg, (1.0, 2.0, 90.0))
         self.assertAlmostEqual(status.wheelbase_m, 2.7, places=5)
         self.assertEqual(status.link_id, "A123")
-
-    def test_converts_udp_kmh_velocity_to_csv_mps(self):
-        status = parse_ego_vehicle_status_24r1(make_packet())
-        sample = status_to_sample(status, receive_time_sec=200.0)
-
-        self.assertEqual(sample["enu"], (10.0, 20.0, 3.0))
-        self.assertAlmostEqual(sample["velocity"][0], 10.0)
-        self.assertAlmostEqual(sample["velocity"][1], 5.0)
-        self.assertAlmostEqual(sample["velocity"][2], 1.0)
-        self.assertAlmostEqual(sample["signed_speed_mps"], 10.0)
+        self.assertEqual(status.tire_lateral_force, (0.0, 1.0, 2.0, 3.0))
+        self.assertEqual(status.side_slip_angle, (4.0, 5.0, 6.0, 7.0))
+        self.assertEqual(status.tire_cornering_stiffness, (8.0, 9.0, 10.0, 11.0))
 
     def test_rejects_other_packet_versions(self):
-        with self.assertRaises(UdpPacketError):
-            parse_ego_vehicle_status_24r1(make_packet() + b"extra")
+        with self.assertRaises(CompetitionStatusPacketError):
+            parse_competition_vehicle_status(make_packet()[:-48])
 
-        packet = bytearray(make_packet())
-        struct.pack_into("<I", packet, 11, 216)
-        with self.assertRaises(UdpPacketError):
-            parse_ego_vehicle_status_24r1(bytes(packet))
-
-    def test_recorder_writes_uniform_interpolated_3d_points(self):
+    def test_recorder_converts_status_units_and_resamples_3d(self):
         first_packet = bytearray(make_packet())
         second_packet = bytearray(make_packet())
         struct.pack_into("<fff", first_packet, 77, 0.0, 0.0, 0.0)
@@ -85,19 +72,16 @@ class MoraiUdpEgoStatusTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             output_file = os.path.join(directory, "udp_path.csv")
             recorder = MoraiGlobalCsvRecorder(output_file, sample_distance=0.5)
-            recorder.add_sample(
-                status_to_sample(parse_ego_vehicle_status_24r1(bytes(first_packet)), 100.0)
-            )
-            recorder.add_sample(
-                status_to_sample(parse_ego_vehicle_status_24r1(bytes(second_packet)), 101.0)
-            )
+            for packet, receive_time in ((first_packet, 100.0), (second_packet, 101.0)):
+                status = parse_competition_vehicle_status(bytes(packet))
+                recorder.add_sample(status_to_sample(status, receive_time))
             recorder.close()
-
             with open(output_file, newline="", encoding="utf-8") as stream:
                 rows = list(csv.DictReader(stream))
 
         self.assertEqual(len(rows), 3)
         self.assertEqual([float(row["global_enu_z_m"]) for row in rows], [0.0, 0.5, 1.0])
+        self.assertAlmostEqual(float(rows[0]["velocity_x_mps"]), 10.0)
 
 
 if __name__ == "__main__":

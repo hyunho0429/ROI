@@ -31,10 +31,10 @@ rostopic echo /global_path_marker
 
 ## MORAI keyboard path CSV recording
 
-To save MORAI 24.R1 UDP Ego Vehicle Status coordinates to CSV at uniform 0.5 m 3-D intervals:
+To save Competition Vehicle Status ENU coordinates at uniform 0.5 m 3-D intervals:
 
 ```bash
-python3 src/path_planning/src/morai_global_csv_recorder.py --bind-ip 0.0.0.0 --port 909
+python3 src/path_planning/src/morai_global_csv_recorder.py --bind-ip 0.0.0.0 --port 3315
 ```
 
 The recorder is standalone and does not require ROS. The default output is `src/path_planning/data/morai_global_path.csv`. See `src/path_planning/README_GLOBAL_CSV_RECORDER.md` for MORAI network settings and parameters.
@@ -49,10 +49,11 @@ GPS/IMU sensor fusion and the documented MORAI UDP control packet. Install
 python3 src/path_planning/src/morai_stanley_udp.py \
   --path src/path_planning/data/morai_global_path.csv \
   --gps-port 9100 --imu-port 9101 \
+  --competition-status-port 3315 --collision-port 5678 \
   --control-ip 127.0.0.1 --control-port 9090
 ```
 
-See `src/path_planning/README_STANLEY_UDP.md` for the MORAI version boundary,
+See `src/path_planning/README_STANLEY_UDP.md` for the MORAI 26.R1 public protocol basis,
 coordinate conversion, network settings, safety behavior, and tuning values.
 
 For a fixed start and goal node:

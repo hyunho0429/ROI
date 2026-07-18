@@ -1,130 +1,119 @@
-# MORAI UDP Stanley controller
+# MORAI 대회용 UDP Stanley 제어기
 
-This controller follows the ENU CSV produced by `morai_global_csv_recorder.py`.
-It is a standalone UDP program; ROS and a catkin workspace are not required at
-runtime.
+`morai_stanley_udp.py`는 ROS 없이 다음 대회 허용 인터페이스만 사용한다.
 
-## Why the old modules were not copied
+- `[UDP] Ego Ctrl Cmd`: 조향 및 accel/brake 송신
+- `[UDP] CollisionData`: 충돌 시 3초간 제동
+- `[UDP] Competition Vehicle Status`: 실제 속도 피드백
+- `[UDP] GPS`: NMEA RMC/GGA 위치·속도
+- `[UDP] IMU`: quaternion yaw와 yaw rate
 
-The supplied `alignment.py`, `ekf.py`, `mechanization.py`, and
-`system_dynamics.py` form a physical OpenIMU/u-blox strapdown INS stack. They
-subscribe to ROS messages and integrate latitude/longitude, Earth rotation,
-gravity, and curvature in an NED frame. That implementation cannot be reused
-unchanged with MORAI UDP.
+Camera와 3D LiDAR도 허용 센서지만, 미리 기록한 경로를 Stanley로 추종하는
+기본 기능에는 필요하지 않아 이 프로그램에서는 열지 않는다. 향후 차선·장애물
+인식 기능을 붙일 때 별도 perception 모듈로 연결하는 편이 안전하다.
 
-Because the competition adds GPS and IMU noise, localization itself must not be
-removed. This branch replaces the old stack with a small planar EKF whose state
-is `[x, y, vx, vy, yaw, gyro_z_bias]`. It fuses:
+## 대회 규정과 26.R1 기준 핵심 사항
 
-- GPS position and NMEA ground speed/course
-- IMU quaternion yaw and yaw angular velocity
+대회 규정에 따라 `Ego Ctrl Cmd`는 항상 `longCmdType = 1`을 전송한다. 목표
+속도와 현재 속도의 차이를 PI 제어기로 accel 또는 brake 값으로 바꾸며, 두
+페달을 동시에 명령하지 않는다. 속도 제어 모드인 `longCmdType = 2`를 지정하면
+인코더가 오류를 발생시키므로 실수로 규정을 어길 수 없다.
 
-Stanley only needs horizontal position, heading, and speed. GPS altitude is
-low-pass filtered and retained for 3-D path-segment disambiguation; it is not
-used as a condition that must change before a waypoint can be followed. IMU
-linear acceleration is parsed but deliberately not integrated: on a slope it
-contains gravity/projection effects, and integrating it without a fully
-calibrated sensor model creates more drift than it removes.
+위치추정은 Competition Status의 위치·yaw를 사용하지 않는다. 노이즈가 적용된
+GPS와 IMU를 `[x, y, vx, vy, yaw, gyro bias]` EKF로 융합한다. Competition
+Status는 종방향 페달 제어를 위한 signed velocity만 사용하며, 상태 패킷이
+잠시 끊기면 GPS RMC 속도를 대신 사용한다.
 
-`--localization ego` remains available only for network/controller debugging.
-It uses simulator Ground Truth and must not be used for a noisy-sensor
-competition run.
+기존 OpenIMU용 `alignment`, strapdown `mechanization`, Earth-frame
+`system_dynamics`는 사용하지 않는다. MORAI IMU가 절대 quaternion을 제공하고
+Stanley에는 수평 위치·yaw·속도만 필요하므로, 이 전체 INS를 그대로 쓰면 중복
+적분과 좌표계 오류가 생긴다. Z는 GPS 고도를 지도 원점 기준으로 바꾼 뒤 저역
+통과 필터링한다. Z가 매번 변해야 경로를 저장하거나 추종하는 조건은 아니다.
 
-## Coordinates confirmed from MORAI documentation
+## 패킷과 좌표
 
-- The [sensor protocol](https://help-morai-sim.scrollhelp.site/ko/morai-sim-drive/24.R2/-35)
-  says GPS UDP follows NMEA0183 and simultaneously sends RMC/GGA sentences with
-  latitude, longitude, and altitude. Therefore GPS UDP is **not a UTM x/y wire
-  packet**.
-- The [sensor coordinate page](https://help-morai-sim.scrollhelp.site/ko/morai-sim-drive/24.R2/-8)
-  specifies GPS as WGS84 UTM zone 52N (EPSG:32652), and IMU axes as x-forward,
-  y-left, z-up with counter-clockwise positive yaw.
-- The [24.R1 MapSpec definition](https://help-morai-sim.scrollhelp.site/ko/morai-sim-drive/24.R1.0/ros-1)
-  identifies `UTMoffset` as the map offset. The UDP sensor protocol does not
-  define a MapSpec service packet, so this program reads the equivalent MGeo
-  `global_info.json` (`global_coordinate_system` and
-  `local_origin_in_global`).
-- The same 24.R1 protocol page defines the exact 55-byte `Ego Ctrl Cmd` packet,
-  including normalized steering, and the 181-byte `Ego Vehicle Status` packet.
-- MORAI documents GPS Gaussian noise/blackout and IMU Gaussian noise,
-  bias-instability, random-walk, and blackout in the
-  [Denied Area page](https://help-morai-sim.scrollhelp.site/ko/morai-sim-drive/24.R1.0/denied-area).
+공식 [26.R1 센서 통신 프로토콜](https://help-morai-sim.scrollhelp.site/ko/morai-sim-drive/26.R1/-35)은
+GPS UDP가 UTM x/y가 아닌 NMEA0183 RMC/GGA 위도·경도·고도라고 명시한다.
+따라서 `pyproj`로 WGS84를 MGeo의 `global_coordinate_system`으로 투영하고,
+`global_info.json`의 `local_origin_in_global`을 빼서 경로 CSV와 같은 맵 원점
+ENU 좌표로 만든다. 기본 K-City 데이터는 EPSG:32652이다.
 
-Important version boundary: the official sensor-protocol page marks the
-107-byte IMU UDP packet as a **24.R2.2 update**. The 24.R1 protocol page does
-not document an IMU UDP packet. If the competition simulator is truly 24.R1
-and does not emit `#IMUData$` packets, this parser cannot invent that missing
-protocol; use the interface/version supplied by the organizer or obtain their
-packet specification. Ego control and Ego status in this branch are strictly
-24.R1 packet layouts.
+공식 IMU UDP는 107 byte이며 quaternion 순서는 wire 기준 **w, x, y, z**이다.
+각속도는 rad/s, 선가속도는 m/s²이다. 수신기는 길이, `#IMUData$`, data size
+80, tail을 모두 검사하고 내부에서는 x,y,z,w 순서로 변환한다.
 
-## Install
+공식 [26.R1 UDP 프로토콜](https://help-morai-sim.scrollhelp.site/ko/morai-sim-drive/26.R1/udp-1)을
+기준으로 `Ego Ctrl Cmd`는 59 byte, `CollisionData`는 181 byte로 처리한다.
+제어 패킷은 앞·뒤 조향 필드를 모두 포함하며 뒤 조향은 0으로 둔다.
 
-Python 3.8 or newer is recommended. Only the GPS projection dependency is
-external.
+`Competition Vehicle Status`는 `Ego Vehicle Status`와 별개다. 전용 공개 규격을
+확인할 수 없어 이 저장소에서는 대회용 229-byte packed 형식으로 분리해 파싱한다.
+기존 상태 필드 뒤의 타이어 횡력 4개, slip angle 4개, cornering stiffness 4개까지
+검사한다. 길이·헤더·`data_length=200`이 다르면 임의로 해석하지 않고 오류 로그에
+실제 길이와 헤더를 출력한다. 실제 25.01 대회 환경에서 최초 수신 길이를 반드시
+확인해야 한다.
+
+## 설치
+
+Python 3.8 이상에서 저장소 루트 기준으로 실행한다.
 
 ```bash
 python3 -m pip install -r src/path_planning/requirements.txt
 ```
 
-## MORAI network settings
+## 네트워크 설정
 
-Example values for one PC:
+아래 포트는 실행 예시일 뿐이다. MORAI Network/Sensor Settings의 Destination
+Port와 명령행 옵션을 반드시 동일하게 맞춘다.
 
-| MORAI item | Direction | IP | Port |
-|---|---|---:|---:|
-| GPS sensor UDP | SIM to program | `127.0.0.1` | `9100` |
-| IMU sensor UDP | SIM to program | `127.0.0.1` | `9101` |
-| Ego Ctrl Cmd | program to SIM | `127.0.0.1` | `9090` |
+| 항목 | 방향 | 기본 포트 |
+|---|---|---:|
+| GPS | SIM → 프로그램 | 9100 |
+| IMU | SIM → 프로그램 | 9101 |
+| Competition Vehicle Status | SIM → 프로그램 | 3315 |
+| CollisionData | SIM → 프로그램 | 5678 |
+| Ego Ctrl Cmd | 프로그램 → SIM | 9090 |
 
-The port numbers are examples; MORAI and the command-line options must match.
-Place the Ego controller in external/Auto control mode before running. Do not
-assign the same receive port to multiple sensor messages.
+한 PC에서 실행하면 센서와 Publisher의 Destination IP, Ctrl Cmd의 Host IP를
+보통 `127.0.0.1`로 둔다. 다른 PC/VM/WSL이면 프로그램이 실행되는 PC의 실제
+IPv4 주소를 Destination IP로 사용한다. 네 수신 포트는 서로 달라야 한다.
 
-## Run
-
-From the repository root:
+## 실행
 
 ```bash
 python3 src/path_planning/src/morai_stanley_udp.py \
   --path src/path_planning/data/morai_global_path.csv \
   --gps-port 9100 \
   --imu-port 9101 \
+  --competition-status-port 3315 \
+  --collision-port 5678 \
   --control-ip 127.0.0.1 \
   --control-port 9090 \
   --target-speed-kmh 20
 ```
 
-For a map other than the included K-City 2025 map, pass its
-`mgeo/.../global_info.json`:
+다른 맵이면 그 맵의 MGeo 설정을 넘긴다.
 
 ```bash
 python3 src/path_planning/src/morai_stanley_udp.py \
-  --path path.csv \
-  --global-info /absolute/path/to/global_info.json
+  --path /absolute/path/run.csv \
+  --global-info /absolute/path/mgeo/global_info.json
 ```
 
-The program brakes when GPS/IMU becomes stale, when localization is not yet
-initialized, at the end of the path, and on `Ctrl+C`.
-MORAI's documented all-zero GPS blackout is rejected, as are GPS position jumps
-larger than 15 m from the predicted state; rejected fixes do not refresh the
-watchdog.
+GPS 또는 IMU가 timeout을 넘겨 끊기거나, 위치가 예측치에서 15 m 이상 튀거나,
+충돌이 감지되거나, 목적지에 도달하거나, `Ctrl+C`가 입력되면 brake 명령을
+보낸다.
 
-## Parameters that must be verified on the actual vehicle
+## 현장에서 먼저 확인할 값
 
-- `--max-steering-deg`: maximum front-wheel angle used to normalize the MORAI
-  command. The default `36.25` is a starting value, not a universal vehicle
-  specification.
-- `--morai-steer-sign`: defaults to `-1`, converting mathematical left-positive
-  Stanley angle to MORAI command convention. Verify at very low speed; use `1`
-  if the selected controller/model has the opposite convention.
-- `--control-point-offset`: defaults to `0`. MORAI 24.R1 describes `posXYZ` only
-  as vehicle position and does not identify front axle, rear axle, or center of
-  mass. The recorded path uses the same reported reference. Set a forward
-  offset only after the competition vehicle's reference point is confirmed.
-- `--imu-yaw-offset-deg` and `--imu-yaw-sign`: compensate only for a known
-  sensor mounting rotation/convention. With a forward-aligned documented ENU
-  IMU, keep `0` and `1`.
+- `--max-steering-deg`: 선택 차량의 최대 앞바퀴 조향각. 기본값은 36.25°이다.
+- `--morai-steer-sign`: 매우 낮은 속도에서 좌/우가 맞는지 확인한다. 반대면 1을 쓴다.
+- `--control-point-offset`: 기본 0 m. GPS 센서 장착 위치에서 앞차축 중심까지의
+  차량 전방 오프셋을 실측했을 때만 설정한다.
+- `--imu-yaw-offset-deg`: 센서가 차량 정면과 돌아가 장착된 경우에만 보정한다.
+- `--speed-kp`, `--speed-ki`, `--max-accel-pedal`, `--max-brake-pedal`: 먼저
+  5–10 km/h에서 튜닝한다.
+- `--stanley-gain`: 커지면 횡오차를 빠르게 줄이지만 GPS 노이즈에서 진동할 수 있다.
 
-Start at 5-10 km/h and tune `--stanley-gain`, then increase speed. A larger gain
-corrects cross-track error more aggressively but can oscillate with noisy GPS.
+차량 위치 또는 GPS가 앞차축 중심인지 MORAI 공개 UDP 문서에는 명시되어 있지
+않다. 따라서 wheelbase만으로 임의 보정하지 않는다.

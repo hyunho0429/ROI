@@ -1,4 +1,4 @@
-"""Parser for the MORAI IMU UDP format documented from 24.R2.2."""
+"""Parser for the MORAI IMU UDP format used by SIM: Drive 26.R1."""
 
 import math
 import struct
@@ -23,7 +23,11 @@ class ImuMeasurement:
 
 
 def parse_imu_packet(packet):
-    """Parse quaternion, angular velocity, and linear acceleration doubles."""
+    """Parse the official 107-byte IMU datagram.
+
+    MORAI puts quaternion components on the wire as w, x, y, z.  The returned
+    tuple is deliberately converted to the conventional x, y, z, w order.
+    """
     if len(packet) != PACKET_SIZE:
         raise ImuPacketError("expected {} bytes, received {}".format(PACKET_SIZE, len(packet)))
     if packet[:9] != PACKET_HEADER:
@@ -40,8 +44,9 @@ def parse_imu_packet(packet):
     quaternion_norm = math.sqrt(sum(value * value for value in values[:4]))
     if quaternion_norm < 1e-8:
         raise ImuPacketError("IMU orientation quaternion has zero norm")
-    quaternion = tuple(value / quaternion_norm for value in values[:4])
-    return ImuMeasurement(quaternion, values[4:7], values[7:10])
+    orientation_wxyz = tuple(value / quaternion_norm for value in values[:4])
+    w, x, y, z = orientation_wxyz
+    return ImuMeasurement((x, y, z, w), values[4:7], values[7:10])
 
 
 def quaternion_to_yaw(orientation_xyzw):

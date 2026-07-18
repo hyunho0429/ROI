@@ -14,19 +14,19 @@ from path_planning.morai_udp_ctrl_cmd import (
     PACKET_DATA_LENGTH,
     PACKET_HEADER,
     PACKET_SIZE,
-    EgoCtrlCommand24R1,
-    encode_ego_ctrl_cmd_24r1,
+    EgoCtrlCommand26R1,
+    encode_ego_ctrl_cmd_26r1,
 )
 
 
 class MoraiUdpCtrlCmdTest(unittest.TestCase):
-    def test_encodes_exact_documented_24r1_layout(self):
-        packet = encode_ego_ctrl_cmd_24r1(
-            EgoCtrlCommand24R1(
+    def test_encodes_exact_competition_throttle_layout(self):
+        packet = encode_ego_ctrl_cmd_26r1(
+            EgoCtrlCommand26R1(
                 ctrl_mode=2,
                 gear=4,
-                long_cmd_type=2,
-                velocity_kmh=25.0,
+                long_cmd_type=1,
+                accel=0.3,
                 steering_normalized=-0.25,
             )
         )
@@ -34,15 +34,20 @@ class MoraiUdpCtrlCmdTest(unittest.TestCase):
         self.assertEqual(packet[:14], PACKET_HEADER)
         self.assertEqual(struct.unpack_from("<I", packet, 14)[0], PACKET_DATA_LENGTH)
         self.assertEqual(packet[18:30], bytes(12))
-        fields = struct.unpack_from("<BBBfffff", packet, 30)
-        self.assertEqual(fields[:3], (2, 4, 2))
-        self.assertAlmostEqual(fields[3], 25.0)
+        fields = struct.unpack_from("<BBBffffff", packet, 30)
+        self.assertEqual(fields[:3], (2, 4, 1))
+        self.assertAlmostEqual(fields[5], 0.3)
         self.assertAlmostEqual(fields[7], -0.25)
+        self.assertAlmostEqual(fields[8], 0.0)
         self.assertEqual(packet[-2:], b"\r\n")
 
     def test_rejects_out_of_range_steering(self):
         with self.assertRaises(ValueError):
-            encode_ego_ctrl_cmd_24r1(EgoCtrlCommand24R1(steering_normalized=1.1))
+            encode_ego_ctrl_cmd_26r1(EgoCtrlCommand26R1(steering_normalized=1.1))
+
+    def test_rejects_disallowed_velocity_control(self):
+        with self.assertRaises(ValueError):
+            encode_ego_ctrl_cmd_26r1(EgoCtrlCommand26R1(long_cmd_type=2))
 
 
 if __name__ == "__main__":

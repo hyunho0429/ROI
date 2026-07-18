@@ -11,6 +11,7 @@ if PACKAGE_SRC not in sys.path:
     sys.path.insert(0, PACKAGE_SRC)
 
 from path_planning.localization import PlanarGpsImuEkf
+from path_planning.longitudinal_controller import PedalSpeedController
 from path_planning.stanley_controller import PathPoint, StanleyController
 
 
@@ -43,6 +44,15 @@ class StanleyControllerTest(unittest.TestCase):
         ekf = PlanarGpsImuEkf(gps_outlier_threshold_m=10.0)
         self.assertTrue(ekf.add_gps(1.0, 0.0, 0.0))
         self.assertFalse(ekf.add_gps(1.1, 1000.0, 1000.0))
+
+    def test_speed_controller_never_commands_both_pedals(self):
+        controller = PedalSpeedController(kp=0.2, ki=0.0)
+        accel, brake = controller.compute(5.0, 2.0, 1.0)
+        self.assertGreater(accel, 0.0)
+        self.assertEqual(brake, 0.0)
+        accel, brake = controller.compute(2.0, 5.0, 1.1)
+        self.assertEqual(accel, 0.0)
+        self.assertGreater(brake, 0.0)
 
 
 if __name__ == "__main__":
