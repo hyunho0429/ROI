@@ -15,9 +15,9 @@ MORAI 네트워크 포트 예시는 다음과 같다. 실제 Sensor/Network Sett
 
 | UDP 항목 | 방향 | 기본 포트 |
 |---|---|---:|
-| GPS | SIM → 코드 | 9100 |
-| IMU | SIM → 코드 | 9101 |
-| Competition Vehicle Status | SIM → 코드 | 3315 |
+| GPS | SIM → 코드 | 3001 |
+| IMU | SIM → 코드 | 4001 |
+| Competition Vehicle Status | SIM → 코드 | 909 |
 | CollisionData | SIM → 코드 | 5678 |
 | Ego Ctrl Cmd | 코드 → SIM | 9090 |
 
@@ -52,9 +52,9 @@ body-to-ENU quaternion, gyro bias와 accelerometer bias이고, 15상태 오차 �
 ```bash
 python3 src/path_planning/src/morai_stanley_ins_udp.py \
   --path src/path_planning/data/morai_global_path.csv \
-  --gps-port 9100 \
-  --imu-port 9101 \
-  --competition-status-port 3315 \
+  --gps-port 3001 \
+  --imu-port 4001 \
+  --competition-status-port 909 \
   --collision-port 5678 \
   --control-ip 127.0.0.1 \
   --control-port 9090 \
@@ -93,9 +93,9 @@ position_dot = R_body_to_ENU @ [vehicle_speed, 0, 0]
 ```bash
 python3 src/path_planning/src/morai_stanley_dead_reckoning_udp.py \
   --path src/path_planning/data/morai_global_path.csv \
-  --gps-port 9100 \
-  --imu-port 9101 \
-  --competition-status-port 3315 \
+  --gps-port 3001 \
+  --imu-port 4001 \
+  --competition-status-port 909 \
   --collision-port 5678 \
   --control-ip 127.0.0.1 \
   --control-port 9090 \

@@ -88,7 +88,7 @@ def parse_arguments(argv=None):
         description="Record MORAI GPS NMEA fixes as K-City map-local ENU CSV."
     )
     parser.add_argument("--bind-ip", default="0.0.0.0")
-    parser.add_argument("--port", type=int, default=9100, help="GPS destination port")
+    parser.add_argument("--port", type=int, default=3001, help="GPS destination port")
     parser.add_argument("--output", default=DEFAULT_OUTPUT_FILE)
     parser.add_argument("--sample-period", type=float, default=1.0)
     parser.add_argument("--global-info", default=DEFAULT_GLOBAL_INFO)

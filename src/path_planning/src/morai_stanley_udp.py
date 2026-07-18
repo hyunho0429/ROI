@@ -68,9 +68,9 @@ def parse_arguments(argv=None):
     )
     parser.add_argument("--path", default=DEFAULT_PATH, help="map-origin ENU waypoint CSV")
     parser.add_argument("--bind-ip", default="0.0.0.0")
-    parser.add_argument("--gps-port", type=int, default=9100)
-    parser.add_argument("--imu-port", type=int, default=9101)
-    parser.add_argument("--competition-status-port", type=int, default=3315)
+    parser.add_argument("--gps-port", type=int, default=3001)
+    parser.add_argument("--imu-port", type=int, default=4001)
+    parser.add_argument("--competition-status-port", type=int, default=909)
     parser.add_argument("--collision-port", type=int, default=5678)
     parser.add_argument("--control-ip", default="127.0.0.1")
     parser.add_argument("--control-port", type=int, default=9090)
@@ -268,11 +268,11 @@ def run(arguments):
             if now < next_control:
                 continue
             next_control = now + period
+            gps_age = math.inf if latest_gps_time is None else now - latest_gps_time
+            imu_age = math.inf if latest_imu_time is None else now - latest_imu_time
             localization_fresh = (
-                latest_gps_time is not None
-                and latest_imu_time is not None
-                and now - latest_gps_time <= arguments.gps_timeout
-                and now - latest_imu_time <= arguments.imu_timeout
+                gps_age <= arguments.gps_timeout
+                and imu_age <= arguments.imu_timeout
             )
             state = localizer.state_at(now) if localization_fresh else None
             collision_active = now < collision_brake_until
@@ -325,7 +325,15 @@ def run(arguments):
                 if collision_active:
                     print("Collision brake active")
                 elif state is None:
-                    print("Waiting for fresh GPS/IMU; brake command active")
+                    print(
+                        "Waiting/stale sensors: GPS={}, IMU={} "
+                        "(limits: GPS {:.1f}s, IMU {:.1f}s); brake active".format(
+                            "never" if math.isinf(gps_age) else "{:.2f}s".format(gps_age),
+                            "never" if math.isinf(imu_age) else "{:.2f}s".format(imu_age),
+                            arguments.gps_timeout,
+                            arguments.imu_timeout,
+                        )
+                    )
                 else:
                     print(
                         "pos=({:.2f}, {:.2f}, {:.2f}) speed={:.2f}/{:.2f}m/s "

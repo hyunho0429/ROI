@@ -135,9 +135,9 @@ Port와 명령행 옵션을 반드시 동일하게 맞춘다.
 
 | 항목 | 방향 | 기본 포트 |
 |---|---|---:|
-| GPS | SIM → 프로그램 | 9100 |
-| IMU | SIM → 프로그램 | 9101 |
-| Competition Vehicle Status | SIM → 프로그램 | 3315 |
+| GPS | SIM → 프로그램 | 3001 |
+| IMU | SIM → 프로그램 | 4001 |
+| Competition Vehicle Status | SIM → 프로그램 | 909 |
 | CollisionData | SIM → 프로그램 | 5678 |
 | Ego Ctrl Cmd | 프로그램 → SIM | 9090 |
 
@@ -150,9 +150,9 @@ IPv4 주소를 Destination IP로 사용한다. 네 수신 포트는 서로 달�
 ```bash
 python3 src/path_planning/src/morai_stanley_udp.py \
   --path src/path_planning/data/morai_global_path.csv \
-  --gps-port 9100 \
-  --imu-port 9101 \
-  --competition-status-port 3315 \
+  --gps-port 3001 \
+  --imu-port 4001 \
+  --competition-status-port 909 \
   --collision-port 5678 \
   --control-ip 127.0.0.1 \
   --control-port 9090 \

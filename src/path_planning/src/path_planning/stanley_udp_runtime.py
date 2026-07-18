@@ -74,9 +74,9 @@ def argument_parser(localization_mode):
     )
     parser.add_argument("--path", default=DEFAULT_PATH, help="map-origin ENU path CSV")
     parser.add_argument("--bind-ip", default="0.0.0.0")
-    parser.add_argument("--gps-port", type=int, default=9100)
-    parser.add_argument("--imu-port", type=int, default=9101)
-    parser.add_argument("--competition-status-port", type=int, default=3315)
+    parser.add_argument("--gps-port", type=int, default=3001)
+    parser.add_argument("--imu-port", type=int, default=4001)
+    parser.add_argument("--competition-status-port", type=int, default=909)
     parser.add_argument("--collision-port", type=int, default=5678)
     parser.add_argument("--control-ip", default="127.0.0.1")
     parser.add_argument("--control-port", type=int, default=9090)
@@ -301,11 +301,13 @@ def run(localization_mode, arguments):
             gps_outage = (
                 math.inf if latest_gps_time is None else now - latest_gps_time
             )
+            imu_age = math.inf if latest_imu_time is None else now - latest_imu_time
+            status_age = (
+                math.inf if latest_status_time is None else now - latest_status_time
+            )
             sensor_fresh = (
-                latest_imu_time is not None
-                and now - latest_imu_time <= arguments.imu_timeout
-                and latest_status_time is not None
-                and now - latest_status_time <= arguments.status_timeout
+                imu_age <= arguments.imu_timeout
+                and status_age <= arguments.status_timeout
                 and gps_outage <= arguments.max_gps_outage
             )
             state = localizer.state_at(now) if sensor_fresh else None
@@ -354,8 +356,15 @@ def run(localization_mode, arguments):
                     print("Collision brake active")
                 elif state is None:
                     print(
-                        "Waiting/stale sensors: gps_outage={:.1f}s; brake active".format(
-                            gps_outage
+                        "Waiting/stale sensors: GPS={}, IMU={}, Competition={} "
+                        "(limits: GPS {:.1f}s, IMU {:.1f}s, Competition {:.1f}s); "
+                        "brake active".format(
+                            "never" if math.isinf(gps_outage) else "{:.2f}s".format(gps_outage),
+                            "never" if math.isinf(imu_age) else "{:.2f}s".format(imu_age),
+                            "never" if math.isinf(status_age) else "{:.2f}s".format(status_age),
+                            arguments.max_gps_outage,
+                            arguments.imu_timeout,
+                            arguments.status_timeout,
                         )
                     )
                 else:
