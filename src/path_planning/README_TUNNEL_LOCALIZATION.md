@@ -2,7 +2,7 @@
 
 권장 구성은 GPS 음영 구간을 통과하는 `morai_pure_pursuit_ins_udp.py`이다. 비교 시험을
 위해 dead-reckoning 실행기도 유지한다. 두 실행기 모두 ROS/catkin 없이 Python과
-UDP만으로 실행되며 같은 경로 CSV, Pure Pursuit 조향기, accel/brake PI 제어기와 충돌
+UDP만으로 실행되며 같은 경로 CSV, Pure Pursuit 조향기, accel/brake PID 제어기와 충돌
 제동을 사용한다.
 
 ## 공통 준비
@@ -40,7 +40,7 @@ MGeo 원점 기준 ENU 변환을 사용한다.
 
 경로는 최소 0.5 m 간격과 9점 이동평균을 적용한다. 횡제어는 속도 비례 lookahead
 target과 kinematic bicycle model을 사용하는 Pure Pursuit이다. 경로에
-`target_speed`가 없으면 기본 10 km/h를 `longCmdType 1`의 accel/brake PI 제어로
+`target_speed`가 없으면 기본 10 km/h를 `longCmdType 1`의 accel/brake PID 제어로
 추종한다.
 
 ## 1. INS error-state EKF 버전

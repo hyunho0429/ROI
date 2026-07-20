@@ -23,7 +23,7 @@ from path_planning.stanley_controller import (
     load_path_csv,
     load_recorded_path_origin,
 )
-from path_planning.pure_pursuit_udp_runtime import argument_parser
+from path_planning.pure_pursuit_udp_runtime import argument_parser, main
 
 
 class StanleyControllerTest(unittest.TestCase):
@@ -311,7 +311,10 @@ class StanleyControllerTest(unittest.TestCase):
         self.assertEqual(arguments.alignment_seconds, 2.0)
         self.assertEqual(arguments.alignment_min_samples, 20)
         self.assertEqual(arguments.morai_steer_sign, 1.0)
-        self.assertEqual(arguments.speed_kp, 0.35)
+        self.assertEqual(arguments.control_rate_hz, 30.0)
+        self.assertEqual(arguments.speed_kp, 0.075)
+        self.assertEqual(arguments.speed_ki, 0.0001)
+        self.assertEqual(arguments.speed_kd, 0.025)
         self.assertFalse(hasattr(arguments, "stanley_gain"))
         self.assertEqual(arguments.target_search_window, 50)
 
@@ -331,13 +334,43 @@ class StanleyControllerTest(unittest.TestCase):
         self.assertFalse(ekf.add_gps(1.1, 1000.0, 1000.0))
 
     def test_speed_controller_never_commands_both_pedals(self):
-        controller = PedalSpeedController(kp=0.2, ki=0.0)
+        controller = PedalSpeedController(kp=0.2, ki=0.0, kd=0.0)
         accel, brake = controller.compute(5.0, 2.0, 1.0)
         self.assertGreater(accel, 0.0)
         self.assertEqual(brake, 0.0)
         accel, brake = controller.compute(2.0, 5.0, 1.1)
         self.assertEqual(accel, 0.0)
         self.assertGreater(brake, 0.0)
+
+    def test_speed_controller_uses_main_branch_pid_equation(self):
+        controller = PedalSpeedController(
+            kp=0.075,
+            ki=0.0001,
+            kd=0.025,
+            nominal_dt=1.0 / 30.0,
+        )
+        accel, brake = controller.compute(3.0, 2.0, 1.0)
+        expected = 0.075 + 0.0001 / 30.0 + 0.025 * 30.0
+        self.assertAlmostEqual(accel, expected)
+        self.assertEqual(brake, 0.0)
+
+        accel, brake = controller.compute(3.0, 2.0, 1.0 + 1.0 / 30.0)
+        self.assertAlmostEqual(accel, 0.075 + 0.0001 * 2.0 / 30.0)
+        self.assertEqual(brake, 0.0)
+
+    def test_roslaunch_remapping_arguments_are_ignored(self):
+        with patch("path_planning.pure_pursuit_udp_runtime.run") as run_mock:
+            main(
+                "ins",
+                [
+                    "--target-speed-kmh",
+                    "12.5",
+                    "__name:=morai_pure_pursuit_ins_udp",
+                    "__log:=/tmp/controller.log",
+                ],
+            )
+        arguments = run_mock.call_args.args[1]
+        self.assertEqual(arguments.target_speed_kmh, 12.5)
 
 
 if __name__ == "__main__":

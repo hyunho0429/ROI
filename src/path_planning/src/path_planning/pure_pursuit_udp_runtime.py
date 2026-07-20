@@ -112,7 +112,12 @@ def argument_parser(localization_mode):
         default="25s4",
         help="Ego Ctrl Cmd wire layout (25s4: 55 bytes, 26r1: 59 bytes)",
     )
-    parser.add_argument("--control-rate-hz", type=float, default=20.0)
+    parser.add_argument(
+        "--control-rate-hz",
+        type=float,
+        default=30.0,
+        help="control loop rate; main branch PID was configured for 30 Hz",
+    )
     parser.add_argument("--target-speed-kmh", type=float, default=TARGET_SPEED_KMH)
     parser.add_argument("--wheelbase", type=float, default=2.7)
     parser.add_argument("--lookahead-distance", type=float, default=4.0)
@@ -165,8 +170,9 @@ def argument_parser(localization_mode):
     parser.add_argument("--gps-speed-sigma", type=float, default=0.8)
     parser.add_argument("--imu-orientation-sigma-deg", type=float, default=4.0)
     parser.add_argument("--vehicle-speed-sigma", type=float, default=0.25)
-    parser.add_argument("--speed-kp", type=float, default=0.35)
-    parser.add_argument("--speed-ki", type=float, default=0.04)
+    parser.add_argument("--speed-kp", type=float, default=0.075)
+    parser.add_argument("--speed-ki", type=float, default=0.0001)
+    parser.add_argument("--speed-kd", type=float, default=0.025)
     parser.add_argument("--max-accel-pedal", type=float, default=1.0)
     parser.add_argument("--max-brake-pedal", type=float, default=1.0)
     parser.add_argument("--global-info", default=DEFAULT_GLOBAL_INFO)
@@ -227,9 +233,15 @@ def _validate(arguments):
         "lookahead_speed_gain",
         "minimum_waypoint_spacing",
         "max_steering_rate_radps",
+        "speed_kp",
+        "speed_ki",
+        "speed_kd",
     ):
         if getattr(arguments, name) < 0.0:
             raise ValueError("{} cannot be negative".format(name))
+    for name in ("max_accel_pedal", "max_brake_pedal"):
+        if getattr(arguments, name) <= 0.0:
+            raise ValueError("{} must be positive".format(name))
     if not 0.0 <= arguments.steering_filter_alpha <= 1.0:
         raise ValueError("steering-filter-alpha must be between 0 and 1")
     if arguments.waypoint_smoothing_window < 1:
@@ -306,6 +318,8 @@ def run(localization_mode, arguments):
     speed_controller = PedalSpeedController(
         kp=arguments.speed_kp,
         ki=arguments.speed_ki,
+        kd=arguments.speed_kd,
+        nominal_dt=1.0 / arguments.control_rate_hz,
         max_accel=arguments.max_accel_pedal,
         max_brake=arguments.max_brake_pedal,
     )
@@ -411,6 +425,14 @@ def run(localization_mode, arguments):
             arguments.maximum_lookahead,
             arguments.wheelbase,
             arguments.target_speed_kmh,
+        )
+    )
+    print(
+        "  longitudinal PID: Kp={:.6f}, Ki={:.6f}, Kd={:.6f} at {:.1f} Hz".format(
+            arguments.speed_kp,
+            arguments.speed_ki,
+            arguments.speed_kd,
+            arguments.control_rate_hz,
         )
     )
     print("  maximum GPS outage: {:.1f} s".format(arguments.max_gps_outage))
@@ -649,4 +671,10 @@ def run(localization_mode, arguments):
 
 def main(localization_mode, argv=None):
     parser = argument_parser(localization_mode)
+    if argv is None:
+        argv = sys.argv[1:]
+    # roslaunch appends ROS remapping arguments (for example __name:=...).
+    # The controller deliberately remains UDP-only, so discard only those
+    # process-management arguments before handing options to argparse.
+    argv = [value for value in argv if ":=" not in value]
     run(localization_mode, parser.parse_args(argv))

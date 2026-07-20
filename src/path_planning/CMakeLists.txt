@@ -32,3 +32,7 @@ catkin_install_python(PROGRAMS
   src/mgeo_json_pub.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
+
+install(DIRECTORY launch data mgeo
+  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
+)

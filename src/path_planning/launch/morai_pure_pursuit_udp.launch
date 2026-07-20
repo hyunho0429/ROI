@@ -1,0 +1,70 @@
+<launch>
+    <!-- roslaunch is used only as a process/configuration runner. Sensor and
+         control traffic remains competition-compliant UDP. -->
+    <arg name="path" default="$(find path_planning)/data/2026_molit_comp_global_path.txt"/>
+    <arg name="global_info" default="$(find path_planning)/mgeo/R_KR_PR_K-city_2025/global_info.json"/>
+
+    <arg name="bind_ip" default="0.0.0.0"/>
+    <arg name="gps_port" default="3001"/>
+    <arg name="imu_port" default="4001"/>
+    <arg name="competition_status_port" default="909"/>
+    <arg name="collision_port" default="907"/>
+    <arg name="control_ip" default="192.168.0.170"/>
+    <arg name="control_port" default="9090"/>
+    <arg name="control_protocol" default="25s4"/>
+
+    <arg name="control_rate_hz" default="30.0"/>
+    <arg name="target_speed_kmh" default="10.0"/>
+    <arg name="speed_kp" default="0.075"/>
+    <arg name="speed_ki" default="0.0001"/>
+    <arg name="speed_kd" default="0.025"/>
+    <arg name="max_accel_pedal" default="1.0"/>
+    <arg name="max_brake_pedal" default="1.0"/>
+
+    <arg name="wheelbase" default="2.7"/>
+    <arg name="lookahead_distance" default="4.0"/>
+    <arg name="lookahead_speed_gain" default="0.5"/>
+    <arg name="minimum_lookahead" default="3.0"/>
+    <arg name="maximum_lookahead" default="12.0"/>
+    <arg name="max_steering_deg" default="21.77"/>
+    <arg name="vehicle_max_steering_deg" default="36.25"/>
+    <arg name="morai_steer_sign" default="1.0"/>
+
+    <arg name="alignment_seconds" default="2.0"/>
+    <arg name="alignment_min_samples" default="20"/>
+    <arg name="max_gps_outage" default="120.0"/>
+
+    <node pkg="path_planning"
+          type="morai_pure_pursuit_ins_udp.py"
+          name="morai_pure_pursuit_ins_udp"
+          output="screen"
+          required="true"
+          args='--path "$(arg path)"
+                --global-info "$(arg global_info)"
+                --bind-ip $(arg bind_ip)
+                --gps-port $(arg gps_port)
+                --imu-port $(arg imu_port)
+                --competition-status-port $(arg competition_status_port)
+                --collision-port $(arg collision_port)
+                --control-ip $(arg control_ip)
+                --control-port $(arg control_port)
+                --control-protocol $(arg control_protocol)
+                --control-rate-hz $(arg control_rate_hz)
+                --target-speed-kmh $(arg target_speed_kmh)
+                --speed-kp $(arg speed_kp)
+                --speed-ki $(arg speed_ki)
+                --speed-kd $(arg speed_kd)
+                --max-accel-pedal $(arg max_accel_pedal)
+                --max-brake-pedal $(arg max_brake_pedal)
+                --wheelbase $(arg wheelbase)
+                --lookahead-distance $(arg lookahead_distance)
+                --lookahead-speed-gain $(arg lookahead_speed_gain)
+                --minimum-lookahead $(arg minimum_lookahead)
+                --maximum-lookahead $(arg maximum_lookahead)
+                --max-steering-deg $(arg max_steering_deg)
+                --vehicle-max-steering-deg $(arg vehicle_max_steering_deg)
+                --morai-steer-sign $(arg morai_steer_sign)
+                --alignment-seconds $(arg alignment_seconds)
+                --alignment-min-samples $(arg alignment_min_samples)
+                --max-gps-outage $(arg max_gps_outage)'/>
+</launch>

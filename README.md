@@ -64,6 +64,30 @@ python3 src/path_planning/src/morai_pure_pursuit_ins_udp.py \
   --path src/path_planning/data/2026_molit_comp_global_path.txt
 ```
 
+The same controller can be started through `roslaunch`. ROS is used only to
+start the process and supply arguments; GPS, IMU, Competition Status,
+CollisionData, and Ego Ctrl Cmd still use UDP only.
+
+```bash
+cd ~/catkin_ws
+python3 -m pip install -r src/path_planning/requirements.txt
+catkin_make
+source devel/setup.bash
+roslaunch path_planning morai_pure_pursuit_udp.launch
+```
+
+The launch defaults use the `main` branch longitudinal PID settings at 30 Hz:
+`Kp=0.075`, `Ki=0.0001`, and `Kd=0.025`. Positive PID output is sent as
+`accel`, negative output as `brake`, and Pure Pursuit supplies `steering` in
+the same MORAI `longCmdType=1` packet. Network and controller values can be
+overridden without editing code, for example:
+
+```bash
+roslaunch path_planning morai_pure_pursuit_udp.launch \
+  control_ip:=192.168.0.170 target_speed_kmh:=10.0 \
+  speed_kp:=0.075 speed_ki:=0.0001 speed_kd:=0.025
+```
+
 See `src/path_planning/README_PURE_PURSUIT_UDP.md` for the MORAI 25.S4 protocol basis,
 coordinate conversion, network settings, safety behavior, and tuning values.
 

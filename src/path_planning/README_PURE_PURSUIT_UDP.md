@@ -13,7 +13,7 @@ GPS UDP ─┐
 IMU UDP ─┼─> 15-state EKF-INS ─> x, y, z, yaw, speed ─> Pure Pursuit
 Status ──┘                                           └─> steering
 
-INS estimated speed ─> PI speed control ─> accel / brake
+INS estimated speed ─> PID speed control ─> accel / brake
 CollisionData ─────────────────────────> emergency brake
 ```
 
@@ -248,6 +248,40 @@ Velodyne 모델의 UDP 프로토콜을 따르므로 필요 없는 포트는 열�
 
 ## 실행
 
+권장 실행 방법은 `roslaunch`이다. ROS는 프로세스 실행과 인자 전달에만 사용하고,
+센서와 제어 통신은 모두 UDP로 유지한다.
+
+```bash
+cd ~/catkin_ws
+python3 -m pip install -r src/path_planning/requirements.txt
+catkin_make
+source devel/setup.bash
+roslaunch path_planning morai_pure_pursuit_udp.launch
+```
+
+기본 종방향 PID는 `main` 브랜치와 같은 30 Hz, `Kp=0.075`, `Ki=0.0001`,
+`Kd=0.025`이다. 양수 출력은 accel, 음수 출력은 brake로 분리되고 Pure Pursuit
+steering과 함께 `longCmdType=1` 패킷으로 전송된다. launch 인자는 다음처럼
+덮어쓸 수 있다.
+
+```bash
+roslaunch path_planning morai_pure_pursuit_udp.launch \
+  target_speed_kmh:=10.0 \
+  speed_kp:=0.075 speed_ki:=0.0001 speed_kd:=0.025
+```
+
+Competition Status `909`와 CollisionData `907`은 1024 미만 포트이다. Linux에서
+권한 오류가 발생하면 MORAI와 launch의 두 수신 포트를 동일한 1024 이상 값으로
+변경하는 것이 가장 간단하다. 예를 들어 MORAI Destination Port도 각각 1909,
+1907로 맞춘 뒤 아래처럼 실행한다.
+
+```bash
+roslaunch path_planning morai_pure_pursuit_udp.launch \
+  competition_status_port:=1909 collision_port:=1907
+```
+
+Python 단독 실행도 계속 지원한다.
+
 ```bash
 python3 -m pip install -r src/path_planning/requirements.txt
 
@@ -303,6 +337,8 @@ Cmd Control의 Host IP/Port를 점검한다. feedback에도 accel이 들어오�
 - `--max-steering-rate-radps`: 초당 조향각 변화 제한
 - `--minimum-waypoint-spacing`, `--waypoint-smoothing-window`: 경로 전처리
 - `--morai-steer-sign`: 좌우가 반대일 때 `1` 또는 `-1`로 변경
+- `--speed-kp`, `--speed-ki`, `--speed-kd`: 종방향 PID 게인
+- `--control-rate-hz`: PID 및 제어 루프 주기(기본 30 Hz)
 
 GPS/IMU/Competition Status가 stale이거나 CollisionData가 충돌을 알리거나 경로
 끝에 도달하면 즉시 brake 명령을 전송한다. `Ctrl+C` 종료 시에도 brake 패킷을
