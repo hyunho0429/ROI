@@ -1,7 +1,8 @@
 """Strict parser for the MORAI Competition Vehicle Status UDP packet.
 
 Competition Vehicle Status is a competition-only interface and is deliberately
-kept separate from the public Ego Vehicle Status protocol.
+kept separate from both public Ego Vehicle Status and beta_drive
+morai_msgs/Competition (start_signal/team_name/mission_success).
 """
 
 import math

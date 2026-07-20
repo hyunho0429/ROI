@@ -12,6 +12,18 @@ class GpsPacketError(ValueError):
 
 
 @dataclass(frozen=True)
+class GPSMessage:
+    """Semantic mirror of beta_drive morai_msgs/GPSMessage (without Header)."""
+
+    latitude: float
+    longitude: float
+    altitude: float
+    eastOffset: float
+    northOffset: float
+    status: int
+
+
+@dataclass(frozen=True)
 class GpsMeasurement:
     latitude_deg: float
     longitude_deg: float
@@ -19,6 +31,28 @@ class GpsMeasurement:
     speed_mps: float = None
     course_deg: float = None
     fix_valid: bool = True
+
+    def to_beta_drive_message(self, east_offset_m, north_offset_m):
+        """Add map constants absent from NMEA and expose GPSMessage fields."""
+        if self.altitude_m is None:
+            raise ValueError("GPSMessage conversion needs a merged GGA altitude")
+        values = (
+            self.latitude_deg,
+            self.longitude_deg,
+            self.altitude_m,
+            float(east_offset_m),
+            float(north_offset_m),
+        )
+        if not all(math.isfinite(value) for value in values):
+            raise ValueError("GPSMessage conversion contains a non-finite value")
+        return GPSMessage(
+            latitude=self.latitude_deg,
+            longitude=self.longitude_deg,
+            altitude=self.altitude_m,
+            eastOffset=float(east_offset_m),
+            northOffset=float(north_offset_m),
+            status=1 if self.fix_valid else 0,
+        )
 
 
 def _verify_checksum(sentence):

@@ -28,6 +28,13 @@ class MoraiUdpSensorsTest(unittest.TestCase):
         self.assertAlmostEqual(measurement.altitude_m, 42.5)
         self.assertAlmostEqual(measurement.speed_mps, 5.1444444444)
         self.assertAlmostEqual(measurement.course_deg, 90.0)
+        message = measurement.to_beta_drive_message(302595.0, 4124145.0)
+        self.assertAlmostEqual(message.latitude, measurement.latitude_deg)
+        self.assertAlmostEqual(message.longitude, measurement.longitude_deg)
+        self.assertEqual(message.altitude, 42.5)
+        self.assertEqual(message.eastOffset, 302595.0)
+        self.assertEqual(message.northOffset, 4124145.0)
+        self.assertEqual(message.status, 1)
 
     def test_parses_documented_wxyz_107_byte_imu_packet(self):
         yaw = math.radians(45.0)
@@ -42,6 +49,9 @@ class MoraiUdpSensorsTest(unittest.TestCase):
         self.assertIsNone(measurement.timestamp_sec)
         self.assertEqual(measurement.angular_velocity_radps, (0.1, 0.2, 0.3))
         self.assertEqual(measurement.linear_acceleration_mps2, (1.0, 2.0, 3.0))
+        self.assertEqual(measurement.orientation, measurement.orientation_xyzw)
+        self.assertEqual(measurement.angular_velocity, (0.1, 0.2, 0.3))
+        self.assertEqual(measurement.linear_acceleration, (1.0, 2.0, 3.0))
 
     def test_parses_official_115_byte_imu_packet_with_timestamp(self):
         yaw = math.radians(45.0)

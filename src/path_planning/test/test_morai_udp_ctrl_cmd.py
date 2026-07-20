@@ -64,6 +64,22 @@ class MoraiUdpCtrlCmdTest(unittest.TestCase):
     def test_generic_encoder_defaults_to_25s4(self):
         self.assertEqual(len(encode_ego_ctrl_cmd(EgoCtrlCommand())), 55)
 
+    def test_exposes_beta_drive_ctrl_cmd_field_names(self):
+        command = EgoCtrlCommand(
+            long_cmd_type=1,
+            velocity_kmh=12.0,
+            acceleration_mps2=0.4,
+            accel=0.3,
+            brake=0.1,
+            steering_normalized=-0.2,
+        )
+        self.assertEqual(command.longlCmdType, 1)
+        self.assertEqual(command.velocity, 12.0)
+        self.assertEqual(command.acceleration, 0.4)
+        self.assertEqual(command.accel, 0.3)
+        self.assertEqual(command.brake, 0.1)
+        self.assertEqual(command.steering, -0.2)
+
     def test_rejects_out_of_range_steering(self):
         with self.assertRaises(ValueError):
             encode_ego_ctrl_cmd_25s4(EgoCtrlCommand(steering_normalized=1.1))

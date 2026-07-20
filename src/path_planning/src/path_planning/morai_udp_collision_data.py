@@ -31,9 +31,15 @@ class CollisionObject:
 
 
 @dataclass(frozen=True)
-class CollisionData26R1:
+class CollisionData:
     timestamp_sec: float
     objects: tuple
+
+    @property
+    def global_offset_m(self):
+        """beta_drive CollisionData's message-level global map offset."""
+        populated = [item for item in self.objects if item.populated]
+        return populated[0].global_offset_m if populated else (0.0, 0.0, 0.0)
 
     @property
     def collided_objects(self):
@@ -46,11 +52,16 @@ class CollisionData26R1:
         )
 
     @property
+    def collision_object(self):
+        """beta_drive-compatible name for the actual collided objects."""
+        return self.collided_objects
+
+    @property
     def collision_detected(self):
         return bool(self.collided_objects)
 
 
-def parse_collision_data_26r1(packet):
+def parse_collision_data(packet):
     if len(packet) != PACKET_SIZE:
         raise CollisionPacketError(
             "expected {} bytes, received {} (header={!r})".format(
@@ -101,7 +112,20 @@ def parse_collision_data_26r1(packet):
                 global_offset_m=tuple(values[3:]),
             )
         )
-    return CollisionData26R1(
+    populated = [item for item in objects if item.populated]
+    if populated:
+        expected_offset = populated[0].global_offset_m
+        for item in populated[1:]:
+            if math.dist(item.global_offset_m, expected_offset) > 1e-3:
+                raise CollisionPacketError(
+                    "collision objects contain inconsistent global offsets"
+                )
+    return CollisionData(
         timestamp_sec=seconds + nanoseconds * 1e-9,
         objects=tuple(objects),
     )
+
+
+# Backward-compatible names retained for previous dev/stanley users.
+CollisionData26R1 = CollisionData
+parse_collision_data_26r1 = parse_collision_data

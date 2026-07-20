@@ -15,6 +15,7 @@ from path_planning.morai_udp_collision_data import (
     PACKET_HEADER,
     PACKET_SIZE,
     CollisionPacketError,
+    parse_collision_data,
     parse_collision_data_26r1,
 )
 
@@ -45,16 +46,18 @@ def make_first_slot_collision_packet():
 
 class CollisionDataTest(unittest.TestCase):
     def test_detects_second_populated_object(self):
-        collision = parse_collision_data_26r1(make_packet(collided=True))
+        collision = parse_collision_data(make_packet(collided=True))
         self.assertAlmostEqual(collision.timestamp_sec, 10.25)
         self.assertTrue(collision.collision_detected)
         self.assertEqual(collision.collided_objects[0].object_id, 42)
+        self.assertEqual(collision.collision_object, collision.collided_objects)
+        self.assertEqual(collision.global_offset_m, (300000.0, 4100000.0, 0.0))
 
     def test_empty_slots_are_not_collision(self):
-        self.assertFalse(parse_collision_data_26r1(make_packet()).collision_detected)
+        self.assertFalse(parse_collision_data(make_packet()).collision_detected)
 
     def test_detects_non_ego_collision_in_first_slot(self):
-        collision = parse_collision_data_26r1(make_first_slot_collision_packet())
+        collision = parse_collision_data(make_first_slot_collision_packet())
         self.assertTrue(collision.collision_detected)
         self.assertEqual(collision.collided_objects[0].object_id, 99)
 
@@ -63,6 +66,18 @@ class CollisionDataTest(unittest.TestCase):
         packet[:15] = b"wrong".ljust(15, b"\x00")
         with self.assertRaises(CollisionPacketError):
             parse_collision_data_26r1(bytes(packet))
+
+    def test_keeps_previous_parser_name_as_alias(self):
+        self.assertEqual(
+            parse_collision_data_26r1(make_packet(collided=True)),
+            parse_collision_data(make_packet(collided=True)),
+        )
+
+    def test_rejects_inconsistent_message_level_global_offset(self):
+        packet = bytearray(make_packet(collided=True))
+        struct.pack_into("<f", packet, 67 + 16, 300001.0)
+        with self.assertRaisesRegex(CollisionPacketError, "inconsistent"):
+            parse_collision_data(bytes(packet))
 
 
 if __name__ == "__main__":

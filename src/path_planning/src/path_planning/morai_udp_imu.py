@@ -24,6 +24,19 @@ class ImuMeasurement:
     linear_acceleration_mps2: tuple
     timestamp_sec: float = None
 
+    # sensor_msgs/Imu-compatible semantic names used by beta_drive.
+    @property
+    def orientation(self):
+        return self.orientation_xyzw
+
+    @property
+    def angular_velocity(self):
+        return self.angular_velocity_radps
+
+    @property
+    def linear_acceleration(self):
+        return self.linear_acceleration_mps2
+
 
 def parse_imu_packet(packet):
     """Parse a timestamped 115-byte or public 107-byte IMU datagram.

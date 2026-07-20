@@ -17,6 +17,27 @@ INS estimated speed ─> PI speed control ─> accel / brake
 CollisionData ─────────────────────────> emergency brake
 ```
 
+## `beta_drive` 메시지 타입 대응
+
+내부 필드 의미는 MORAI 공식
+[`MORAI-ROS_morai_msgs`의 `beta_drive`](https://github.com/MORAI-Autonomous/MORAI-ROS_morai_msgs/tree/beta_drive)
+메시지 정의에 맞췄다. 단, 대회 규정에 따라 ROS transport나 ROS serialization은
+사용하지 않고 MORAI UDP wire format만 사용한다.
+검토 기준은 `beta_drive`의 `45c6baf148f2327f4c9fefd48262f25bdfe4b567`이다.
+
+- `CtrlCmd`: `longlCmdType`, `accel`, `brake`, `steering`, `velocity`,
+  `acceleration`과 대응한다. UDP envelope의 `ctrl_mode`, `gear`는 별도 필드다.
+- `GPSMessage`: NMEA RMC/GGA에서 `latitude`, `longitude`, `altitude`, `status`를
+  만들고, NMEA에 없는 `eastOffset`, `northOffset`은 MGeo 고정 원점을 붙인다.
+- IMU: `sensor_msgs/Imu`와 같은 `orientation(x,y,z,w)`, `angular_velocity`,
+  `linear_acceleration` 의미와 단위를 사용한다.
+- `CollisionData`: UDP 각 object record의 공통 global offset을 메시지 레벨
+  `global_offset_x/y/z`로 노출하고 실제 충돌 객체를 `collision_object`로 제공한다.
+- `EgoVehicleStatusExtended`와 Competition Vehicle Status는 필드가 겹치지만
+  동일 wire message가 아니다. 후자는 관측된 181/229-byte 전용 파서로 유지한다.
+- `Competition.msg`의 `start_signal/team_name/mission_success`는 Competition
+  Vehicle Status와 다른 메시지이며, 허용 UDP 규격이 제공되지 않아 수신하지 않는다.
+
 경로 CSV에 기록된 과거 IMU·가속도·각속도는 현재 차량 위치추정에 사용하지
 않는다. 현재 차량은 실시간 GPS/IMU/Competition Status로 추정한다. CSV에서는
 경로의 `x/y/z` 또는 GPS 열과 고정 원점만 읽는다.

@@ -24,7 +24,7 @@ from path_planning.morai_competition_config import (
 )
 from path_planning.morai_udp_collision_data import (
     CollisionPacketError,
-    parse_collision_data_26r1,
+    parse_collision_data,
 )
 from path_planning.morai_udp_competition_status import (
     CompetitionStatusPacketError,
@@ -382,7 +382,7 @@ def run(arguments):
                             )
                             last_drive_state = drive_state
                     else:
-                        collision = parse_collision_data_26r1(packet)
+                        collision = parse_collision_data(packet)
                         if collision.collision_detected:
                             collision_brake_until = max(
                                 collision_brake_until,

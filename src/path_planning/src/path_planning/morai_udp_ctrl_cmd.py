@@ -36,21 +36,39 @@ class EgoCtrlCommand:
     steering_normalized: float = 0.0
     rear_steering_normalized: float = 0.0
 
+    # beta_drive morai_msgs/CtrlCmd-compatible field names.  ctrl_mode and
+    # gear belong to the UDP envelope and are intentionally kept separate.
+    @property
+    def longlCmdType(self):
+        return self.long_cmd_type
+
+    @property
+    def velocity(self):
+        return self.velocity_kmh
+
+    @property
+    def acceleration(self):
+        return self.acceleration_mps2
+
+    @property
+    def steering(self):
+        return self.steering_normalized
+
 
 def _validated_values(command):
     if command.ctrl_mode not in (1, 2):
         raise ValueError("ctrl_mode must be 1 (keyboard) or 2 (auto)")
     if command.gear not in range(6):
         raise ValueError("gear must be between 0 and 5")
-    if command.long_cmd_type != 1:
+    if command.longlCmdType != 1:
         raise ValueError("competition rules require long_cmd_type 1 (accel/brake)")
 
     values = (
-        command.velocity_kmh,
-        command.acceleration_mps2,
+        command.velocity,
+        command.acceleration,
         command.accel,
         command.brake,
-        command.steering_normalized,
+        command.steering,
         command.rear_steering_normalized,
     )
     if not all(math.isfinite(value) for value in values):
@@ -59,7 +77,7 @@ def _validated_values(command):
         raise ValueError("accel must be between 0 and 1")
     if not 0.0 <= command.brake <= 1.0:
         raise ValueError("brake must be between 0 and 1")
-    if not -1.0 <= command.steering_normalized <= 1.0:
+    if not -1.0 <= command.steering <= 1.0:
         raise ValueError("steering_normalized must be between -1 and 1")
     if not -1.0 <= command.rear_steering_normalized <= 1.0:
         raise ValueError("rear_steering_normalized must be between -1 and 1")
@@ -94,7 +112,7 @@ def encode_ego_ctrl_cmd(command, protocol=CONTROL_PROTOCOL_25S4):
         30,
         command.ctrl_mode,
         command.gear,
-        command.long_cmd_type,
+        command.longlCmdType,
         *payload_values,
     )
     packet[-2:] = PACKET_TAIL
