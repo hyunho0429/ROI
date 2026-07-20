@@ -49,7 +49,9 @@ from path_planning.stanley_controller import (
 
 
 PACKAGE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-DEFAULT_PATH = os.path.join(PACKAGE_DIR, "data", "morai_global_path.csv")
+DEFAULT_PATH = os.path.join(
+    PACKAGE_DIR, "data", "2026_molit_comp_global_path.txt"
+)
 DEFAULT_GLOBAL_INFO = os.path.join(
     PACKAGE_DIR, "mgeo", "R_KR_PR_K-city_2025", "global_info.json"
 )
@@ -91,7 +93,9 @@ def argument_parser(localization_mode):
         )
     )
     parser.add_argument(
-        "--path", default=DEFAULT_PATH, help="ENU CSV or MORAI GPS sensor path file"
+        "--path",
+        default=DEFAULT_PATH,
+        help="ENU CSV/TXT or MORAI GPS sensor path file",
     )
     parser.add_argument("--bind-ip", default=BIND_IP)
     parser.add_argument("--gps-port", type=int, default=GPS_PORT)

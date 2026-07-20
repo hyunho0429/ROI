@@ -69,8 +69,22 @@ x,y,z,target_speed,lat,lon,alt,origin_lat,origin_lon,origin_alt
 latitude longitude altitude eastOffset northOffset
 ```
 
-쉼표 CSV와 공백/탭 TXT, 헤더 없는 5열 파일을 모두 지원한다. 헤더는 공식
-영문명뿐 아니라 `위도,경도,고도,동쪽 좌표,북쪽 좌표`도 인식한다.
+쉼표 CSV와 공백/탭 TXT, 헤더 없는 ENU 2/3열 및 GPS 5열 파일을 모두
+지원한다. 헤더는 공식 영문명뿐 아니라
+`위도,경도,고도,동쪽 좌표,북쪽 좌표`도 인식한다.
+
+## 2026 국토부 대회 전역 경로
+
+대회 제공 `2026_molit_comp_global_path.txt`는 헤더 없는 `x y z` 3열이며,
+단위는 meter인 K-City MGeo 로컬 ENU 좌표이다. 4,430개 원본 점은
+`R_KR_PR_K-city_2025/link_set.json`의 점과 일치한다. 범위는
+`x=-159.24~75.41`, `y=-550.49~345.79`, `z=28.11~28.59 m`이고 한 바퀴가
+약 2,184.6 m인 폐곡선이다.
+
+경로 파일에는 좌표 변환을 다시 적용하지 않는다. 실시간 NMEA GPS만
+`global_info.json`의 UTM 52N 원점 `(302595, 4124145, 0)`을 빼서 같은 로컬
+ENU로 변환한다. 이 파일이 기본 `--path`이므로 옵션을 생략해도 대회 경로로
+주행한다.
 
 대회 허용 네트워크만 사용하는 경로 기록 명령은 다음과 같다.
 
@@ -206,7 +220,7 @@ Velodyne 모델의 UDP 프로토콜을 따르므로 필요 없는 포트는 열�
 python3 -m pip install -r src/path_planning/requirements.txt
 
 sudo "$(which python3)" src/path_planning/src/morai_stanley_ins_udp.py \
-  --path src/path_planning/data/morai_global_path.csv
+  --path src/path_planning/data/2026_molit_comp_global_path.txt
 ```
 
 위 명령에서 생략한 기본값은 코드의 `morai_competition_config.py`에 있다.

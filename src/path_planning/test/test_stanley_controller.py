@@ -27,6 +27,28 @@ from path_planning.stanley_udp_runtime import argument_parser
 
 
 class StanleyControllerTest(unittest.TestCase):
+    def test_loads_competition_headerless_xyz_path(self):
+        filename = os.path.abspath(
+            os.path.join(
+                os.path.dirname(__file__),
+                "..",
+                "data",
+                "2026_molit_comp_global_path.txt",
+            )
+        )
+        points = load_path_csv(filename)
+        projection = load_gps_path_projection(
+            filename, MapProjection("EPSG:32652", 302595.0, 4124145.0, 0.0)
+        )
+
+        self.assertEqual(len(points), 4392)
+        self.assertIsNone(projection)
+        self.assertAlmostEqual(points[0].x_m, -131.68979755061446)
+        self.assertAlmostEqual(points[0].y_m, -428.3310229377821)
+        self.assertAlmostEqual(points[0].z_m, 28.543960281954277)
+        self.assertAlmostEqual(points[-1].x_m, points[0].x_m)
+        self.assertAlmostEqual(points[-1].y_m, points[0].y_m)
+
     def test_loads_origin_anchored_sensor_csv_in_recorded_local_frame(self):
         header = (
             "x,y,z,target_speed,lat,lon,alt,origin_lat,origin_lon,origin_alt,"
@@ -277,6 +299,9 @@ class StanleyControllerTest(unittest.TestCase):
         self.assertEqual(arguments.control_ip, "192.168.0.170")
         self.assertEqual(arguments.control_port, 9090)
         self.assertEqual(arguments.control_protocol, "25s4")
+        self.assertEqual(
+            os.path.basename(arguments.path), "2026_molit_comp_global_path.txt"
+        )
         self.assertEqual(arguments.control_point_offset, 3.0)
         self.assertEqual(arguments.morai_steer_sign, 1.0)
         self.assertEqual(arguments.speed_kp, 0.35)

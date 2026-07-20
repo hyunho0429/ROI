@@ -91,6 +91,25 @@ def _numeric(value):
         return False
 
 
+def _headerless_path_header(values):
+    """Infer the two documented headerless path layouts by column count."""
+    if len(values) == 2:
+        return ["x", "y"]
+    if len(values) == 3:
+        return ["x", "y", "z"]
+    if len(values) == 5:
+        return [
+            "latitude",
+            "longitude",
+            "altitude",
+            "eastOffset",
+            "northOffset",
+        ]
+    raise ValueError(
+        "headerless path needs 2/3 ENU columns or 5 MORAI GPS columns"
+    )
+
+
 def _field_index(header, aliases):
     normalized = {_normalized_name(value): index for index, value in enumerate(header)}
     for alias in aliases:
@@ -331,8 +350,9 @@ def _load_gps_sensor_rows(header, rows, line_numbers, gps_projection):
 
 
 def load_path_csv(filename, gps_projection=None):
-    """Load ENU CSV or MORAI GPS sensor-export rows as map-local ENU points.
+    """Load ENU CSV/TXT or MORAI GPS sensor-export rows as map-local ENU.
 
+    Headerless two/three-value rows are interpreted as map-local ENU x/y[/z].
     GPS sensor rows may be a headered CSV containing latitude, longitude,
     altitude, eastOffset and northOffset, or the documented headerless
     five-value text format. Extra IMU columns in a combined CSV are ignored;
@@ -355,10 +375,16 @@ def load_path_csv(filename, gps_projection=None):
         header = first_values
         data = parsed[1:]
     else:
-        # Official MORAI GPS sensor save format:
-        # latitude longitude altitude eastOffset northOffset
-        header = ["latitude", "longitude", "altitude", "eastOffset", "northOffset"]
+        header = _headerless_path_header(first_values)
         data = parsed
+        expected_columns = len(first_values)
+        for line_number, values in data:
+            if len(values) != expected_columns:
+                raise ValueError(
+                    "inconsistent column count at path file line {}".format(
+                        line_number
+                    )
+                )
     if not data:
         raise ValueError("path file contains a header but no data rows")
 
@@ -406,7 +432,7 @@ def load_gps_path_projection(filename, fallback_projection=None):
     ]
     first_values = parsed[0][1]
     if all(_numeric(value) for value in first_values):
-        header = ["latitude", "longitude", "altitude", "eastOffset", "northOffset"]
+        header = _headerless_path_header(first_values)
         data = parsed
     else:
         header = first_values
