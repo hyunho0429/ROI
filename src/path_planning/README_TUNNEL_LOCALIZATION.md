@@ -1,8 +1,8 @@
-# MORAI 터널용 Stanley 위치추정 실행기
+# MORAI 터널용 Pure Pursuit 위치추정 실행기
 
-권장 구성은 GPS 음영 구간을 통과하는 `morai_stanley_ins_udp.py`이다. 비교 시험을
+권장 구성은 GPS 음영 구간을 통과하는 `morai_pure_pursuit_ins_udp.py`이다. 비교 시험을
 위해 dead-reckoning 실행기도 유지한다. 두 실행기 모두 ROS/catkin 없이 Python과
-UDP만으로 실행되며 같은 경로 CSV, Stanley 조향기, accel/brake PI 제어기와 충돌
+UDP만으로 실행되며 같은 경로 CSV, Pure Pursuit 조향기, accel/brake PI 제어기와 충돌
 제동을 사용한다.
 
 ## 공통 준비
@@ -38,15 +38,14 @@ northOffset`) 또는 이 GPS 열과 IMU 열이 합쳐진 CSV를 받는 경우에
 사용하고 실시간 GPS도 같은 원점으로 변환한다. 공식 GPS 5열 파일은 기존 K-City
 MGeo 원점 기준 ENU 변환을 사용한다.
 
-경로는 AutoVehicle 방식으로 최소 0.5 m 간격과 9점 이동평균을 적용한다. 횡제어는
-Pure Pursuit 목표점이나 lookahead distance 없이 최근접 segment 접선과 전륜축
-CTE만 사용하는 Stanley이다. `target_search_window`는 waypoint 인덱스 검색 범위일
-뿐 lookahead 거리가 아니다. CSV의 `target_speed`는 무시하고 기본 10 km/h를
-`longCmdType 1`의 accel/brake PI 제어로 추종한다.
+경로는 최소 0.5 m 간격과 9점 이동평균을 적용한다. 횡제어는 속도 비례 lookahead
+target과 kinematic bicycle model을 사용하는 Pure Pursuit이다. 경로에
+`target_speed`가 없으면 기본 10 km/h를 `longCmdType 1`의 accel/brake PI 제어로
+추종한다.
 
 ## 1. INS error-state EKF 버전
 
-실행 파일은 `morai_stanley_ins_udp.py`이다. nominal state는 3차원 위치·속도,
+실행 파일은 `morai_pure_pursuit_ins_udp.py`이다. nominal state는 3차원 위치·속도,
 body-to-ENU quaternion, gyro bias와 accelerometer bias이고, 15상태 오차 벡터는
 `[dp, dv, dtheta, dbg, dba]`이다.
 
@@ -59,12 +58,13 @@ body-to-ENU quaternion, gyro bias와 accelerometer bias이고, 15상태 오차 �
 - GPS blackout 중에도 IMU + Competition 속도 + NHC로 예측 지속
 
 ```bash
-python3 src/path_planning/src/morai_stanley_ins_udp.py \
+python3 src/path_planning/src/morai_pure_pursuit_ins_udp.py \
   --path src/path_planning/data/morai_global_path.csv \
   --max-gps-outage 120
 ```
 
-실행 후 차량을 3–5초간 정지시켜 초기 bias가 수렴할 시간을 준다. INS 버전은
+실행 후 기본 2초 동안 코드가 brake를 유지하고 IMU bias alignment를 수행한다.
+필요하면 `--alignment-seconds`와 `--alignment-min-samples`를 조정한다. INS 버전은
 IMU 선가속도가 정지 시 body +Z 방향으로 약 `+9.80665 m/s²`를
 출력하는 specific-force 규약을 전제로 한다. 첫 시험에서는 반드시 정지 상태에서
 로그의 Z가 빠르게 변하지 않는지 확인한다. 반대 부호 또는 중력 제거된 가속도가
@@ -80,7 +80,7 @@ IMU 선가속도가 정지 시 body +Z 방향으로 약 `+9.80665 m/s²`를
 
 ## 2. Competition 속도 기반 dead-reckoning 버전
 
-실행 파일은 `morai_stanley_dead_reckoning_udp.py`이다. IMU 가속도를 적분하지
+실행 파일은 `morai_pure_pursuit_dead_reckoning_udp.py`이다. IMU 가속도를 적분하지
 않고 Competition Status의 signed speed를 IMU 자세의 차량 전방축 방향으로
 적분한다.
 
@@ -93,7 +93,7 @@ position_dot = R_body_to_ENU @ [vehicle_speed, 0, 0]
 전방축에 반영되므로 경사 구간의 Z 변화도 계산한다.
 
 ```bash
-python3 src/path_planning/src/morai_stanley_dead_reckoning_udp.py \
+python3 src/path_planning/src/morai_pure_pursuit_dead_reckoning_udp.py \
   --path src/path_planning/data/morai_global_path.csv \
   --max-gps-outage 120
 ```

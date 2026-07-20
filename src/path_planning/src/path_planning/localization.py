@@ -35,7 +35,7 @@ class PlanarGpsImuEkf:
 
     State: [x, y, vx, vy, yaw, gyro_z_bias].  This deliberately avoids the
     old full Earth-frame strapdown mechanization: MORAI already supplies an
-    absolute quaternion, while Stanley only needs horizontal pose and speed.
+    absolute quaternion, while path tracking only needs horizontal pose and speed.
     """
 
     def __init__(

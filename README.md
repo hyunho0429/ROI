@@ -45,9 +45,9 @@ fixed CRS/EastOffset/NorthOffset/UpOffset used for conversion. It deliberately
 does not use Ego Vehicle Status or store historical IMU samples. See
 `src/path_planning/README_GPS_CSV_RECORDER.md`.
 
-## MORAI UDP Stanley control
+## MORAI UDP Pure Pursuit control
 
-The `dev/stanley` branch adds a standalone strict Stanley controller with a
+The `dev/stanley` branch now runs a standalone Pure Pursuit controller with a
 15-state GPS/IMU/Competition-speed-aided EKF-INS. It ports AutoVehicle's local
 ENU CSV conversion and waypoint preprocessing without its ROS dependencies.
 Install `src/path_planning/requirements.txt`, then run the recommended INS
@@ -60,11 +60,11 @@ IMU `4001`, Competition Status `909`, CollisionData `907`, control destination
 repeated on the command line.
 
 ```bash
-python3 src/path_planning/src/morai_stanley_ins_udp.py \
-  --path src/path_planning/data/morai_global_path.csv
+python3 src/path_planning/src/morai_pure_pursuit_ins_udp.py \
+  --path src/path_planning/data/2026_molit_comp_global_path.txt
 ```
 
-See `src/path_planning/README_STANLEY_UDP.md` for the MORAI 25.S4 protocol basis,
+See `src/path_planning/README_PURE_PURSUIT_UDP.md` for the MORAI 25.S4 protocol basis,
 coordinate conversion, network settings, safety behavior, and tuning values.
 
 Before running the full controller, verify that MORAI reflects the safe brake
@@ -78,8 +78,8 @@ For comparison, the speed-aided dead-reckoning alternative remains available:
 
 ```bash
 # Competition-speed-aided dead reckoning
-python3 src/path_planning/src/morai_stanley_dead_reckoning_udp.py \
-  --path src/path_planning/data/morai_global_path.csv
+python3 src/path_planning/src/morai_pure_pursuit_dead_reckoning_udp.py \
+  --path src/path_planning/data/2026_molit_comp_global_path.txt
 ```
 
 Both continue through a configurable GPS outage while IMU and Competition

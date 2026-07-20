@@ -39,6 +39,24 @@ class InertialMathTest(unittest.TestCase):
 
 
 class InsErrorStateEkfTest(unittest.TestCase):
+    def test_stationary_alignment_initializes_imu_biases(self):
+        localizer = InsErrorStateEkf(
+            alignment_duration_s=1.0, alignment_min_samples=3
+        )
+        localizer.add_gps(0.0, 10.0, 20.0, 3.0)
+        for timestamp in (0.0, 0.5, 1.0):
+            localizer.add_imu(
+                timestamp,
+                IDENTITY_QUATERNION,
+                (0.01, -0.02, 0.03),
+                (0.1, -0.2, 9.90665),
+            )
+
+        self.assertTrue(localizer.alignment_complete)
+        self.assertTrue(localizer.ready)
+        np.testing.assert_allclose(localizer.gyro_bias, (0.01, -0.02, 0.03))
+        np.testing.assert_allclose(localizer.accel_bias, (0.1, -0.2, 0.1))
+
     def test_stationary_specific_force_does_not_fall_through_map(self):
         localizer = InsErrorStateEkf()
         localizer.add_imu(

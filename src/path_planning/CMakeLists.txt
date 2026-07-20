@@ -24,6 +24,8 @@ catkin_install_python(PROGRAMS
   src/morai_global_csv_recorder.py
   src/morai_gps_csv_recorder.py
   src/morai_udp_control_check.py
+  src/morai_pure_pursuit_ins_udp.py
+  src/morai_pure_pursuit_dead_reckoning_udp.py
   src/morai_stanley_udp.py
   src/morai_stanley_ins_udp.py
   src/morai_stanley_dead_reckoning_udp.py

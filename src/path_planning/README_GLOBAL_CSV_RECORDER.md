@@ -57,4 +57,4 @@ saved #2: (124.802, -78.315, 28.326)
 
 Ego Status 위치가 앞차축, 뒤차축 또는 무게중심 중 어디를 기준으로 하는지는 공개
 UDP 규격만으로 확인할 수 없다. 기록 단계에서 임의의 앞차축 보정을 적용하지 않고,
-Stanley 실행 시 기준점 거리를 확인한 경우에만 `--control-point-offset`을 사용한다.
+Pure Pursuit 실행 시 기준점 거리를 확인한 경우에만 `--control-point-offset`을 사용한다.

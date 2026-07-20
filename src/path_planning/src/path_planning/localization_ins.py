@@ -39,6 +39,8 @@ class InsErrorStateEkf:
         nhc_lateral_sigma_mps=0.35,
         nhc_vertical_sigma_mps=0.25,
         gps_gate_sigma=6.0,
+        alignment_duration_s=0.0,
+        alignment_min_samples=1,
     ):
         self.gps_position_sigma_m = float(gps_position_sigma_m)
         self.gps_altitude_sigma_m = float(gps_altitude_sigma_m)
@@ -52,6 +54,8 @@ class InsErrorStateEkf:
         self.nhc_lateral_sigma_mps = float(nhc_lateral_sigma_mps)
         self.nhc_vertical_sigma_mps = float(nhc_vertical_sigma_mps)
         self.gps_gate_sigma = float(gps_gate_sigma)
+        self.alignment_duration_s = max(0.0, float(alignment_duration_s))
+        self.alignment_min_samples = max(1, int(alignment_min_samples))
 
         self.position = np.zeros(3)
         self.velocity = np.zeros(3)
@@ -70,13 +74,28 @@ class InsErrorStateEkf:
         self.last_vehicle_speed_mps = None
         self.position_initialized = False
         self.orientation_initialized = False
+        self.alignment_complete = self.alignment_duration_s <= 0.0
+        self.alignment_start_timestamp = None
+        self._alignment_gyro_samples = []
+        self._alignment_force_samples = []
 
     @property
     def ready(self):
-        return self.position_initialized and self.orientation_initialized
+        return (
+            self.position_initialized
+            and self.orientation_initialized
+            and self.alignment_complete
+        )
+
+    @property
+    def alignment_sample_count(self):
+        return len(self._alignment_gyro_samples)
 
     def _predict_to(self, timestamp):
         timestamp = float(timestamp)
+        if not self.alignment_complete:
+            self.timestamp = timestamp
+            return
         if self.timestamp is None:
             self.timestamp = timestamp
             return
@@ -158,6 +177,39 @@ class InsErrorStateEkf:
         linear_acceleration_mps2,
     ):
         measured_orientation = normalize_quaternion(orientation_xyzw)
+        measured_gyro = np.asarray(angular_velocity_radps, dtype=float).reshape(3)
+        measured_force = np.asarray(
+            linear_acceleration_mps2, dtype=float
+        ).reshape(3)
+        if not self.alignment_complete:
+            timestamp = float(timestamp)
+            if self.alignment_start_timestamp is None:
+                self.alignment_start_timestamp = timestamp
+            self.orientation = measured_orientation
+            self.orientation_initialized = True
+            self.timestamp = timestamp
+            self.last_gyro = measured_gyro
+            self.last_specific_force = measured_force
+            self._alignment_gyro_samples.append(measured_gyro.copy())
+            self._alignment_force_samples.append(measured_force.copy())
+            elapsed = timestamp - self.alignment_start_timestamp
+            if (
+                elapsed >= self.alignment_duration_s
+                and self.alignment_sample_count >= self.alignment_min_samples
+            ):
+                self.gyro_bias = np.mean(
+                    np.vstack(self._alignment_gyro_samples), axis=0
+                )
+                mean_force = np.mean(
+                    np.vstack(self._alignment_force_samples), axis=0
+                )
+                rotation = quaternion_to_matrix(self.orientation)
+                expected_specific_force = rotation.T @ (-GRAVITY_ENU_MPS2)
+                self.accel_bias = mean_force - expected_specific_force
+                self.covariance[9:12, 9:12] = np.eye(3) * 1e-4
+                self.covariance[12:15, 12:15] = np.eye(3) * 1e-2
+                self.alignment_complete = True
+            return
         if not self.orientation_initialized:
             self.orientation = measured_orientation
             self.covariance[6:9, 6:9] = (
@@ -174,10 +226,8 @@ class InsErrorStateEkf:
             observation[:, 6:9] = np.eye(3)
             variance = self.imu_orientation_sigma_rad ** 2
             self._update(attitude_innovation, observation, np.eye(3) * variance)
-        self.last_gyro = np.asarray(angular_velocity_radps, dtype=float).reshape(3)
-        self.last_specific_force = np.asarray(
-            linear_acceleration_mps2, dtype=float
-        ).reshape(3)
+        self.last_gyro = measured_gyro
+        self.last_specific_force = measured_force
         if (
             self.last_vehicle_speed_mps is not None
             and abs(self.last_vehicle_speed_mps) < 0.08
@@ -244,8 +294,11 @@ class InsErrorStateEkf:
         return True
 
     def add_vehicle_speed(self, timestamp, signed_speed_mps):
-        self._predict_to(timestamp)
         self.last_vehicle_speed_mps = float(signed_speed_mps)
+        if not self.alignment_complete:
+            self.timestamp = float(timestamp)
+            return
+        self._predict_to(timestamp)
         rotation = quaternion_to_matrix(self.orientation)
         body_axes = rotation
         observations = []

@@ -23,7 +23,7 @@ from path_planning.stanley_controller import (
     load_path_csv,
     load_recorded_path_origin,
 )
-from path_planning.stanley_udp_runtime import argument_parser
+from path_planning.pure_pursuit_udp_runtime import argument_parser
 
 
 class StanleyControllerTest(unittest.TestCase):
@@ -289,7 +289,7 @@ class StanleyControllerTest(unittest.TestCase):
         self.assertEqual(steering_filter.update(0.0, 1.0), 0.0)
         self.assertAlmostEqual(steering_filter.update(1.0, 1.1), 0.04)
 
-    def test_ins_runtime_defaults_to_fixed_ten_kmh_strict_stanley(self):
+    def test_ins_runtime_defaults_to_competition_pure_pursuit(self):
         arguments = argument_parser("ins").parse_args([])
         self.assertEqual(arguments.target_speed_kmh, 10.0)
         self.assertEqual(arguments.gps_port, 3001)
@@ -302,10 +302,17 @@ class StanleyControllerTest(unittest.TestCase):
         self.assertEqual(
             os.path.basename(arguments.path), "2026_molit_comp_global_path.txt"
         )
-        self.assertEqual(arguments.control_point_offset, 3.0)
+        self.assertEqual(arguments.control_point_offset, 0.0)
+        self.assertEqual(arguments.wheelbase, 2.7)
+        self.assertEqual(arguments.lookahead_distance, 4.0)
+        self.assertEqual(arguments.lookahead_speed_gain, 0.5)
+        self.assertEqual(arguments.minimum_lookahead, 3.0)
+        self.assertEqual(arguments.maximum_lookahead, 12.0)
+        self.assertEqual(arguments.alignment_seconds, 2.0)
+        self.assertEqual(arguments.alignment_min_samples, 20)
         self.assertEqual(arguments.morai_steer_sign, 1.0)
         self.assertEqual(arguments.speed_kp, 0.35)
-        self.assertFalse(hasattr(arguments, "path_yaw_lookahead"))
+        self.assertFalse(hasattr(arguments, "stanley_gain"))
         self.assertEqual(arguments.target_search_window, 50)
 
     def test_planar_filter_requires_both_gps_and_imu(self):

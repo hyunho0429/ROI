@@ -565,7 +565,7 @@ class SteeringCommandFilter:
         return self._last_steering
 
 
-def _preprocess_path_points(points, minimum_spacing_m, smoothing_window):
+def preprocess_path_points(points, minimum_spacing_m, smoothing_window):
     """Apply AutoVehicle waypoint spacing and moving-average smoothing."""
     spaced = []
     for point in points:
@@ -620,7 +620,7 @@ class StanleyController:
         if len(points) < 2:
             raise ValueError("StanleyController needs at least two path points")
         self.original_point_count = len(points)
-        self.points = _preprocess_path_points(
+        self.points = preprocess_path_points(
             list(points),
             max(0.0, float(minimum_waypoint_spacing_m)),
             waypoint_smoothing_window,

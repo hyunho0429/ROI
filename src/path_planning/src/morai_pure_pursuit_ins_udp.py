@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compatibility command for the competition Pure Pursuit INS controller."""
+"""Run MORAI Pure Pursuit with 15-state INS error-state EKF."""
 
 from path_planning.pure_pursuit_udp_runtime import main
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Run MORAI Stanley control with speed-aided dead reckoning."""
+"""Compatibility command: run Pure Pursuit with dead reckoning."""
 
-from path_planning.stanley_udp_runtime import main
+from path_planning.pure_pursuit_udp_runtime import main
 
 
 if __name__ == "__main__":

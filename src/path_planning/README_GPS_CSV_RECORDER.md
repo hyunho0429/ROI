@@ -5,12 +5,12 @@
 
 ## 왜 GPS와 ENU를 함께 저장하는가
 
-Stanley 계산에는 metre 단위 직교좌표가 필요하므로 ENU `x/y/z`를 저장한다.
+Pure Pursuit 계산에는 metre 단위 직교좌표가 필요하므로 ENU `x/y/z`를 저장한다.
 동시에 원본 위도·경도·고도를 보존하면 좌표 변환 설정을 검증하거나 다른 맵
 원점으로 다시 변환할 수 있다. 한 행의 주요 열은 다음과 같다.
 
 - `latitude_deg`, `longitude_deg`, `altitude_m`: GPS 원본
-- `global_enu_x_m`, `global_enu_y_m`, `global_enu_z_m`: Stanley 입력
+- `global_enu_x_m`, `global_enu_y_m`, `global_enu_z_m`: Pure Pursuit 입력
 - `projection_crs`: 기본 K-City `EPSG:32652`
 - `east_offset_m`, `north_offset_m`, `up_offset_m`: 고정 맵 원점
 - `speed_mps`, `velocity_x_mps`, `velocity_y_mps`: RMC에 값이 있을 때의 진단값
@@ -50,6 +50,6 @@ python3 src/path_planning/src/morai_gps_csv_recorder.py \
 기록한 파일은 그대로 추종기에 넣는다.
 
 ```bash
-sudo "$(which python3)" src/path_planning/src/morai_stanley_ins_udp.py \
+sudo "$(which python3)" src/path_planning/src/morai_pure_pursuit_ins_udp.py \
   --path src/path_planning/data/morai_global_path.csv
 ```
