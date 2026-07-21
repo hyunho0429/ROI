@@ -45,9 +45,10 @@ PID의 양수 출력은 `accel`, 음수 출력은 `brake`로 분리한다. Pure 
 | CollisionData | MORAI → 알고리즘 | 9091 | 9092 |
 | Ego Ctrl Cmd | 알고리즘 → MORAI | 9093 | 9094 |
 
-MORAI에서 GPS, IMU, Competition Vehicle Status 및 CollisionData의 Destination
-IP는 알고리즘 PC의 IPv4 주소로 설정한다. Ego Ctrl Cmd의 `control_ip`에는 MORAI
-시뮬레이터가 실행되는 PC의 IPv4 주소를 사용한다.
+현재 네트워크 기준 MORAI Host IP는 `192.168.56.1`, 알고리즘 PC Destination IP는
+`192.168.56.101`이다. MORAI에서 GPS, IMU, Competition Vehicle Status 및
+CollisionData의 Destination IP는 `192.168.56.101`로 설정한다. Ego Ctrl Cmd의
+`control_ip`에는 MORAI 시뮬레이터가 실행되는 `192.168.56.1`을 사용한다.
 
 알고리즘 PC의 IP는 다음 명령으로 확인할 수 있다.
 
@@ -146,7 +147,7 @@ Competition Status 확인 프로그램을 종료한 뒤 실행한다. `MORAI_PC_
 ```bash
 cd ~/ROI
 source devel/setup.bash
-export MORAI_PC_IP=192.168.0.170
+export MORAI_PC_IP=192.168.56.1
 
 python3 src/path_planning/src/morai_udp_control_check.py \
   --control-ip "$MORAI_PC_IP"
@@ -170,7 +171,7 @@ Competition Status 확인 프로그램과 제어 점검 프로그램을 모두 �
 ```bash
 cd ~/ROI
 source devel/setup.bash
-export MORAI_PC_IP=192.168.0.170
+export MORAI_PC_IP=192.168.56.1
 
 roslaunch path_planning morai_pure_pursuit_udp.launch \
   control_ip:="$MORAI_PC_IP"
@@ -191,7 +192,7 @@ roslaunch path_planning morai_pure_pursuit_udp.launch \
 
 ```bash
 roslaunch path_planning morai_pure_pursuit_udp.launch \
-  control_ip:=192.168.0.170 \
+  control_ip:=192.168.56.1 \
   target_speed_kmh:=8.0 \
   speed_kp:=0.075 \
   speed_ki:=0.0001 \
@@ -202,7 +203,7 @@ roslaunch path_planning morai_pure_pursuit_udp.launch \
 
 ```bash
 roslaunch path_planning morai_pure_pursuit_udp.launch \
-  control_ip:=192.168.0.170 \
+  control_ip:=192.168.56.1 \
   path:=/home/ubuntu/path/reference_path.csv
 ```
 
@@ -268,7 +269,7 @@ python3 -m pip install -r src/path_planning/requirements.txt
 
 python3 src/path_planning/src/morai_pure_pursuit_ins_udp.py \
   --path src/path_planning/data/2026_molit_comp_global_path.txt \
-  --control-ip 192.168.0.170
+  --control-ip 192.168.56.1
 ```
 
 Competition 속도 보조 추측 항법 실행기는 다음과 같다.
@@ -276,7 +277,7 @@ Competition 속도 보조 추측 항법 실행기는 다음과 같다.
 ```bash
 python3 src/path_planning/src/morai_pure_pursuit_dead_reckoning_udp.py \
   --path src/path_planning/data/2026_molit_comp_global_path.txt \
-  --control-ip 192.168.0.170
+  --control-ip 192.168.56.1
 ```
 
 ## 문제 확인

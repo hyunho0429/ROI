@@ -11,7 +11,7 @@ COLLISION_HOST_PORT = 9091
 COLLISION_PORT = 9092
 # Ego Ctrl Cmd travels in the opposite direction: algorithm Destination Port
 # (UDP source) -> MORAI Host Port (UDP destination).
-CONTROL_IP = "192.168.0.170"
+CONTROL_IP = "192.168.56.1"
 CONTROL_PORT = 9093
 CONTROL_DESTINATION_PORT = 9094
 TARGET_SPEED_KMH = 10.0

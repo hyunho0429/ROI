@@ -201,11 +201,13 @@ Destination/Host IP와 Port를 이 값과 일치시켜야 한다.
 | CollisionData | SIM → 코드 | 9091 | 9092 |
 | Ego Ctrl Cmd | 코드 → SIM | 9093 | 9094 |
 
-MORAI에서 GPS/IMU/Competition Status/CollisionData의 Destination IP는 코드를
-실행하는 PC, Destination Port는 위 수신 포트로 맞춘다. Status와 Collision의
-Host Port도 각각 9080, 9091로 맞춘다. `Ego-0 > Cmd Control`은 Host Port 9093,
-Destination Port 9094로 설정한다. 코드는 로컬 9094에 bind한 뒤
-`--control-ip`의 9093으로 명령을 보낸다. 차량 UI에서
+현재 네트워크 기준 MORAI Host IP는 `192.168.56.1`, 알고리즘 PC Destination IP는
+`192.168.56.101`이다. MORAI에서 GPS/IMU/Competition Status/CollisionData의
+Destination IP는 `192.168.56.101`, Destination Port는 위 수신 포트로 맞춘다.
+Status와 Collision의 Host Port도 각각 9080, 9091로 맞춘다.
+`Ego-0 > Cmd Control`은 Host Port 9093, Destination Port 9094로 설정한다.
+코드는 로컬 9094에 bind한 뒤 `--control-ip`의 9093으로 명령을 보낸다. 기본
+`--control-ip`는 MORAI Host IP인 `192.168.56.1`이다. 차량 UI에서
 `Q`를 눌러 `AV-ExternalCtrl`로 전환하고 기어가 D인지 확인해야 한다. 코드는
 Competition Status가 mode 2와 gear 4를 회신하기 전까지 가속하지 않고 brake만
 보낸다.
@@ -344,7 +346,7 @@ python3 src/path_planning/src/morai_pure_pursuit_ins_udp.py \
 
 위 명령에서 생략한 기본값은 코드의 `morai_competition_config.py`에 있다.
 GPS `3001`, IMU `4001`, Competition Status `9080 -> 9081`, CollisionData
-`9091 -> 9092`, Ego Ctrl Cmd `9094 -> 192.168.0.170:9093`, 목표 속도
+`9091 -> 9092`, Ego Ctrl Cmd `9094 -> 192.168.56.1:9093`, 목표 속도
 `10 km/h`이다. 목표 속도는
 고정값이고, INS가 추정한 현재 속도와의 오차로 accel/brake를 계산한다.
 
