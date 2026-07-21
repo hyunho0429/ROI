@@ -43,8 +43,8 @@ class MoraiUdpCtrlCmdTest(unittest.TestCase):
         self.assertEqual(packet[18:30], bytes(12))
         fields = struct.unpack_from("<BBBfffff", packet, 30)
         self.assertEqual(fields[:3], (2, 4, 1))
-        self.assertEqual(fields[3], 0.0)  # velocity command is unused in type 1
-        self.assertEqual(fields[4], 0.0)  # acceleration command is unused in type 1
+        self.assertEqual(fields[3], 0.0)
+        self.assertEqual(fields[4], 0.0)
         self.assertAlmostEqual(fields[5], 0.3)
         self.assertAlmostEqual(fields[7], -0.25)
         self.assertEqual(packet[-2:], b"\r\n")
@@ -67,15 +67,11 @@ class MoraiUdpCtrlCmdTest(unittest.TestCase):
     def test_exposes_beta_drive_ctrl_cmd_field_names(self):
         command = EgoCtrlCommand(
             long_cmd_type=1,
-            velocity_kmh=12.0,
-            acceleration_mps2=0.4,
             accel=0.3,
             brake=0.1,
             steering_normalized=-0.2,
         )
         self.assertEqual(command.longlCmdType, 1)
-        self.assertEqual(command.velocity, 12.0)
-        self.assertEqual(command.acceleration, 0.4)
         self.assertEqual(command.accel, 0.3)
         self.assertEqual(command.brake, 0.1)
         self.assertEqual(command.steering, -0.2)
@@ -84,7 +80,7 @@ class MoraiUdpCtrlCmdTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             encode_ego_ctrl_cmd_25s4(EgoCtrlCommand(steering_normalized=1.1))
 
-    def test_rejects_disallowed_velocity_control(self):
+    def test_rejects_disallowed_longitudinal_mode(self):
         with self.assertRaises(ValueError):
             encode_ego_ctrl_cmd_25s4(EgoCtrlCommand(long_cmd_type=2))
 

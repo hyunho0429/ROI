@@ -5,7 +5,7 @@ import math
 from dataclasses import dataclass
 
 from path_planning.localization import wrap_angle
-from path_planning.stanley_controller import preprocess_path_points
+from path_planning.stanley_controller import PathPoint, preprocess_path_points
 
 
 @dataclass(frozen=True)
@@ -24,6 +24,40 @@ class PurePursuitResult:
     target_speed_mps: float = None
 
 
+def _offset_path_points(points, lateral_offset_m):
+    if abs(lateral_offset_m) <= 1e-9:
+        return points
+    closed = math.dist(
+        (points[0].x_m, points[0].y_m, points[0].z_m),
+        (points[-1].x_m, points[-1].y_m, points[-1].z_m),
+    ) <= 1e-6
+    shifted = []
+    for index, point in enumerate(points):
+        if closed:
+            previous_point = points[index - 1] if index > 0 else points[-2]
+            next_point = points[index + 1] if index < len(points) - 1 else points[1]
+        else:
+            previous_point = points[index - 1] if index > 0 else point
+            next_point = points[index + 1] if index < len(points) - 1 else point
+        dx = next_point.x_m - previous_point.x_m
+        dy = next_point.y_m - previous_point.y_m
+        length = math.hypot(dx, dy)
+        if length <= 1e-9:
+            shifted.append(point)
+            continue
+        left_x = -dy / length
+        left_y = dx / length
+        shifted.append(
+            PathPoint(
+                point.x_m + lateral_offset_m * left_x,
+                point.y_m + lateral_offset_m * left_y,
+                point.z_m,
+                point.target_speed_mps,
+            )
+        )
+    return shifted
+
+
 class PurePursuitController:
     """Kinematic-bicycle Pure Pursuit using an arc-length lookahead target.
 
@@ -36,13 +70,14 @@ class PurePursuitController:
     def __init__(
         self,
         points,
-        wheelbase_m=2.7,
+        wheelbase_m=3.0,
         lookahead_distance_m=4.0,
         lookahead_speed_gain_s=0.5,
         minimum_lookahead_m=3.0,
         maximum_lookahead_m=12.0,
         max_steering_deg=21.77,
         control_point_offset_m=0.0,
+        path_lateral_offset_m=0.0,
         minimum_waypoint_spacing_m=0.5,
         waypoint_smoothing_window=9,
         z_distance_weight=0.25,
@@ -62,10 +97,13 @@ class PurePursuitController:
             raise ValueError("maximum_lookahead_m must be >= minimum_lookahead_m")
 
         self.original_point_count = len(points)
-        self.points = preprocess_path_points(
-            list(points),
-            max(0.0, float(minimum_waypoint_spacing_m)),
-            waypoint_smoothing_window,
+        self.points = _offset_path_points(
+            preprocess_path_points(
+                list(points),
+                max(0.0, float(minimum_waypoint_spacing_m)),
+                waypoint_smoothing_window,
+            ),
+            float(path_lateral_offset_m),
         )
         self.wheelbase_m = float(wheelbase_m)
         self.lookahead_distance_m = float(lookahead_distance_m)
@@ -74,6 +112,7 @@ class PurePursuitController:
         self.maximum_lookahead_m = float(maximum_lookahead_m)
         self.max_steering_rad = math.radians(float(max_steering_deg))
         self.control_point_offset_m = float(control_point_offset_m)
+        self.path_lateral_offset_m = float(path_lateral_offset_m)
         self.z_distance_weight = max(0.0, float(z_distance_weight))
         self.search_back_segments = max(0, int(search_back_segments))
         self.search_forward_segments = max(1, int(search_forward_segments))

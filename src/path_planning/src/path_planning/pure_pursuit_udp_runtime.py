@@ -24,6 +24,7 @@ from path_planning.morai_competition_config import (
     GPS_PORT,
     IMU_PORT,
     TARGET_SPEED_KMH,
+    VEHICLE_WHEELBASE_M,
 )
 from path_planning.morai_udp_collision_data import (
     CollisionPacketError,
@@ -150,7 +151,7 @@ def argument_parser(localization_mode):
         help="control loop rate; main branch PID was configured for 30 Hz",
     )
     parser.add_argument("--target-speed-kmh", type=float, default=TARGET_SPEED_KMH)
-    parser.add_argument("--wheelbase", type=float, default=2.7)
+    parser.add_argument("--wheelbase", type=float, default=VEHICLE_WHEELBASE_M)
     parser.add_argument("--lookahead-distance", type=float, default=4.0)
     parser.add_argument("--lookahead-speed-gain", type=float, default=0.5)
     parser.add_argument("--minimum-lookahead", type=float, default=3.0)
@@ -173,6 +174,12 @@ def argument_parser(localization_mode):
         type=float,
         default=0.0,
         help="distance from localization point to Pure Pursuit control point",
+    )
+    parser.add_argument(
+        "--path-lateral-offset",
+        type=float,
+        default=0.0,
+        help="shift reference path in meters; positive is left of path direction",
     )
     parser.add_argument("--minimum-waypoint-spacing", type=float, default=0.5)
     parser.add_argument("--waypoint-smoothing-window", type=int, default=9)
@@ -292,6 +299,8 @@ def _validate(arguments):
         raise ValueError("maximum-lookahead must be >= minimum-lookahead")
     if not math.isfinite(arguments.control_point_offset):
         raise ValueError("control-point-offset must be finite")
+    if not math.isfinite(arguments.path_lateral_offset):
+        raise ValueError("path-lateral-offset must be finite")
     if hasattr(arguments, "alignment_seconds"):
         if arguments.alignment_seconds < 0.0:
             raise ValueError("alignment-seconds cannot be negative")
@@ -344,6 +353,7 @@ def run(localization_mode, arguments):
         maximum_lookahead_m=arguments.maximum_lookahead,
         max_steering_deg=arguments.max_steering_deg,
         control_point_offset_m=arguments.control_point_offset,
+        path_lateral_offset_m=arguments.path_lateral_offset,
         minimum_waypoint_spacing_m=arguments.minimum_waypoint_spacing,
         waypoint_smoothing_window=arguments.waypoint_smoothing_window,
         search_back_segments=5 if arguments.allow_target_backtrack else 0,
@@ -486,12 +496,13 @@ def run(localization_mode, arguments):
         print("  localization: GPS/IMU/status-aided dead reckoning")
     print(
         "  Pure Pursuit: Ld=clip({:.2f}+{:.2f}*speed, {:.2f}, {:.2f})m, "
-        "wheelbase={:.2f}m, fixed speed {:.1f} km/h".format(
+        "wheelbase={:.2f}m, lateral_offset={:+.2f}m, fixed speed {:.1f} km/h".format(
             arguments.lookahead_distance,
             arguments.lookahead_speed_gain,
             arguments.minimum_lookahead,
             arguments.maximum_lookahead,
             arguments.wheelbase,
+            arguments.path_lateral_offset,
             arguments.target_speed_kmh,
         )
     )

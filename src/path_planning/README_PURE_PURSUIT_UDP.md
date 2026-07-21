@@ -144,11 +144,14 @@ steering = atan(wheelbase * curvature)
 
 | 항목 | 기본값 |
 |---|---:|
-| wheelbase | 2.7 m (Competition Status 수신값 우선) |
+| vehicle | 2023 Hyundai IONIQ 5 |
+| length / width | 4.635 m / 1.892 m |
+| wheelbase | 3.0 m (Competition Status 수신값 우선) |
 | base lookahead | 4.0 m |
 | speed lookahead gain | 0.5 s |
 | lookahead limits | 3.0~12.0 m |
 | control point offset | 0.0 m |
+| path lateral offset | 0.0 m |
 | controller steering limit | 21.77° |
 | MORAI physical steering limit | 36.25° |
 | waypoint spacing | 0.5 m |
@@ -156,6 +159,10 @@ steering = atan(wheelbase * curvature)
 
 GPS 센서 기준점과 bicycle model 제어점이 다르면 `--control-point-offset`으로
 전방(+) 또는 후방(-) 오프셋을 설정한다.
+
+차량이 차선 안에서 한쪽으로 일정하게 치우치면 `--path-lateral-offset`으로
+기준 경로를 좌우 평행 이동한다. 양수는 경로 진행 방향의 왼쪽, 음수는 오른쪽이다.
+오른쪽 바퀴가 오른쪽 차선에 붙는 상황에서는 `0.8~1.0 m`부터 시험한다.
 
 ## EKF-INS
 
@@ -369,7 +376,7 @@ python3 src/path_planning/src/morai_udp_control_check.py
 ```text
 localization: GPS/IMU/status-aided 15-state error-state EKF INS
 alignment: hold brake for 2.0s (at least 20 IMU samples)
-Pure Pursuit: Ld=clip(4.00+0.50*speed, 3.00, 12.00)m, wheelbase=2.70m, fixed speed 10.0 km/h
+Pure Pursuit: Ld=clip(4.00+0.50*speed, 3.00, 12.00)m, wheelbase=3.00m, lateral_offset=+0.80m, fixed speed 10.0 km/h
 requesting AV-ExternalCtrl (ctrl_mode=2) and Drive (gear=4)
 Competition control state: ctrl_mode=2 (AV-ExternalCtrl), gear=4 (D)
 ```
@@ -386,6 +393,7 @@ Cmd Control의 Host IP/Port를 점검한다. feedback에도 accel이 들어오�
 - `--minimum-lookahead`, `--maximum-lookahead`: lookahead 제한
 - `--wheelbase`: 상태 패킷 수신 전 사용할 기본 wheelbase
 - `--control-point-offset`: GPS/INS 위치에서 제어점까지 전방(+)·후방(-) 거리
+- `--path-lateral-offset`: 기준 경로 좌우 평행 이동. 양수는 진행 방향 왼쪽
 - `--max-steering-deg`: Pure Pursuit이 낼 수 있는 조향각 제한
 - `--vehicle-max-steering-deg`: MORAI normalized steering ±1의 실제 조향각
 - `--alignment-seconds`, `--alignment-min-samples`: 정지 bias 초기화 조건

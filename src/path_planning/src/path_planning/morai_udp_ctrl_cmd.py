@@ -29,8 +29,6 @@ class EgoCtrlCommand:
     ctrl_mode: int = EXTERNAL_CTRL_MODE
     gear: int = DRIVE_GEAR
     long_cmd_type: int = 1
-    velocity_kmh: float = 0.0
-    acceleration_mps2: float = 0.0
     accel: float = 0.0
     brake: float = 0.0
     steering_normalized: float = 0.0
@@ -41,14 +39,6 @@ class EgoCtrlCommand:
     @property
     def longlCmdType(self):
         return self.long_cmd_type
-
-    @property
-    def velocity(self):
-        return self.velocity_kmh
-
-    @property
-    def acceleration(self):
-        return self.acceleration_mps2
 
     @property
     def steering(self):
@@ -64,8 +54,6 @@ def _validated_values(command):
         raise ValueError("competition rules require long_cmd_type 1 (accel/brake)")
 
     values = (
-        command.velocity,
-        command.acceleration,
         command.accel,
         command.brake,
         command.steering,
@@ -86,17 +74,24 @@ def _validated_values(command):
 
 def encode_ego_ctrl_cmd(command, protocol=CONTROL_PROTOCOL_25S4):
     """Encode a versioned Ego Ctrl Cmd packet, defaulting to MORAI 25.S4."""
-    values = _validated_values(command)
+    _validated_values(command)
     if protocol == CONTROL_PROTOCOL_25S4:
         data_length = PACKET_DATA_LENGTH
         packet_size = PACKET_SIZE
         payload_format = "<BBBfffff"
-        payload_values = values[:-1]
+        payload_values = (0.0, 0.0, command.accel, command.brake, command.steering)
     elif protocol == CONTROL_PROTOCOL_26R1:
         data_length = PACKET_DATA_LENGTH_26R1
         packet_size = PACKET_SIZE_26R1
         payload_format = "<BBBffffff"
-        payload_values = values
+        payload_values = (
+            0.0,
+            0.0,
+            command.accel,
+            command.brake,
+            command.steering,
+            command.rear_steering_normalized,
+        )
     else:
         raise ValueError(
             "control protocol must be one of {}".format(", ".join(CONTROL_PROTOCOLS))
