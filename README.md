@@ -1,110 +1,88 @@
-# K-City 2025 Dijkstra Path Planning
+# MORAI 대회 자율주행
 
-This branch contains the K-City 2025 MGeo planner and the competition UDP
-Pure Pursuit/PID controller with GPS/IMU EKF-INS localization.
+`dev/stanley` 브랜치는 MORAI 25.S4 대회 환경에서 전역 경로를 추종하기 위한
+UDP 기반 자율주행 코드이다.
 
-## Build
+- 횡방향 제어: Pure Pursuit
+- 종방향 제어: PID
+- 위치 추정: GPS/IMU 기반 15상태 오차 상태 EKF-INS
+- 속도 보조: Competition Vehicle Status의 signed velocity
+- 제어 통신: MORAI Ego Ctrl Cmd UDP
+- 안전 기능: 센서 stale, 충돌, 잘못된 제어 모드 및 기어 감지 시 제동
 
-```bash
-cd ~/catkin_ws
-sb
-catkin_make
-source devel/setup.bash
-```
+ROS는 프로세스 실행과 인자 전달에만 사용한다. GPS, IMU, Competition Vehicle
+Status, CollisionData 및 Ego Ctrl Cmd는 모두 UDP로 통신한다.
 
-## Run
+## 기본 제어 설정
 
-```bash
-roslaunch path_planning kcity_2025_dijkstra.launch use_odom_start:=false
-```
+메인 코드는 다음 형식의 제어 패킷을 전송한다.
 
-The launch shows a default example route from `A1256W000437` to `A1256W000531`.
-In RViz, select `2D Nav Goal` and click another destination on the map to update the route. The planner chooses a reachable MGeo node near the clicked point, computes the shortest Dijkstra path from the start node, and publishes `/global_path` and `/global_path_marker`.
+| 항목 | 기본값 | 설명 |
+|---|---:|---|
+| `ctrl_mode` | 2 | 외부 자율주행 제어 모드 |
+| `gear` | 4 | Drive |
+| `longCmdType` | 1 | accel/brake 직접 제어 |
+| 제어 주기 | 30 Hz | PID 및 Pure Pursuit 계산 주기 |
+| 목표 속도 | 10 km/h | launch 인자로 변경 가능 |
+| PID Kp | 0.075 | 종방향 비례 이득 |
+| PID Ki | 0.0001 | 종방향 적분 이득 |
+| PID Kd | 0.025 | 종방향 미분 이득 |
 
-Useful topics:
+PID의 양수 출력은 `accel`, 음수 출력은 `brake`로 분리한다. Pure Pursuit가
+계산한 조향값은 같은 `longCmdType=1` 패킷의 `steering` 필드로 전송한다.
 
-```bash
-rostopic echo /node
-rostopic echo /link
-rostopic echo /global_path
-rostopic echo /global_path_marker
-```
+## 네트워크 설정
 
-## MORAI keyboard path CSV recording
+기본값은
+`src/path_planning/src/path_planning/morai_competition_config.py`에 정의되어
+있다.
 
-Record the reference path with the competition-allowed GPS UDP sensor while
-driving manually. The recorder saves a point every 0.5 m by default:
+| 네트워크 | 방향 | MORAI Host/Source Port | MORAI Destination Port |
+|---|---|---:|---:|
+| GPS | MORAI → 알고리즘 | 센서 설정값 | 3001 |
+| IMU | MORAI → 알고리즘 | 센서 설정값 | 4001 |
+| Competition Vehicle Status | MORAI → 알고리즘 | 9080 | 9081 |
+| CollisionData | MORAI → 알고리즘 | 9091 | 9092 |
+| Ego Ctrl Cmd | 알고리즘 → MORAI | 9093 | 9094 |
 
-```bash
-python3 src/path_planning/src/morai_gps_csv_recorder.py \
-  --bind-ip 0.0.0.0 --port 3001 \
-  --output src/path_planning/data/morai_global_path.csv
-```
+MORAI에서 GPS, IMU, Competition Vehicle Status 및 CollisionData의 Destination
+IP는 알고리즘 PC의 IPv4 주소로 설정한다. Ego Ctrl Cmd의 `control_ip`에는 MORAI
+시뮬레이터가 실행되는 PC의 IPv4 주소를 사용한다.
 
-The CSV contains raw latitude/longitude/altitude, derived map-local ENU, and the
-fixed CRS/EastOffset/NorthOffset/UpOffset used for conversion. It deliberately
-does not use Ego Vehicle Status or store historical IMU samples. See
-`src/path_planning/README_GPS_CSV_RECORDER.md`.
-
-## MORAI UDP Pure Pursuit control
-
-The `dev/stanley` branch now runs a standalone Pure Pursuit controller with a
-15-state GPS/IMU/Competition-speed-aided EKF-INS. It ports AutoVehicle's local
-ENU CSV conversion and waypoint preprocessing without its ROS dependencies.
-Install `src/path_planning/requirements.txt`, then run the recommended INS
-runner:
-
-The competition UDP values are defined in
-`src/path_planning/src/path_planning/morai_competition_config.py`: GPS `3001`,
-IMU `4001`, Competition Status `9080 -> 9081`, CollisionData `9091 -> 9092`,
-and Ego Ctrl Cmd `9094 -> 192.168.0.170:9093`. The target speed is `10 km/h`.
-These values do not need to be
-repeated on the command line.
+알고리즘 PC의 IP는 다음 명령으로 확인할 수 있다.
 
 ```bash
-python3 src/path_planning/src/morai_pure_pursuit_ins_udp.py \
-  --path src/path_planning/data/2026_molit_comp_global_path.txt
+hostname -I
 ```
 
-The same controller can be started through `roslaunch`. ROS is used only to
-start the process and supply arguments; GPS, IMU, Competition Status,
-CollisionData, and Ego Ctrl Cmd still use UDP only.
+## 1. 저장소 받기
+
+다른 컴퓨터에서 처음 받는 경우:
 
 ```bash
-cd ~/catkin_ws
-python3 -m pip install -r src/path_planning/requirements.txt
-catkin_make
-source devel/setup.bash
-roslaunch path_planning morai_pure_pursuit_udp.launch
+cd ~
+git clone -b dev/stanley --single-branch https://github.com/hyunho0429/ROI.git
+cd ROI
 ```
 
-The launch defaults use the `main` branch longitudinal PID settings at 30 Hz:
-`Kp=0.075`, `Ki=0.0001`, and `Kd=0.025`. Positive PID output is sent as
-`accel`, negative output as `brake`, and Pure Pursuit supplies `steering` in
-the same MORAI `longCmdType=1` packet. Network and controller values can be
-overridden without editing code, for example:
-
-```bash
-roslaunch path_planning morai_pure_pursuit_udp.launch \
-  control_ip:=192.168.0.170 target_speed_kmh:=10.0 \
-  speed_kp:=0.075 speed_ki:=0.0001 speed_kd:=0.025
-```
-
-See `src/path_planning/README_PURE_PURSUIT_UDP.md` for the MORAI 25.S4 protocol basis,
-coordinate conversion, network settings, safety behavior, and tuning values.
-
-## 대회 UDP 주행 코드 실행 순서
-
-아래 명령은 저장소를 `~/ROI`에 clone한 Ubuntu/ROS Noetic 환경을 기준으로 한다.
-다른 위치에 clone했다면 `~/ROI`를 실제 저장소 경로로 바꾼다.
-
-### 1. 브랜치 업데이트 및 최초 빌드
+이미 저장소가 있는 경우:
 
 ```bash
 cd ~/ROI
+git fetch origin
 git switch dev/stanley
 git pull origin dev/stanley
+```
 
+구버전 Git에서 `git switch`가 지원되지 않으면 `git checkout dev/stanley`를
+사용한다.
+
+## 2. 최초 빌드
+
+저장소 루트가 catkin workspace이다.
+
+```bash
+cd ~/ROI
 source /opt/ros/noetic/setup.bash
 python3 -m pip install -r src/path_planning/requirements.txt
 catkin_make
@@ -119,30 +97,9 @@ source /opt/ros/noetic/setup.bash
 source devel/setup.bash
 ```
 
-### 2. MORAI 네트워크 설정
+## 3. Competition Vehicle Status 정보 확인
 
-MORAI의 각 Destination IP에는 알고리즘을 실행하는 PC의 IPv4 주소를 입력한다.
-Ego Ctrl Cmd의 전송 대상 IP만 MORAI 시뮬레이터 PC의 IPv4 주소이다.
-
-| 네트워크 | 방향 | MORAI Host/Source Port | 알고리즘 Destination/Source Port |
-|---|---|---:|---:|
-| GPS | MORAI -> 알고리즘 | 센서 설정값 | 3001 |
-| IMU | MORAI -> 알고리즘 | 센서 설정값 | 4001 |
-| Competition Vehicle Status | MORAI -> 알고리즘 | 9080 | 9081 |
-| CollisionData | MORAI -> 알고리즘 | 9091 | 9092 |
-| Ego Ctrl Cmd | 알고리즘 -> MORAI | 9093 | 9094 |
-
-알고리즘 PC의 IP는 다음 명령으로 확인할 수 있다.
-
-```bash
-hostname -I
-```
-
-### 3. Competition Vehicle Status 단독 확인
-
-이 프로그램은 제어 명령을 보내지 않고 Competition Status만 수신한다. 메인 주행
-프로그램도 Destination Port `9081`을 사용하므로 두 프로그램을 동시에 실행하지
-않는다.
+다음 프로그램은 제어 명령을 보내지 않고 Competition Vehicle Status만 수신한다.
 
 ```bash
 cd ~/ROI
@@ -155,24 +112,36 @@ python3 src/path_planning/src/morai_competition_status_inspect.py \
   --hex-bytes 0
 ```
 
-정상 수신 시 payload 크기, header, `ctrl_mode`, gear, 속도, accel/brake,
-조향각, wheelbase, 위치, 자세, 각속도, 가속도 및 link ID가 출력된다. 현재 파서는
-181-byte 기본 패킷과 229-byte 확장 패킷을 지원한다. `--hex-bytes 96`을 사용하면
-패킷 앞부분만 출력할 수 있다.
+정상 수신 시 다음 정보가 출력된다.
 
-`TIMEOUT`이 발생하면 MORAI Destination IP/Port와 로컬 bind 상태를 확인한다.
+- 송신 IP와 source port
+- UDP payload 크기, header 및 data length
+- `ctrl_mode`, gear 및 signed velocity
+- accel/brake 페달 피드백
+- 차량 크기, wheelbase 및 overhang
+- 위치, 자세, 속도, 각속도 및 가속도
+- 조향각과 link ID
+- 원본 패킷 hexadecimal 값
+
+현재 파서는 181-byte 기본 패킷과 229-byte 확장 패킷을 지원한다.
+`--hex-bytes 96`을 사용하면 원본 패킷 앞부분만 출력한다.
+
+이 프로그램과 메인 주행 코드는 모두 Destination Port `9081`을 사용하므로
+동시에 실행하지 않는다.
+
+패킷이 수신되지 않으면 다음 명령으로 포트와 원본 패킷을 확인한다.
 
 ```bash
 sudo ss -lunp | grep 9081
+
 sudo tcpdump -ni any -s 0 -c 10 -XX \
   'udp src port 9080 and dst port 9081'
 ```
 
-### 4. Ego Ctrl Cmd 안전 점검
+## 4. Ego Ctrl Cmd 통신 점검
 
-Competition Status 확인 프로그램을 종료한 뒤, 안전한 brake 패킷을 보내 MORAI가
-제어 명령을 수신하고 피드백하는지 확인한다. 먼저 `MORAI_PC_IP`에 시뮬레이터가
-실행되는 PC의 실제 IPv4 주소를 넣는다.
+Competition Status 확인 프로그램을 종료한 뒤 실행한다. `MORAI_PC_IP`에는
+시뮬레이터가 실행되는 PC의 실제 IPv4 주소를 입력한다.
 
 ```bash
 cd ~/ROI
@@ -183,17 +152,18 @@ python3 src/path_planning/src/morai_udp_control_check.py \
   --control-ip "$MORAI_PC_IP"
 ```
 
-정상이면 다음 메시지가 출력된다.
+이 프로그램은 안전한 brake 명령을 전송하고 Competition Vehicle Status의
+피드백을 확인한다. 정상이라면 다음 메시지가 출력된다.
 
 ```text
 PASS: MORAI reflected the longCmdType-1 brake command
 ```
 
-점검 및 메인 코드는 `ctrl_mode=2`, `gear=4`, `longCmdType=1`을 전송한다.
-`longCmdType=1`에서 PID 출력은 accel/brake로, Pure Pursuit 출력은 steering으로
-전송된다.
+점검 패킷은 `ctrl_mode=2`, `gear=4`, `longCmdType=1`, `accel=0`으로
+전송된다. 빈 공간에서 실제 가속 통신까지 확인해야 할 때만 `--drive-test`를
+추가한다.
 
-### 5. 메인 Pure Pursuit + PID + EKF-INS 주행
+## 5. 메인 주행 코드 실행
 
 Competition Status 확인 프로그램과 제어 점검 프로그램을 모두 종료한 뒤 실행한다.
 
@@ -206,48 +176,141 @@ roslaunch path_planning morai_pure_pursuit_udp.launch \
   control_ip:="$MORAI_PC_IP"
 ```
 
-예를 들어 MORAI PC IP가 `192.168.0.170`이면 다음과 같다.
+MORAI와 알고리즘을 같은 PC에서 실행하는 경우:
 
 ```bash
 roslaunch path_planning morai_pure_pursuit_udp.launch \
-  control_ip:=192.168.0.170
+  control_ip:=127.0.0.1
 ```
 
-MORAI와 알고리즘을 같은 PC에서 실행할 때는 `control_ip:=127.0.0.1`을 사용할 수
-있다. 기본 경로는 `2026_molit_comp_global_path.txt`, 목표 속도는 `10 km/h`이다.
-목표 속도를 변경하려면 다음과 같이 실행한다.
+기본 전역 경로는
+`src/path_planning/data/2026_molit_comp_global_path.txt`이고 목표 속도는
+`10 km/h`이다.
+
+목표 속도와 PID 이득을 변경하는 예:
 
 ```bash
 roslaunch path_planning morai_pure_pursuit_udp.launch \
   control_ip:=192.168.0.170 \
-  target_speed_kmh:=8.0
+  target_speed_kmh:=8.0 \
+  speed_kp:=0.075 \
+  speed_ki:=0.0001 \
+  speed_kd:=0.025
 ```
 
-정상 시작 시 다음 로그를 확인한다.
+다른 경로 파일을 사용하는 예:
+
+```bash
+roslaunch path_planning morai_pure_pursuit_udp.launch \
+  control_ip:=192.168.0.170 \
+  path:=/home/ubuntu/path/reference_path.csv
+```
+
+## 정상 실행 로그
+
+정상 시작 시 다음과 비슷한 로그가 출력된다.
 
 ```text
 localization: GPS/IMU/status-aided 15-state error-state EKF INS
+alignment: hold brake for 2.0s (at least 20 IMU samples)
+Pure Pursuit: Ld=clip(4.00+0.50*speed, 3.00, 12.00)m
 requesting AV-ExternalCtrl (ctrl_mode=2) and Drive (gear=4)
 Competition control state: ctrl_mode=2 (AV-ExternalCtrl), gear=4 (D)
 ```
 
-안전을 위해 GPS, IMU, Competition Status 중 필요한 입력이 준비되지 않았거나
-Competition Status가 `ctrl_mode=2`, `gear=4`를 회신하지 않으면 가속하지 않고
-brake 명령을 유지한다. 이 상태가 계속되면 Cmd Control IP/Port, 차량 제어 모드,
-기어 및 UDP 방화벽을 확인한다.
+안전을 위해 다음 상황에서는 가속하지 않고 brake 명령을 유지한다.
 
-For comparison, the speed-aided dead-reckoning alternative remains available:
+- GPS, IMU 또는 Competition Status가 아직 수신되지 않은 경우
+- 필요한 센서 데이터가 stale 상태인 경우
+- Competition Status가 `ctrl_mode=2`, `gear=4`를 회신하지 않는 경우
+- CollisionData에서 충돌이 검출된 경우
+- 전역 경로의 마지막 지점에 도달한 경우
+
+종료할 때는 `Ctrl+C`를 누른다. 종료 과정에서도 안전 정지 패킷을 전송한다.
+
+## 위치 추정 방식
+
+1. GPS UDP에서 NMEA0183 RMC/GGA 문장을 수신한다.
+2. 위도, 경도, 고도를 경로와 동일한 map-local ENU 좌표로 변환한다.
+3. 초기 정렬 동안 brake를 유지하며 IMU 자세와 바이어스를 초기화한다.
+4. IMU 각속도와 선형가속도로 INS mechanization을 수행한다.
+5. GPS 위치와 Competition Status 속도를 이용해 15상태 오차 상태 EKF를 보정한다.
+6. 추정된 ENU 위치, yaw 및 속도를 Pure Pursuit와 PID에 전달한다.
+
+GPS가 일시적으로 끊겨도 설정된 `max_gps_outage` 동안 IMU와 Competition Status
+속도를 사용해 추측 항법을 계속한다. 자세한 내용은
+`src/path_planning/README_TUNNEL_LOCALIZATION.md`를 참고한다.
+
+## 기준 경로 기록
+
+MORAI 차량을 수동으로 움직이며 GPS 기준점을 CSV로 기록할 수 있다.
 
 ```bash
-# Competition-speed-aided dead reckoning
-python3 src/path_planning/src/morai_pure_pursuit_dead_reckoning_udp.py \
-  --path src/path_planning/data/2026_molit_comp_global_path.txt
+cd ~/ROI
+source devel/setup.bash
+
+python3 src/path_planning/src/morai_gps_csv_recorder.py \
+  --bind-ip 0.0.0.0 \
+  --port 3001 \
+  --output src/path_planning/data/morai_global_path.csv
 ```
 
-Both continue through a configurable GPS outage while IMU and Competition
-Vehicle Status remain fresh. See `src/path_planning/README_TUNNEL_LOCALIZATION.md`.
+CSV에는 원본 위도, 경도, 고도와 변환된 map-local ENU, CRS 및 고정 offset 정보가
+저장된다. 기본적으로 차량이 0.5 m 이상 이동할 때 새로운 점을 저장한다.
 
-For a fixed start and goal node:
+## Python으로 직접 실행
+
+`roslaunch` 사용을 권장하지만 다음과 같이 직접 실행할 수도 있다.
+
+```bash
+cd ~/ROI
+python3 -m pip install -r src/path_planning/requirements.txt
+
+python3 src/path_planning/src/morai_pure_pursuit_ins_udp.py \
+  --path src/path_planning/data/2026_molit_comp_global_path.txt \
+  --control-ip 192.168.0.170
+```
+
+Competition 속도 보조 추측 항법 실행기는 다음과 같다.
+
+```bash
+python3 src/path_planning/src/morai_pure_pursuit_dead_reckoning_udp.py \
+  --path src/path_planning/data/2026_molit_comp_global_path.txt \
+  --control-ip 192.168.0.170
+```
+
+## 문제 확인
+
+### Competition Status TIMEOUT
+
+- MORAI Destination IP가 알고리즘 PC IP인지 확인한다.
+- Host/Source Port가 `9080`, Destination Port가 `9081`인지 확인한다.
+- 메인 주행 코드나 다른 프로세스가 `9081`을 사용 중인지 확인한다.
+- 방화벽에서 UDP 수신을 허용했는지 확인한다.
+
+### 제어 명령이 반영되지 않음
+
+- `control_ip`가 MORAI PC IP인지 확인한다.
+- Ego Ctrl Cmd Host Port가 `9093`, Destination/Source Port가 `9094`인지
+  확인한다.
+- 주행 로그의 명령값과 Competition Status의 accel/brake/steer 피드백을 비교한다.
+- 차량이 `ctrl_mode=2`, `gear=4` 상태인지 확인한다.
+
+### 센서 대기 상태에서 주행하지 않음
+
+- GPS `3001`, IMU `4001`, Competition Status `9081` 수신 여부를 확인한다.
+- 초기 정렬에는 기본 2초와 최소 20개의 IMU 샘플이 필요하다.
+- 경로 파일과 `global_info.json`의 좌표계 및 offset이 일치하는지 확인한다.
+
+## 보조 경로 계획 및 RViz 실행
+
+MGeo 다익스트라 경로 계획과 RViz 시각화가 필요한 경우 다음 명령을 사용한다.
+
+```bash
+roslaunch path_planning kcity_2025_dijkstra.launch use_odom_start:=false
+```
+
+고정 시작 노드와 도착 노드를 지정하는 예:
 
 ```bash
 roslaunch path_planning kcity_2025_dijkstra.launch \
@@ -256,3 +319,10 @@ roslaunch path_planning kcity_2025_dijkstra.launch \
   start_node:=A1256W000437 \
   goal_node:=A1256W000531
 ```
+
+## 상세 문서
+
+- `src/path_planning/README_PURE_PURSUIT_UDP.md`: UDP 패킷, 좌표 변환, 제어 및
+  튜닝 상세
+- `src/path_planning/README_TUNNEL_LOCALIZATION.md`: GPS 음영 구간 위치 추정
+- `src/path_planning/README_GPS_CSV_RECORDER.md`: GPS 기준 경로 기록
