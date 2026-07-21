@@ -57,7 +57,7 @@ The competition UDP values are defined in
 `src/path_planning/src/path_planning/morai_competition_config.py`: GPS `3001`,
 IMU `4001`, Competition Status `9080 -> 9081`, CollisionData `9091 -> 9092`,
 and Ego Ctrl Cmd `9094 -> 192.168.0.170:9093`. The target speed is `10 km/h`.
-These values do not need to be
+Ego Ctrl Cmd uses `ctrl_mode=1`, `gear=4`, and `longCmdType=1`. These values do not need to be
 repeated on the command line.
 
 ```bash

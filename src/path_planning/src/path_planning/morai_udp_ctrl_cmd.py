@@ -19,6 +19,7 @@ PACKET_SIZE_26R1 = 59
 PACKET_TAIL = b"\r\n"
 KEYBOARD_CTRL_MODE = 1
 EXTERNAL_CTRL_MODE = 2
+DEFAULT_CTRL_MODE = KEYBOARD_CTRL_MODE
 DRIVE_GEAR = 4
 
 
@@ -26,7 +27,7 @@ DRIVE_GEAR = 4
 class EgoCtrlCommand:
     """MORAI control command; competition use is limited to longCmdType 1."""
 
-    ctrl_mode: int = EXTERNAL_CTRL_MODE
+    ctrl_mode: int = DEFAULT_CTRL_MODE
     gear: int = DRIVE_GEAR
     long_cmd_type: int = 1
     velocity_kmh: float = 0.0
@@ -57,7 +58,7 @@ class EgoCtrlCommand:
 
 def _validated_values(command):
     if command.ctrl_mode not in (1, 2):
-        raise ValueError("ctrl_mode must be 1 (keyboard) or 2 (auto)")
+        raise ValueError("ctrl_mode must be 1 or 2")
     if command.gear not in range(6):
         raise ValueError("gear must be between 0 and 5")
     if command.longlCmdType != 1:
@@ -129,23 +130,36 @@ def encode_ego_ctrl_cmd_26r1(command):
     return encode_ego_ctrl_cmd(command, CONTROL_PROTOCOL_26R1)
 
 
-def pedal_command(accel, brake, steering_normalized):
+def pedal_command(
+    accel,
+    brake,
+    steering_normalized,
+    ctrl_mode=DEFAULT_CTRL_MODE,
+):
     """Build a legal longCmdType-1 accel/brake/steering command."""
     return EgoCtrlCommand(
+        ctrl_mode=int(ctrl_mode),
         accel=max(0.0, min(1.0, float(accel))),
         brake=max(0.0, min(1.0, float(brake))),
         steering_normalized=max(-1.0, min(1.0, float(steering_normalized))),
     )
 
 
-def brake_command(brake=1.0):
+def brake_command(brake=1.0, ctrl_mode=DEFAULT_CTRL_MODE):
     """Build a legal command that explicitly applies the brake."""
-    return EgoCtrlCommand(brake=max(0.0, min(1.0, float(brake))))
+    return EgoCtrlCommand(
+        ctrl_mode=int(ctrl_mode),
+        brake=max(0.0, min(1.0, float(brake))),
+    )
 
 
-def external_control_ready(ctrl_mode, gear):
-    """Return whether status confirms AV-ExternalCtrl with Drive gear."""
-    return ctrl_mode == EXTERNAL_CTRL_MODE and gear == DRIVE_GEAR
+def external_control_ready(
+    ctrl_mode,
+    gear,
+    required_ctrl_mode=DEFAULT_CTRL_MODE,
+):
+    """Return whether status confirms the configured mode and Drive gear."""
+    return ctrl_mode == required_ctrl_mode and gear == DRIVE_GEAR
 
 
 # Keep the old public name import-compatible with earlier dev/stanley commits.
