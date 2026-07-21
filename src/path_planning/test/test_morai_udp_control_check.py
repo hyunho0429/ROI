@@ -29,12 +29,12 @@ def available_udp_port():
         udp_socket.close()
 
 
-def status_packet(accel, brake, ctrl_mode=1):
+def status_packet(accel, brake):
     packet = bytearray(BASE_PACKET_SIZE)
     packet[:11] = PACKET_HEADER
     struct.pack_into("<I", packet, 11, BASE_PACKET_DATA_LENGTH)
     struct.pack_into("<II", packet, 27, 10, 0)
-    struct.pack_into("<bb", packet, 35, ctrl_mode, 4)
+    struct.pack_into("<bb", packet, 35, 2, 4)
     struct.pack_into("<ff", packet, 45, accel, brake)
     packet[-2:] = b"\r\n"
     return bytes(packet)
@@ -60,7 +60,6 @@ class MoraiUdpControlCheckTest(unittest.TestCase):
         stop_event = threading.Event()
         observed_packet_sizes = []
         observed_source_ports = []
-        observed_ctrl_modes = []
 
         def fake_simulator():
             sender = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -74,9 +73,8 @@ class MoraiUdpControlCheckTest(unittest.TestCase):
                     observed_packet_sizes.append(len(packet))
                     observed_source_ports.append(address[1])
                     fields = struct.unpack_from("<BBBfffff", packet, 30)
-                    observed_ctrl_modes.append(fields[0])
                     sender.sendto(
-                        status_packet(fields[5], fields[6], fields[0]),
+                        status_packet(fields[5], fields[6]),
                         ("127.0.0.1", status_port),
                     )
             finally:
@@ -112,7 +110,6 @@ class MoraiUdpControlCheckTest(unittest.TestCase):
         self.assertTrue(observed_packet_sizes)
         self.assertEqual(set(observed_packet_sizes), {55})
         self.assertEqual(set(observed_source_ports), {control_source_port})
-        self.assertEqual(set(observed_ctrl_modes), {1})
 
 
 if __name__ == "__main__":

@@ -20,7 +20,6 @@ from path_planning.morai_competition_config import (
     COMPETITION_STATUS_PORT,
     CONTROL_DESTINATION_PORT,
     CONTROL_IP,
-    CONTROL_MODE,
     CONTROL_PORT,
     GPS_PORT,
     IMU_PORT,
@@ -137,13 +136,6 @@ def argument_parser(localization_mode):
         type=int,
         default=CONTROL_DESTINATION_PORT,
         help="algorithm source/Destination Port for Ego Ctrl Cmd",
-    )
-    parser.add_argument(
-        "--control-mode",
-        type=int,
-        choices=(1, 2),
-        default=CONTROL_MODE,
-        help="ctrl_mode byte placed in every Ego Ctrl Cmd packet",
     )
     parser.add_argument(
         "--control-protocol",
@@ -407,9 +399,6 @@ def run(localization_mode, arguments):
     encode_control = lambda command: encode_ego_ctrl_cmd(
         command, arguments.control_protocol
     )
-    make_brake_command = lambda brake=1.0: brake_command(
-        brake, ctrl_mode=arguments.control_mode
-    )
 
     latest_gps_time = latest_imu_time = latest_status_time = None
     status_speed_mps = 0.0
@@ -474,17 +463,16 @@ def run(localization_mode, arguments):
                     name, expected_source, arguments.bind_ip, port
                 )
             )
-    command_packet_size = len(encode_control(make_brake_command()))
+    command_packet_size = len(encode_control(brake_command()))
     print(
         "  control: source {}:{} -> MORAI host {}:{} "
-        "(protocol {}, {} bytes, ctrl_mode {}, longCmdType 1)".format(
+        "(protocol {}, {} bytes, longCmdType 1)".format(
             arguments.bind_ip,
             arguments.control_source_port,
             control_destination[0],
             control_destination[1],
             arguments.control_protocol,
             command_packet_size,
-            arguments.control_mode,
         )
     )
     if localization_mode == "ins":
@@ -516,12 +504,8 @@ def run(localization_mode, arguments):
         )
     )
     print("  maximum GPS outage: {:.1f} s".format(arguments.max_gps_outage))
-    print(
-        "  requesting configured ctrl_mode={} and Drive (gear=4)".format(
-            arguments.control_mode
-        )
-    )
-    takeover_packet = encode_control(make_brake_command())
+    print("  requesting AV-ExternalCtrl (ctrl_mode=2) and Drive (gear=4)")
+    takeover_packet = encode_control(brake_command())
     for _ in range(3):
         control_socket.sendto(takeover_packet, control_destination)
         time.sleep(0.02)
@@ -591,9 +575,9 @@ def run(localization_mode, arguments):
                                 "Competition control state: ctrl_mode={} {}, "
                                 "gear={} {}".format(
                                     status_ctrl_mode,
-                                    "(required)"
-                                    if status_ctrl_mode == arguments.control_mode
-                                    else "(not required mode)",
+                                    "(AV-ExternalCtrl)"
+                                    if status_ctrl_mode == 2
+                                    else "(not external)",
                                     status_gear,
                                     "(D)" if status_gear == 4 else "(not D)",
                                 )
@@ -635,15 +619,13 @@ def run(localization_mode, arguments):
             state = localizer.state_at(now) if sensor_fresh else None
             collision_active = now < collision_brake_until
             drive_control_ready = external_control_ready(
-                status_ctrl_mode,
-                status_gear,
-                required_ctrl_mode=arguments.control_mode,
+                status_ctrl_mode, status_gear
             )
 
             if state is None or collision_active or not drive_control_ready:
                 speed_controller.reset()
                 steering_filter.reset()
-                command = make_brake_command()
+                command = brake_command()
                 result = None
                 target_speed_mps = 0.0
                 raw_steering_rad = filtered_steering_rad = 0.0
@@ -660,7 +642,7 @@ def run(localization_mode, arguments):
                 if result.goal_reached:
                     speed_controller.reset()
                     steering_filter.reset()
-                    command = make_brake_command()
+                    command = brake_command()
                     target_speed_mps = 0.0
                     raw_steering_rad = filtered_steering_rad = 0.0
                     normalized_steering = 0.0
@@ -685,10 +667,7 @@ def run(localization_mode, arguments):
                         target_speed_mps, state.speed_mps, now
                     )
                     command = pedal_command(
-                        accel,
-                        brake,
-                        normalized_steering,
-                        ctrl_mode=arguments.control_mode,
+                        accel, brake, normalized_steering
                     )
             control_socket.sendto(
                 encode_control(command), control_destination
@@ -700,9 +679,8 @@ def run(localization_mode, arguments):
                     print("Collision brake active")
                 elif state is not None and not drive_control_ready:
                     print(
-                        "Requesting ctrl_mode={}/D: current ctrl_mode={}, "
-                        "gear={}; safety brake command is being sent".format(
-                            arguments.control_mode,
+                        "Requesting AV-ExternalCtrl/D: current ctrl_mode={}, "
+                        "gear={}; takeover brake command is being sent".format(
                             "never" if status_ctrl_mode is None else status_ctrl_mode,
                             "never" if status_gear is None else status_gear,
                         )
@@ -761,7 +739,7 @@ def run(localization_mode, arguments):
     except KeyboardInterrupt:
         print("\nStopping controller and applying brake...")
     finally:
-        stop_packet = encode_control(make_brake_command())
+        stop_packet = encode_control(brake_command())
         for _ in range(5):
             control_socket.sendto(stop_packet, control_destination)
             time.sleep(0.02)

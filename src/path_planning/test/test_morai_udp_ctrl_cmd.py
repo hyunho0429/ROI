@@ -30,7 +30,7 @@ class MoraiUdpCtrlCmdTest(unittest.TestCase):
         self.assertEqual(PACKET_DATA_LENGTH, 23)
         packet = encode_ego_ctrl_cmd_25s4(
             EgoCtrlCommand(
-                ctrl_mode=1,
+                ctrl_mode=2,
                 gear=4,
                 long_cmd_type=1,
                 accel=0.3,
@@ -42,7 +42,7 @@ class MoraiUdpCtrlCmdTest(unittest.TestCase):
         self.assertEqual(struct.unpack_from("<I", packet, 14)[0], PACKET_DATA_LENGTH)
         self.assertEqual(packet[18:30], bytes(12))
         fields = struct.unpack_from("<BBBfffff", packet, 30)
-        self.assertEqual(fields[:3], (1, 4, 1))
+        self.assertEqual(fields[:3], (2, 4, 1))
         self.assertEqual(fields[3], 0.0)  # velocity command is unused in type 1
         self.assertEqual(fields[4], 0.0)  # acceleration command is unused in type 1
         self.assertAlmostEqual(fields[5], 0.3)
@@ -62,9 +62,7 @@ class MoraiUdpCtrlCmdTest(unittest.TestCase):
         self.assertAlmostEqual(fields[8], -0.1)
 
     def test_generic_encoder_defaults_to_25s4(self):
-        packet = encode_ego_ctrl_cmd(EgoCtrlCommand())
-        self.assertEqual(len(packet), 55)
-        self.assertEqual(struct.unpack_from("<B", packet, 30)[0], 1)
+        self.assertEqual(len(encode_ego_ctrl_cmd(EgoCtrlCommand())), 55)
 
     def test_exposes_beta_drive_ctrl_cmd_field_names(self):
         command = EgoCtrlCommand(
@@ -90,11 +88,10 @@ class MoraiUdpCtrlCmdTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             encode_ego_ctrl_cmd_25s4(EgoCtrlCommand(long_cmd_type=2))
 
-    def test_control_ready_requires_configured_mode_and_drive(self):
-        self.assertTrue(external_control_ready(1, 4))
-        self.assertFalse(external_control_ready(2, 4))
-        self.assertFalse(external_control_ready(1, 1))
-        self.assertTrue(external_control_ready(2, 4, required_ctrl_mode=2))
+    def test_external_control_requires_auto_mode_and_drive(self):
+        self.assertTrue(external_control_ready(2, 4))
+        self.assertFalse(external_control_ready(1, 4))
+        self.assertFalse(external_control_ready(2, 1))
 
 
 if __name__ == "__main__":

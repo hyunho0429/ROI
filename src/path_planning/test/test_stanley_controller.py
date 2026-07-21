@@ -301,7 +301,6 @@ class StanleyControllerTest(unittest.TestCase):
         self.assertEqual(arguments.control_ip, "192.168.0.170")
         self.assertEqual(arguments.control_port, 9093)
         self.assertEqual(arguments.control_source_port, 9094)
-        self.assertEqual(arguments.control_mode, 1)
         self.assertEqual(arguments.control_protocol, "25s4")
         self.assertEqual(
             os.path.basename(arguments.path), "2026_molit_comp_global_path.txt"

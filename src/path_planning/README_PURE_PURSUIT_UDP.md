@@ -205,9 +205,10 @@ MORAI에서 GPS/IMU/Competition Status/CollisionData의 Destination IP는 코드
 실행하는 PC, Destination Port는 위 수신 포트로 맞춘다. Status와 Collision의
 Host Port도 각각 9080, 9091로 맞춘다. `Ego-0 > Cmd Control`은 Host Port 9093,
 Destination Port 9094로 설정한다. 코드는 로컬 9094에 bind한 뒤
-`--control-ip`의 9093으로 명령을 보낸다. 현재 대회 설정에 맞춰 모든 명령
-패킷의 `ctrl_mode`는 1이고 gear는 4(D)이다. 코드는 Competition Status가
-mode 1과 gear 4를 회신하기 전까지 가속하지 않고 brake만 보낸다.
+`--control-ip`의 9093으로 명령을 보낸다. 차량 UI에서
+`Q`를 눌러 `AV-ExternalCtrl`로 전환하고 기어가 D인지 확인해야 한다. 코드는
+Competition Status가 mode 2와 gear 4를 회신하기 전까지 가속하지 않고 brake만
+보낸다.
 
 현재 Status/Collision/Ctrl Cmd 포트는 모두 1024 이상이므로 Linux 일반 사용자로
 bind할 수 있다.
@@ -216,11 +217,10 @@ bind할 수 있다.
 `data_length=23`으로 전송한다. payload는 `ctrl_mode, gear, longCmdType,
 velocity, acceleration, accel, brake, front_steer`이다. 2026년 공식 예제의
 59 byte 후륜 조향 형식은 `--control-protocol 26r1`로만 선택한다. 실행 직후
-안전 제동 상태로 `ctrl_mode=1`, `gear=4` 패킷을 반복 전송한다. 시작 제동,
-PID accel/brake, Pure Pursuit steering, 경로 끝 제동과 종료 제동 모두 동일하게
-`ctrl_mode=1`을 사용하며, Competition Status가 mode 1과 D를 회신한 뒤에만
-가속을 시작한다. 다른 환경에서 mode 2가 필요할 때만 launch의
-`control_mode:=2`로 명시적으로 변경한다.
+안전 제동 상태로 `ctrl_mode=2`,
+`gear=4` 패킷을 반복 전송한다. MORAI UI에서 기존 AutoMode로 불리던 모드는
+24.R2부터 `AV-ExternalCtrl`로 표시되므로, Competition Status가 mode 2와 D를
+회신한 뒤에만 가속을 시작한다.
 
 규정의 `longCmdType=1`에도 조향이 포함된다. `accel/brake`와 함께
 `front_steer`를 같은 패킷으로 보낼 수 있다. 공식 UDP 예제에 맞춰 명령값은
@@ -325,7 +325,6 @@ steering과 함께 `longCmdType=1` 패킷으로 전송된다. launch 인자는 �
 
 ```bash
 roslaunch path_planning morai_pure_pursuit_udp.launch \
-  control_mode:=1 \
   target_speed_kmh:=10.0 \
   speed_kp:=0.075 speed_ki:=0.0001 speed_kd:=0.025
 ```
@@ -359,7 +358,7 @@ GPS `3001`, IMU `4001`, Competition Status `9080 -> 9081`, CollisionData
 python3 src/path_planning/src/morai_udp_control_check.py
 ```
 
-`PASS`가 나오면 mode 1, gear 4와 brake feedback까지 확인된 것이다. 통제된
+`PASS`가 나오면 mode 2, gear 4와 brake feedback까지 확인된 것이다. 통제된
 빈 공간에서만 `--drive-test`를 추가해 0.1 accel을 1초간 시험한다. 종료 시에는
 항상 full brake를 다섯 번 전송한다.
 
@@ -369,8 +368,8 @@ python3 src/path_planning/src/morai_udp_control_check.py
 localization: GPS/IMU/status-aided 15-state error-state EKF INS
 alignment: hold brake for 2.0s (at least 20 IMU samples)
 Pure Pursuit: Ld=clip(4.00+0.50*speed, 3.00, 12.00)m, wheelbase=2.70m, fixed speed 10.0 km/h
-requesting configured ctrl_mode=1 and Drive (gear=4)
-Competition control state: ctrl_mode=1 (required), gear=4 (D)
+requesting AV-ExternalCtrl (ctrl_mode=2) and Drive (gear=4)
+Competition control state: ctrl_mode=2 (AV-ExternalCtrl), gear=4 (D)
 ```
 
 주행 로그의 `cmd=(accel,normalized steering,brake)`와 Competition Status가

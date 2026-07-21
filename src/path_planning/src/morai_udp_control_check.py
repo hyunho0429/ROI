@@ -12,7 +12,6 @@ from path_planning.morai_competition_config import (
     COMPETITION_STATUS_PORT,
     CONTROL_DESTINATION_PORT,
     CONTROL_IP,
-    CONTROL_MODE,
     CONTROL_PORT,
 )
 from path_planning.morai_udp_competition_status import (
@@ -48,9 +47,6 @@ def argument_parser():
     parser.add_argument("--control-port", type=int, default=CONTROL_PORT)
     parser.add_argument(
         "--control-source-port", type=int, default=CONTROL_DESTINATION_PORT
-    )
-    parser.add_argument(
-        "--control-mode", type=int, choices=(1, 2), default=CONTROL_MODE
     )
     parser.add_argument(
         "--control-protocol", choices=CONTROL_PROTOCOLS, default="25s4"
@@ -158,9 +154,6 @@ def run(arguments):
     encoder = lambda command: encode_ego_ctrl_cmd(
         command, arguments.control_protocol
     )
-    make_brake_command = lambda brake=1.0: brake_command(
-        brake, ctrl_mode=arguments.control_mode
-    )
 
     status_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     status_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -193,8 +186,7 @@ def run(arguments):
     print("MORAI UDP control reception check")
     print(
         "  status: host/source *:{} -> destination {}:{}; "
-        "control: source {}:{} -> host {}:{}; protocol={} "
-        "({} bytes, ctrl_mode={})".format(
+        "control: source {}:{} -> host {}:{}; protocol={} ({} bytes)".format(
             arguments.competition_status_host_port,
             arguments.bind_ip,
             arguments.competition_status_port,
@@ -203,15 +195,14 @@ def run(arguments):
             destination[0],
             destination[1],
             arguments.control_protocol,
-            len(encoder(make_brake_command(arguments.brake))),
-            arguments.control_mode,
+            len(encoder(brake_command(arguments.brake))),
         )
     )
     latest_status = None
     try:
         latest_status, brake_confirmed = _run_phase(
             "BRAKE",
-            make_brake_command(arguments.brake),
+            brake_command(arguments.brake),
             arguments.brake_test_seconds,
             "brake_pedal",
             arguments.brake,
@@ -228,21 +219,15 @@ def run(arguments):
                 file=sys.stderr,
             )
             return 2
-        if not external_control_ready(
-            latest_status.ctrl_mode,
-            latest_status.gear,
-            required_ctrl_mode=arguments.control_mode,
-        ):
+        if not external_control_ready(latest_status.ctrl_mode, latest_status.gear):
             print(
-                "FAIL: status did not confirm ctrl_mode={} and gear=4".format(
-                    arguments.control_mode
-                ),
+                "FAIL: status did not confirm ctrl_mode=2 and gear=4",
                 file=sys.stderr,
             )
             return 3
         if not brake_confirmed:
             print(
-                "FAIL: configured mode is active but brake feedback did not follow the command; "
+                "FAIL: external mode is active but brake feedback did not follow the command; "
                 "check Cmd Control Host IP/Port and control protocol",
                 file=sys.stderr,
             )
@@ -252,12 +237,7 @@ def run(arguments):
         if arguments.drive_test:
             latest_status, accel_confirmed = _run_phase(
                 "ACCEL",
-                pedal_command(
-                    arguments.drive_test_accel,
-                    0.0,
-                    0.0,
-                    ctrl_mode=arguments.control_mode,
-                ),
+                pedal_command(arguments.drive_test_accel, 0.0, 0.0),
                 arguments.drive_test_seconds,
                 "accel_pedal",
                 arguments.drive_test_accel,
@@ -274,7 +254,7 @@ def run(arguments):
             print("PASS: MORAI reflected the low acceleration command")
         return 0
     finally:
-        stop_packet = encoder(make_brake_command())
+        stop_packet = encoder(brake_command())
         for _ in range(5):
             control_socket.sendto(stop_packet, destination)
             time.sleep(0.02)
