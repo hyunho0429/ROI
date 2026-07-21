@@ -26,7 +26,7 @@
 
     <arg name="wheelbase" default="3.0"/>
     <arg name="path_lateral_offset" default="0.0"/>
-    <arg name="lookahead_distance" default="4.0"/>
+    <arg name="lookahead_distance" default="3.0"/>
     <arg name="lookahead_speed_gain" default="0.5"/>
     <arg name="minimum_lookahead" default="3.0"/>
     <arg name="maximum_lookahead" default="12.0"/>

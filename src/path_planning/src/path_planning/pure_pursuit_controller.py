@@ -71,7 +71,7 @@ class PurePursuitController:
         self,
         points,
         wheelbase_m=3.0,
-        lookahead_distance_m=4.0,
+        lookahead_distance_m=3.0,
         lookahead_speed_gain_s=0.5,
         minimum_lookahead_m=3.0,
         maximum_lookahead_m=12.0,
