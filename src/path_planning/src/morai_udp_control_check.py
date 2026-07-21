@@ -8,7 +8,9 @@ import time
 
 from path_planning.morai_competition_config import (
     BIND_IP,
+    COMPETITION_STATUS_HOST_PORT,
     COMPETITION_STATUS_PORT,
+    CONTROL_DESTINATION_PORT,
     CONTROL_IP,
     CONTROL_PORT,
 )
@@ -34,10 +36,18 @@ def argument_parser():
     )
     parser.add_argument("--bind-ip", default=BIND_IP)
     parser.add_argument(
+        "--competition-status-host-port",
+        type=int,
+        default=COMPETITION_STATUS_HOST_PORT,
+    )
+    parser.add_argument(
         "--competition-status-port", type=int, default=COMPETITION_STATUS_PORT
     )
     parser.add_argument("--control-ip", default=CONTROL_IP)
     parser.add_argument("--control-port", type=int, default=CONTROL_PORT)
+    parser.add_argument(
+        "--control-source-port", type=int, default=CONTROL_DESTINATION_PORT
+    )
     parser.add_argument(
         "--control-protocol", choices=CONTROL_PROTOCOLS, default="25s4"
     )
@@ -54,7 +64,12 @@ def argument_parser():
 
 
 def _validate(arguments):
-    for port in (arguments.competition_status_port, arguments.control_port):
+    for port in (
+        arguments.competition_status_host_port,
+        arguments.competition_status_port,
+        arguments.control_port,
+        arguments.control_source_port,
+    ):
         if not 1 <= port <= 65535:
             raise ValueError("UDP ports must be between 1 and 65535")
     for name in ("brake", "drive_test_accel"):
@@ -65,12 +80,20 @@ def _validate(arguments):
             raise ValueError("{} must be positive".format(name))
 
 
-def _receive_latest(status_socket, current):
+def _receive_latest(status_socket, current, expected_source_port):
     while True:
         try:
-            packet, _sender = status_socket.recvfrom(65535)
+            packet, sender = status_socket.recvfrom(65535)
         except (BlockingIOError, socket.timeout):
             return current
+        if sender[1] != expected_source_port:
+            print(
+                "Warning: Competition Status source port is {}, expected Host "
+                "Port {} (packet will still be parsed)".format(
+                    sender[1], expected_source_port
+                ),
+                file=sys.stderr,
+            )
         try:
             current = parse_competition_vehicle_status(packet)
         except CompetitionStatusPacketError as error:
@@ -88,6 +111,7 @@ def _run_phase(
     destination,
     status_socket,
     latest_status,
+    status_source_port,
 ):
     packet = encoder(command)
     deadline = time.monotonic() + duration
@@ -98,7 +122,9 @@ def _run_phase(
         if now >= next_send:
             control_socket.sendto(packet, destination)
             next_send = now + 0.05
-        latest_status = _receive_latest(status_socket, latest_status)
+        latest_status = _receive_latest(
+            status_socket, latest_status, status_source_port
+        )
         if latest_status is not None:
             feedback = getattr(latest_status, expected_feedback_name)
             feedback_confirmed = feedback_confirmed or abs(
@@ -146,12 +172,26 @@ def run(arguments):
         ) from error
     status_socket.setblocking(False)
     control_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        control_socket.bind((arguments.bind_ip, arguments.control_source_port))
+    except OSError as error:
+        status_socket.close()
+        control_socket.close()
+        raise OSError(
+            "cannot bind Ego Ctrl Cmd Destination/source {}:{} ({})".format(
+                arguments.bind_ip, arguments.control_source_port, error
+            )
+        ) from error
 
     print("MORAI UDP control reception check")
     print(
-        "  status: {}:{}; control: {}:{}; protocol={} ({} bytes)".format(
+        "  status: host/source *:{} -> destination {}:{}; "
+        "control: source {}:{} -> host {}:{}; protocol={} ({} bytes)".format(
+            arguments.competition_status_host_port,
             arguments.bind_ip,
             arguments.competition_status_port,
+            arguments.bind_ip,
+            arguments.control_source_port,
             destination[0],
             destination[1],
             arguments.control_protocol,
@@ -171,6 +211,7 @@ def run(arguments):
             destination,
             status_socket,
             latest_status,
+            arguments.competition_status_host_port,
         )
         if latest_status is None:
             print(
@@ -205,6 +246,7 @@ def run(arguments):
                 destination,
                 status_socket,
                 latest_status,
+                arguments.competition_status_host_port,
             )
             if not accel_confirmed:
                 print("FAIL: acceleration feedback did not follow the command", file=sys.stderr)

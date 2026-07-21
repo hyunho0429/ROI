@@ -47,18 +47,31 @@ class MoraiUdpControlCheckTest(unittest.TestCase):
         control_receiver.bind(("127.0.0.1", 0))
         control_port = control_receiver.getsockname()[1]
         control_receiver.settimeout(0.1)
+        status_source_port = available_udp_port()
+        while status_source_port in (status_port, control_port):
+            status_source_port = available_udp_port()
+        control_source_port = available_udp_port()
+        while control_source_port in (
+            status_port,
+            control_port,
+            status_source_port,
+        ):
+            control_source_port = available_udp_port()
         stop_event = threading.Event()
         observed_packet_sizes = []
+        observed_source_ports = []
 
         def fake_simulator():
             sender = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sender.bind(("127.0.0.1", status_source_port))
             try:
                 while not stop_event.is_set():
                     try:
-                        packet, _address = control_receiver.recvfrom(1024)
+                        packet, address = control_receiver.recvfrom(1024)
                     except socket.timeout:
                         continue
                     observed_packet_sizes.append(len(packet))
+                    observed_source_ports.append(address[1])
                     fields = struct.unpack_from("<BBBfffff", packet, 30)
                     sender.sendto(
                         status_packet(fields[5], fields[6]),
@@ -75,10 +88,14 @@ class MoraiUdpControlCheckTest(unittest.TestCase):
                 "127.0.0.1",
                 "--competition-status-port",
                 str(status_port),
+                "--competition-status-host-port",
+                str(status_source_port),
                 "--control-ip",
                 "127.0.0.1",
                 "--control-port",
                 str(control_port),
+                "--control-source-port",
+                str(control_source_port),
                 "--brake-test-seconds",
                 "0.25",
             ]
@@ -92,6 +109,7 @@ class MoraiUdpControlCheckTest(unittest.TestCase):
 
         self.assertTrue(observed_packet_sizes)
         self.assertEqual(set(observed_packet_sizes), {55})
+        self.assertEqual(set(observed_source_ports), {control_source_port})
 
 
 if __name__ == "__main__":

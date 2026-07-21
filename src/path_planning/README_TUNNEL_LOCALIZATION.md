@@ -14,13 +14,13 @@ python3 -m pip install -r src/path_planning/requirements.txt
 MORAI 네트워크 포트 예시는 다음과 같다. 실제 Sensor/Network Settings의 포트와
 명령행 옵션을 반드시 동일하게 맞춘다.
 
-| UDP 항목 | 방향 | 기본 포트 |
-|---|---|---:|
-| GPS | SIM → 코드 | 3001 |
-| IMU | SIM → 코드 | 4001 |
-| Competition Vehicle Status | SIM → 코드 | 909 |
-| CollisionData | SIM → 코드 | 907 |
-| Ego Ctrl Cmd | 코드 → SIM | 9090 |
+| UDP 항목 | 방향 | Host Port | Destination Port |
+|---|---|---:|---:|
+| GPS | SIM → 코드 | 센서 설정값 | 3001 |
+| IMU | SIM → 코드 | 센서 설정값 | 4001 |
+| Competition Vehicle Status | SIM → 코드 | 9080 | 9081 |
+| CollisionData | SIM → 코드 | 9091 | 9092 |
+| Ego Ctrl Cmd | 코드 → SIM | 9093 | 9094 |
 
 경로 CSV가 아직 없다면 먼저 키보드로 주행해 기록한다.
 

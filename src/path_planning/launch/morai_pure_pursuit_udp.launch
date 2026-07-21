@@ -7,10 +7,13 @@
     <arg name="bind_ip" default="0.0.0.0"/>
     <arg name="gps_port" default="3001"/>
     <arg name="imu_port" default="4001"/>
-    <arg name="competition_status_port" default="909"/>
-    <arg name="collision_port" default="907"/>
+    <arg name="competition_status_host_port" default="9080"/>
+    <arg name="competition_status_destination_port" default="9081"/>
+    <arg name="collision_host_port" default="9091"/>
+    <arg name="collision_destination_port" default="9092"/>
     <arg name="control_ip" default="192.168.0.170"/>
-    <arg name="control_port" default="9090"/>
+    <arg name="ego_ctrl_cmd_host_port" default="9093"/>
+    <arg name="ego_ctrl_cmd_destination_port" default="9094"/>
     <arg name="control_protocol" default="25s4"/>
 
     <arg name="control_rate_hz" default="30.0"/>
@@ -44,10 +47,13 @@
                 --bind-ip $(arg bind_ip)
                 --gps-port $(arg gps_port)
                 --imu-port $(arg imu_port)
-                --competition-status-port $(arg competition_status_port)
-                --collision-port $(arg collision_port)
+                --competition-status-host-port $(arg competition_status_host_port)
+                --competition-status-port $(arg competition_status_destination_port)
+                --collision-host-port $(arg collision_host_port)
+                --collision-port $(arg collision_destination_port)
                 --control-ip $(arg control_ip)
-                --control-port $(arg control_port)
+                --control-port $(arg ego_ctrl_cmd_host_port)
+                --control-source-port $(arg ego_ctrl_cmd_destination_port)
                 --control-protocol $(arg control_protocol)
                 --control-rate-hz $(arg control_rate_hz)
                 --target-speed-kmh $(arg target_speed_kmh)

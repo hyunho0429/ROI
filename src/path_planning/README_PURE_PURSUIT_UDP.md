@@ -193,25 +193,25 @@ bias를 초기화하는 편이 대회 출발 절차에 안전하다.
 아래 값은 `morai_competition_config.py`에 정의된 코드 기본값이다. MORAI의
 Destination/Host IP와 Port를 이 값과 일치시켜야 한다.
 
-| UDP 항목 | 방향 | 기본 포트 |
-|---|---|---:|
-| GPS | SIM → 코드 | 3001 |
-| IMU | SIM → 코드 | 4001 |
-| Competition Vehicle Status | SIM → 코드 | 909 |
-| CollisionData | SIM → 코드 | 907 |
-| Ego Ctrl Cmd | 코드 → SIM | 9090 |
+| UDP 항목 | 방향 | MORAI Host Port | 알고리즘 Destination Port |
+|---|---|---:|---:|
+| GPS | SIM → 코드 | 센서 설정값 | 3001 |
+| IMU | SIM → 코드 | 센서 설정값 | 4001 |
+| Competition Vehicle Status | SIM → 코드 | 9080 | 9081 |
+| CollisionData | SIM → 코드 | 9091 | 9092 |
+| Ego Ctrl Cmd | 코드 → SIM | 9093 | 9094 |
 
 MORAI에서 GPS/IMU/Competition Status/CollisionData의 Destination IP는 코드를
-실행하는 PC, Destination Port는 위 수신 포트로 맞춘다. `Ego-0 > Cmd Control`은
-코드가 보내는 `--control-ip/--control-port`를 수신하도록 연결한다. 차량 UI에서
+실행하는 PC, Destination Port는 위 수신 포트로 맞춘다. Status와 Collision의
+Host Port도 각각 9080, 9091로 맞춘다. `Ego-0 > Cmd Control`은 Host Port 9093,
+Destination Port 9094로 설정한다. 코드는 로컬 9094에 bind한 뒤
+`--control-ip`의 9093으로 명령을 보낸다. 차량 UI에서
 `Q`를 눌러 `AV-ExternalCtrl`로 전환하고 기어가 D인지 확인해야 한다. 코드는
 Competition Status가 mode 2와 gear 4를 회신하기 전까지 가속하지 않고 brake만
 보낸다.
 
-CollisionData 907과 Competition Status 909처럼 1024 미만 포트는 Linux에서
-권한이 필요할 수 있다.
-가능하면 MORAI와 코드 양쪽 포트를 1024 이상으로 바꾸고, 대회 설정상 909를
-유지해야 하면 실행 환경의 권한 설정을 확인한다.
+현재 Status/Collision/Ctrl Cmd 포트는 모두 1024 이상이므로 Linux 일반 사용자로
+bind할 수 있다.
 
 25.S4 기본 `Ego Ctrl Cmd`는 공개 23/24 계열과 같은 55 byte,
 `data_length=23`으로 전송한다. payload는 `ctrl_mode, gear, longCmdType,
@@ -236,6 +236,65 @@ RMC/GGA NMEA 문장이므로 고정된 단일 패킷 크기를 제시하지 않�
 IMU는 초/나노초 타임스탬프가 추가된 형식으로 함께 지원한다.
 `Competition Vehicle Status`는 공개 문서에 정의가 없어, 대회 환경에서
 관측한 181/229 byte 패킷만 엄격히 검사한다.
+
+### Competition Vehicle Status 확인
+
+현재 파서가 지원하는 공통 payload는 다음과 같다.
+
+| byte offset | 크기 | 데이터 |
+|---:|---:|---|
+| 0 | 11 | header `#MoraiInfo$` |
+| 11 | 4 | data length: 152 또는 200 |
+| 15 | 12 | aux data |
+| 27 | 8 | sec, nsec |
+| 35 | 2 | ctrl mode, gear |
+| 37 | 4 | signed velocity (km/h) |
+| 41 | 4 | map data ID |
+| 45 | 8 | accel/brake pedal |
+| 53 | 12 | vehicle size x/y/z (m) |
+| 65 | 12 | overhang/wheelbase/rear overhang (m) |
+| 77 | 12 | position x/y/z (m) |
+| 89 | 12 | roll/pitch/yaw (degree) |
+| 101 | 12 | velocity x/y/z (km/h) |
+| 113 | 12 | angular velocity x/y/z (degree/s) |
+| 125 | 12 | acceleration x/y/z (m/s²) |
+| 137 | 4 | front steer (degree) |
+| 141 | 38 | link ID |
+| 179 | 48 | 229-byte형만: tire force/slip/stiffness |
+| 끝 | 2 | `0x0D 0x0A` |
+
+전체 UDP payload는 기본형 181 byte 또는 확장형 229 byte이다. `tcpdump`나
+Wireshark에서 보이는 UDP Length는 8-byte UDP header를 포함하므로 각각 189,
+237로 표시될 수 있다.
+
+실제 대회 패킷을 읽고 길이, 송신 포트, header, hex와 모든 해석 필드를 출력하려면
+주행 노드를 먼저 종료하고 다음 명령을 실행한다. 두 프로세스가 Destination Port
+9081을 동시에 bind하지 않도록 주의한다.
+
+```bash
+python3 src/path_planning/src/morai_competition_status_inspect.py \
+  --host-port 9080 --destination-port 9081 --count 10 --hex-bytes 0
+```
+
+주행기를 실행한 상태에서 패킷을 수동 캡처하려면 `tcpdump`를 사용한다.
+
+```bash
+# 화면에 payload 길이와 전체 hex 출력
+sudo tcpdump -ni any -s 0 -c 10 -XX \
+  'udp src port 9080 and dst port 9081'
+
+# Wireshark에서 열 수 있는 pcap 저장
+sudo tcpdump -ni any -s 0 -c 100 \
+  -w competition_status.pcap \
+  'udp src port 9080 and dst port 9081'
+
+# 현재 UDP bind 상태 확인
+sudo ss -lunp | grep -E ':(9081|9092|9094)\\b'
+```
+
+`parser: INCOMPATIBLE`가 표시되면 출력된 `payload`, `header`, `data_length`, hex를
+기준으로 대회 전용 구조를 확정해야 한다. 원본 pcap에는 시뮬레이터/PC IP 정보가
+포함될 수 있으므로 외부 공유 전 확인한다.
 
 IMU 115-byte 패킷의 센서 타임스탬프는 파싱하고 범위를 검사한다. 다만 GPS
 NMEA, Competition Status와 동일한 시간축으로 EKF 이벤트 순서를 보장하기 위해
@@ -270,28 +329,23 @@ roslaunch path_planning morai_pure_pursuit_udp.launch \
   speed_kp:=0.075 speed_ki:=0.0001 speed_kd:=0.025
 ```
 
-Competition Status `909`와 CollisionData `907`은 1024 미만 포트이다. Linux에서
-권한 오류가 발생하면 MORAI와 launch의 두 수신 포트를 동일한 1024 이상 값으로
-변경하는 것이 가장 간단하다. 예를 들어 MORAI Destination Port도 각각 1909,
-1907로 맞춘 뒤 아래처럼 실행한다.
-
-```bash
-roslaunch path_planning morai_pure_pursuit_udp.launch \
-  competition_status_port:=1909 collision_port:=1907
-```
+Competition Status Destination Port `9081`, CollisionData Destination Port
+`9092`, Ego Ctrl Cmd Destination/source Port `9094`는 모두 일반 사용자로 bind할
+수 있는 1024 이상 포트이다.
 
 Python 단독 실행도 계속 지원한다.
 
 ```bash
 python3 -m pip install -r src/path_planning/requirements.txt
 
-sudo "$(which python3)" src/path_planning/src/morai_pure_pursuit_ins_udp.py \
+python3 src/path_planning/src/morai_pure_pursuit_ins_udp.py \
   --path src/path_planning/data/2026_molit_comp_global_path.txt
 ```
 
 위 명령에서 생략한 기본값은 코드의 `morai_competition_config.py`에 있다.
-GPS `3001`, IMU `4001`, Competition Status `909`, CollisionData `907`,
-제어 목적지 `192.168.0.170:9090`, 목표 속도 `10 km/h`이다. 목표 속도는
+GPS `3001`, IMU `4001`, Competition Status `9080 -> 9081`, CollisionData
+`9091 -> 9092`, Ego Ctrl Cmd `9094 -> 192.168.0.170:9093`, 목표 속도
+`10 km/h`이다. 목표 속도는
 고정값이고, INS가 추정한 현재 속도와의 오차로 accel/brake를 계산한다.
 
 `--control-ip`에는 MORAI가 실행되는 PC의 IPv4 주소를 넣는다. 같은 PC라면
@@ -301,7 +355,7 @@ GPS `3001`, IMU `4001`, Competition Status `909`, CollisionData `907`,
 검증한다.
 
 ```bash
-sudo "$(which python3)" src/path_planning/src/morai_udp_control_check.py
+python3 src/path_planning/src/morai_udp_control_check.py
 ```
 
 `PASS`가 나오면 mode 2, gear 4와 brake feedback까지 확인된 것이다. 통제된

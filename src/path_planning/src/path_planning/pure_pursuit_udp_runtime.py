@@ -14,8 +14,11 @@ from path_planning.localization_ins import InsErrorStateEkf
 from path_planning.longitudinal_controller import PedalSpeedController
 from path_planning.morai_competition_config import (
     BIND_IP,
+    COLLISION_HOST_PORT,
     COLLISION_PORT,
+    COMPETITION_STATUS_HOST_PORT,
     COMPETITION_STATUS_PORT,
+    CONTROL_DESTINATION_PORT,
     CONTROL_IP,
     CONTROL_PORT,
     GPS_PORT,
@@ -101,11 +104,39 @@ def argument_parser(localization_mode):
     parser.add_argument("--gps-port", type=int, default=GPS_PORT)
     parser.add_argument("--imu-port", type=int, default=IMU_PORT)
     parser.add_argument(
+        "--competition-status-host-port",
+        type=int,
+        default=COMPETITION_STATUS_HOST_PORT,
+        help="MORAI source/Host Port for Competition Vehicle Status",
+    )
+    parser.add_argument(
         "--competition-status-port", type=int, default=COMPETITION_STATUS_PORT
     )
-    parser.add_argument("--collision-port", type=int, default=COLLISION_PORT)
+    parser.add_argument(
+        "--collision-host-port",
+        type=int,
+        default=COLLISION_HOST_PORT,
+        help="MORAI source/Host Port for CollisionData",
+    )
+    parser.add_argument(
+        "--collision-port",
+        type=int,
+        default=COLLISION_PORT,
+        help="algorithm Destination Port for CollisionData",
+    )
     parser.add_argument("--control-ip", default=CONTROL_IP)
-    parser.add_argument("--control-port", type=int, default=CONTROL_PORT)
+    parser.add_argument(
+        "--control-port",
+        type=int,
+        default=CONTROL_PORT,
+        help="MORAI Host Port for Ego Ctrl Cmd",
+    )
+    parser.add_argument(
+        "--control-source-port",
+        type=int,
+        default=CONTROL_DESTINATION_PORT,
+        help="algorithm source/Destination Port for Ego Ctrl Cmd",
+    )
     parser.add_argument(
         "--control-protocol",
         choices=CONTROL_PROTOCOLS,
@@ -203,11 +234,20 @@ def _validate(arguments):
         arguments.competition_status_port,
         arguments.collision_port,
     )
-    for value in receive_ports + (arguments.control_port,):
+    network_ports = receive_ports + (
+        arguments.competition_status_host_port,
+        arguments.collision_host_port,
+        arguments.control_port,
+        arguments.control_source_port,
+    )
+    for value in network_ports:
         if not 1 <= value <= 65535:
             raise ValueError("UDP ports must be between 1 and 65535")
-    if len(receive_ports) != len(set(receive_ports)):
-        raise ValueError("GPS, IMU, status and collision ports must be distinct")
+    local_bind_ports = receive_ports + (arguments.control_source_port,)
+    if len(local_bind_ports) != len(set(local_bind_ports)):
+        raise ValueError(
+            "GPS, IMU, status, collision and control source ports must be distinct"
+        )
     positive_names = (
         "control_rate_hz",
         "imu_timeout",
@@ -343,6 +383,18 @@ def run(localization_mode, arguments):
         selector.register(udp_socket, selectors.EVENT_READ, name)
         receive_sockets.append(udp_socket)
     control_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        control_socket.bind((arguments.bind_ip, arguments.control_source_port))
+    except OSError as error:
+        control_socket.close()
+        selector.close()
+        for udp_socket in receive_sockets:
+            udp_socket.close()
+        raise OSError(
+            "cannot bind Ego Ctrl Cmd Destination/source {}:{} ({})".format(
+                arguments.bind_ip, arguments.control_source_port, error
+            )
+        ) from error
     control_destination = (arguments.control_ip, arguments.control_port)
     encode_control = lambda command: encode_ego_ctrl_cmd(
         command, arguments.control_protocol
@@ -356,6 +408,11 @@ def run(localization_mode, arguments):
     last_drive_state = None
     collision_brake_until = 0.0
     invalid_counts = {name: 0 for name, _port in channels}
+    unexpected_source_counts = {"status": 0, "collision": 0}
+    expected_source_ports = {
+        "status": arguments.competition_status_host_port,
+        "collision": arguments.collision_host_port,
+    }
     packet_errors = (
         GpsPacketError,
         ImuPacketError,
@@ -397,10 +454,21 @@ def run(localization_mode, arguments):
     else:
         print("  coordinate frame: MGeo map-origin ENU")
     for name, port in channels:
-        print("  {} receive: {}:{}".format(name, arguments.bind_ip, port))
+        expected_source = expected_source_ports.get(name)
+        if expected_source is None:
+            print("  {} receive: destination {}:{}".format(name, arguments.bind_ip, port))
+        else:
+            print(
+                "  {} receive: MORAI host/source *:{} -> destination {}:{}".format(
+                    name, expected_source, arguments.bind_ip, port
+                )
+            )
     command_packet_size = len(encode_control(brake_command()))
     print(
-        "  control: {}:{} (protocol {}, {} bytes, longCmdType 1)".format(
+        "  control: source {}:{} -> MORAI host {}:{} "
+        "(protocol {}, {} bytes, longCmdType 1)".format(
+            arguments.bind_ip,
+            arguments.control_source_port,
             control_destination[0],
             control_destination[1],
             arguments.control_protocol,
@@ -447,8 +515,20 @@ def run(localization_mode, arguments):
             now = time.monotonic()
             timeout = max(0.0, min(period, next_control - now))
             for key, _mask in selector.select(timeout):
-                packet, _sender = key.fileobj.recvfrom(65535)
+                packet, sender = key.fileobj.recvfrom(65535)
                 received = time.monotonic()
+                expected_source = expected_source_ports.get(key.data)
+                if expected_source is not None and sender[1] != expected_source:
+                    unexpected_source_counts[key.data] += 1
+                    count = unexpected_source_counts[key.data]
+                    if count <= 3 or count % 100 == 0:
+                        print(
+                            "Warning: {} packet source port is {}, expected MORAI "
+                            "Host Port {} (packet will still be parsed)".format(
+                                key.data, sender[1], expected_source
+                            ),
+                            file=sys.stderr,
+                        )
                 try:
                     if key.data == "gps":
                         measurement = parse_nmea_datagram(packet)

@@ -50,6 +50,6 @@ python3 src/path_planning/src/morai_gps_csv_recorder.py \
 기록한 파일은 그대로 추종기에 넣는다.
 
 ```bash
-sudo "$(which python3)" src/path_planning/src/morai_pure_pursuit_ins_udp.py \
+python3 src/path_planning/src/morai_pure_pursuit_ins_udp.py \
   --path src/path_planning/data/morai_global_path.csv
 ```
