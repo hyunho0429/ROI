@@ -173,7 +173,7 @@ def argument_parser(localization_mode):
         "--steering-offset-deg",
         type=float,
         default=3.0,
-        help="constant steering angle bias in degrees; positive steers left",
+        help="extra steering magnitude in degrees; sign follows steering direction",
     )
     parser.add_argument(
         "--control-point-offset",
@@ -343,6 +343,18 @@ def _localizer(localization_mode, arguments):
         orientation_correction_gain=arguments.orientation_correction_gain,
         gyro_bias_gain=arguments.gyro_bias_gain,
     )
+
+
+def apply_directional_steering_offset(steering_rad, offset_deg, max_abs_rad):
+    """Increase steering magnitude by offset_deg while preserving steer sign."""
+    if abs(steering_rad) <= 1e-9 or abs(offset_deg) <= 1e-9:
+        adjusted = steering_rad
+    else:
+        adjusted = steering_rad + math.copysign(
+            math.radians(abs(offset_deg)),
+            steering_rad,
+        )
+    return max(-max_abs_rad, min(max_abs_rad, adjusted))
 
 
 def run(localization_mode, arguments):
@@ -668,13 +680,10 @@ def run(localization_mode, arguments):
                     raw_steering_rad = filtered_steering_rad = 0.0
                     normalized_steering = 0.0
                 else:
-                    steering_offset_rad = math.radians(arguments.steering_offset_deg)
-                    raw_steering_rad = max(
-                        -pure_pursuit.max_steering_rad,
-                        min(
-                            pure_pursuit.max_steering_rad,
-                            result.steering_rad + steering_offset_rad,
-                        ),
+                    raw_steering_rad = apply_directional_steering_offset(
+                        result.steering_rad,
+                        arguments.steering_offset_deg,
+                        pure_pursuit.max_steering_rad,
                     )
                     filtered_steering_rad = steering_filter.update(
                         raw_steering_rad, now
