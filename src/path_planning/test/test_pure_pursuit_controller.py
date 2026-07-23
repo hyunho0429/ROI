@@ -62,17 +62,6 @@ class PurePursuitControllerTest(unittest.TestCase):
         self.assertLess(result.alpha_rad, 0.0)
         self.assertLess(result.steering_rad, 0.0)
 
-    def test_positive_path_lateral_offset_moves_path_left(self):
-        pursuit = controller(
-            [PathPoint(0.0, 0.0), PathPoint(20.0, 0.0)],
-            path_lateral_offset_m=1.0,
-        )
-        result = pursuit.compute(0.0, 0.0, 0.0, 0.0, 0.0)
-
-        self.assertAlmostEqual(pursuit.points[0].y_m, 1.0)
-        self.assertLess(result.cross_track_error_m, 0.0)
-        self.assertGreater(result.steering_rad, 0.0)
-
     def test_speed_increases_lookahead_with_configured_limits(self):
         pursuit = controller(
             [PathPoint(0.0, 0.0), PathPoint(30.0, 0.0)],

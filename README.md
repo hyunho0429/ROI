@@ -26,7 +26,7 @@ Status, CollisionData 및 Ego Ctrl Cmd는 모두 UDP로 통신한다.
 | 목표 속도 | 10 km/h | launch 인자로 변경 가능 |
 | 차량 모델 | 2023 Hyundai IONIQ 5 | 대회 규정집 기준 |
 | wheelbase | 3.0 m | IONIQ 5 축간거리 |
-| 차폭 | 1.892 m | lateral offset 튜닝 기준 |
+| 차폭 | 1.892 m | IONIQ 5 차폭 |
 | 조향각 offset | 3.0° | 조향 방향을 유지하며 크기 보정 |
 | PID Kp | 0.075 | 종방향 비례 이득 |
 | PID Ki | 0.0001 | 종방향 적분 이득 |
@@ -203,16 +203,6 @@ roslaunch path_planning morai_pure_pursuit_udp.launch \
   speed_kd:=0.025
 ```
 
-오른쪽 바퀴가 오른쪽 차선에 붙는 것처럼 차량이 전체적으로 오른쪽에 치우치면
-기준 경로를 진행 방향 기준 왼쪽으로 옮긴다. `path_lateral_offset`의 양수는
-경로 진행 방향의 왼쪽이다. 먼저 `0.8~1.0 m` 범위부터 시험한다.
-
-```bash
-roslaunch path_planning morai_pure_pursuit_udp.launch \
-  control_ip:=192.168.56.1 \
-  path_lateral_offset:=0.8
-```
-
 다른 경로 파일을 사용하는 예:
 
 ```bash
@@ -228,7 +218,7 @@ roslaunch path_planning morai_pure_pursuit_udp.launch \
 ```text
 localization: GPS/IMU/status-aided 15-state error-state EKF INS
 alignment: hold brake for 2.0s (at least 20 IMU samples)
-Pure Pursuit: Ld=clip(3.00+0.50*speed, 3.00, 12.00)m, wheelbase=3.00m, lateral_offset=+0.80m, steering_offset=+3.00deg, fixed speed 10.0 km/h
+Pure Pursuit: Ld=clip(3.00+0.50*speed, 3.00, 12.00)m, wheelbase=3.00m, steering_offset=+3.00deg, fixed speed 10.0 km/h
 requesting AV-ExternalCtrl (ctrl_mode=2) and Drive (gear=4)
 Competition control state: ctrl_mode=2 (AV-ExternalCtrl), gear=4 (D)
 ```

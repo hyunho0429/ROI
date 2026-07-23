@@ -310,7 +310,6 @@ class StanleyControllerTest(unittest.TestCase):
             os.path.basename(arguments.path), "2026_molit_comp_global_path.txt"
         )
         self.assertEqual(arguments.control_point_offset, 0.0)
-        self.assertEqual(arguments.path_lateral_offset, 0.0)
         self.assertEqual(arguments.steering_offset_deg, 3.0)
         self.assertEqual(arguments.wheelbase, 3.0)
         self.assertEqual(arguments.lookahead_distance, 3.0)
