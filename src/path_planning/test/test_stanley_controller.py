@@ -24,7 +24,7 @@ from path_planning.stanley_controller import (
     load_recorded_path_origin,
 )
 from path_planning.pure_pursuit_udp_runtime import (
-    apply_directional_steering_offset,
+    apply_opposing_steering_offset,
     argument_parser,
     main,
 )
@@ -326,25 +326,25 @@ class StanleyControllerTest(unittest.TestCase):
         self.assertFalse(hasattr(arguments, "stanley_gain"))
         self.assertEqual(arguments.target_search_window, 50)
 
-    def test_directional_steering_offset_preserves_sign(self):
+    def test_opposing_steering_offset_reduces_magnitude(self):
         max_abs_rad = math.radians(20.0)
         self.assertAlmostEqual(
-            apply_directional_steering_offset(
+            apply_opposing_steering_offset(
                 math.radians(10.0), 3.0, max_abs_rad
             ),
-            math.radians(13.0),
+            math.radians(7.0),
         )
         self.assertAlmostEqual(
-            apply_directional_steering_offset(
+            apply_opposing_steering_offset(
                 math.radians(-10.0), 3.0, max_abs_rad
             ),
-            math.radians(-13.0),
+            math.radians(-7.0),
         )
         self.assertAlmostEqual(
-            apply_directional_steering_offset(
-                math.radians(19.0), 3.0, max_abs_rad
+            apply_opposing_steering_offset(
+                math.radians(2.0), 3.0, max_abs_rad
             ),
-            max_abs_rad,
+            0.0,
         )
 
     def test_planar_filter_requires_both_gps_and_imu(self):

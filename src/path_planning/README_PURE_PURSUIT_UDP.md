@@ -389,7 +389,7 @@ Cmd Control의 Host IP/Port를 점검한다. feedback에도 accel이 들어오�
 - `--minimum-lookahead`, `--maximum-lookahead`: lookahead 제한
 - `--wheelbase`: 상태 패킷 수신 전 사용할 기본 wheelbase
 - `--control-point-offset`: GPS/INS 위치에서 제어점까지 전방(+)·후방(-) 거리
-- `--steering-offset-deg`: Pure Pursuit 조향 방향을 유지하며 조향각 크기에 더하는 offset
+- `--steering-offset-deg`: Pure Pursuit 조향 방향 반대로 적용해 조향각 크기를 줄이는 offset
 - `--max-steering-deg`: Pure Pursuit이 낼 수 있는 조향각 제한
 - `--vehicle-max-steering-deg`: MORAI normalized steering ±1의 실제 조향각
 - `--alignment-seconds`, `--alignment-min-samples`: 정지 bias 초기화 조건
