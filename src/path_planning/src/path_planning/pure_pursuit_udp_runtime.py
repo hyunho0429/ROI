@@ -170,6 +170,12 @@ def argument_parser(localization_mode):
         help="physical steering angle represented by MORAI command +/-1",
     )
     parser.add_argument(
+        "--steering-offset-deg",
+        type=float,
+        default=3.0,
+        help="constant steering angle bias in degrees; positive steers left",
+    )
+    parser.add_argument(
         "--control-point-offset",
         type=float,
         default=0.0,
@@ -291,6 +297,8 @@ def _validate(arguments):
             raise ValueError("{} must be positive".format(name))
     if not 0.0 <= arguments.steering_filter_alpha <= 1.0:
         raise ValueError("steering-filter-alpha must be between 0 and 1")
+    if not math.isfinite(arguments.steering_offset_deg):
+        raise ValueError("steering-offset-deg must be finite")
     if arguments.waypoint_smoothing_window < 1:
         raise ValueError("waypoint-smoothing-window must be at least 1")
     if arguments.target_search_window < 1:
@@ -496,13 +504,15 @@ def run(localization_mode, arguments):
         print("  localization: GPS/IMU/status-aided dead reckoning")
     print(
         "  Pure Pursuit: Ld=clip({:.2f}+{:.2f}*speed, {:.2f}, {:.2f})m, "
-        "wheelbase={:.2f}m, lateral_offset={:+.2f}m, fixed speed {:.1f} km/h".format(
+        "wheelbase={:.2f}m, lateral_offset={:+.2f}m, "
+        "steering_offset={:+.2f}deg, fixed speed {:.1f} km/h".format(
             arguments.lookahead_distance,
             arguments.lookahead_speed_gain,
             arguments.minimum_lookahead,
             arguments.maximum_lookahead,
             arguments.wheelbase,
             arguments.path_lateral_offset,
+            arguments.steering_offset_deg,
             arguments.target_speed_kmh,
         )
     )
@@ -658,7 +668,14 @@ def run(localization_mode, arguments):
                     raw_steering_rad = filtered_steering_rad = 0.0
                     normalized_steering = 0.0
                 else:
-                    raw_steering_rad = result.steering_rad
+                    steering_offset_rad = math.radians(arguments.steering_offset_deg)
+                    raw_steering_rad = max(
+                        -pure_pursuit.max_steering_rad,
+                        min(
+                            pure_pursuit.max_steering_rad,
+                            result.steering_rad + steering_offset_rad,
+                        ),
+                    )
                     filtered_steering_rad = steering_filter.update(
                         raw_steering_rad, now
                     )

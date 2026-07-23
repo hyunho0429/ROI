@@ -32,6 +32,7 @@
     <arg name="maximum_lookahead" default="12.0"/>
     <arg name="max_steering_deg" default="21.77"/>
     <arg name="vehicle_max_steering_deg" default="36.25"/>
+    <arg name="steering_offset_deg" default="3.0"/>
     <arg name="morai_steer_sign" default="1.0"/>
 
     <arg name="alignment_seconds" default="2.0"/>
@@ -71,6 +72,7 @@
                 --maximum-lookahead $(arg maximum_lookahead)
                 --max-steering-deg $(arg max_steering_deg)
                 --vehicle-max-steering-deg $(arg vehicle_max_steering_deg)
+                --steering-offset-deg $(arg steering_offset_deg)
                 --morai-steer-sign $(arg morai_steer_sign)
                 --alignment-seconds $(arg alignment_seconds)
                 --alignment-min-samples $(arg alignment_min_samples)

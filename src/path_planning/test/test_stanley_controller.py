@@ -307,6 +307,7 @@ class StanleyControllerTest(unittest.TestCase):
         )
         self.assertEqual(arguments.control_point_offset, 0.0)
         self.assertEqual(arguments.path_lateral_offset, 0.0)
+        self.assertEqual(arguments.steering_offset_deg, 3.0)
         self.assertEqual(arguments.wheelbase, 3.0)
         self.assertEqual(arguments.lookahead_distance, 3.0)
         self.assertEqual(arguments.lookahead_speed_gain, 0.5)
