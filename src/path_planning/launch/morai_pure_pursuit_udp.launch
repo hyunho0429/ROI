@@ -45,6 +45,8 @@
     <arg name="startup_lane_bias_deg" default="0.8"/>
     <arg name="startup_lane_bias_distance_m" default="25.0"/>
     <arg name="startup_lane_bias_max_steering_deg" default="3.0"/>
+    <arg name="turn_steering_scale" default="0.85"/>
+    <arg name="turn_steering_scale_min_deg" default="3.0"/>
     <arg name="morai_steer_sign" default="1.0"/>
 
     <arg name="alignment_seconds" default="2.0"/>
@@ -97,6 +99,8 @@
                 --startup-lane-bias-deg $(arg startup_lane_bias_deg)
                 --startup-lane-bias-distance-m $(arg startup_lane_bias_distance_m)
                 --startup-lane-bias-max-steering-deg $(arg startup_lane_bias_max_steering_deg)
+                --turn-steering-scale $(arg turn_steering_scale)
+                --turn-steering-scale-min-deg $(arg turn_steering_scale_min_deg)
                 --morai-steer-sign $(arg morai_steer_sign)
                 --alignment-seconds $(arg alignment_seconds)
                 --alignment-min-samples $(arg alignment_min_samples)

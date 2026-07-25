@@ -112,6 +112,13 @@ def _startup_lane_safety_bias_rad(arguments, route_progress_m, steering_rad):
     return math.radians(arguments.startup_lane_bias_deg) * max(0.0, min(1.0, fade))
 
 
+def _turn_steering_scale(arguments, steering_rad):
+    """Soften large steering commands equally for left and right turns."""
+    if abs(math.degrees(steering_rad)) < arguments.turn_steering_scale_min_deg:
+        return 1.0
+    return arguments.turn_steering_scale
+
+
 def argument_parser(localization_mode):
     parser = argparse.ArgumentParser(
         description=(
@@ -247,6 +254,8 @@ def argument_parser(localization_mode):
     parser.add_argument("--startup-lane-bias-deg", type=float, default=0.8)
     parser.add_argument("--startup-lane-bias-distance-m", type=float, default=25.0)
     parser.add_argument("--startup-lane-bias-max-steering-deg", type=float, default=3.0)
+    parser.add_argument("--turn-steering-scale", type=float, default=0.85)
+    parser.add_argument("--turn-steering-scale-min-deg", type=float, default=3.0)
     parser.add_argument(
         "--morai-steer-sign", type=float, choices=(-1.0, 1.0), default=1.0
     )
@@ -335,6 +344,7 @@ def _validate(arguments):
         "sharp_curve_steering_deg",
         "startup_lane_bias_distance_m",
         "startup_lane_bias_max_steering_deg",
+        "turn_steering_scale_min_deg",
         "goal_tolerance",
     )
     for name in positive_names:
@@ -350,6 +360,8 @@ def _validate(arguments):
         raise ValueError(
             "sharp-curve-steering-deg must be greater than medium-curve-steering-deg"
         )
+    if not 0.0 < arguments.turn_steering_scale <= 1.0:
+        raise ValueError("turn-steering-scale must be in (0, 1]")
     for name in (
         "lookahead_speed_gain",
         "stanley_gain",
@@ -623,6 +635,13 @@ def run(localization_mode, arguments):
         )
     )
     print(
+        "  turn steering limit: scale {:.2f} "
+        "when |raw steer| >= {:.1f} deg".format(
+            arguments.turn_steering_scale,
+            arguments.turn_steering_scale_min_deg,
+        )
+    )
+    print(
         "  longitudinal PID: Kp={:.6f}, Ki={:.6f}, Kd={:.6f} at {:.1f} Hz".format(
             arguments.speed_kp,
             arguments.speed_ki,
@@ -765,6 +784,7 @@ def run(localization_mode, arguments):
                 target_speed_mps = 0.0
                 raw_steering_rad = filtered_steering_rad = 0.0
                 startup_bias_rad = 0.0
+                steering_scale = 1.0
                 normalized_steering = 0.0
                 curve_speed_mode = "stop"
             else:
@@ -786,6 +806,7 @@ def run(localization_mode, arguments):
                     target_speed_mps = 0.0
                     raw_steering_rad = filtered_steering_rad = 0.0
                     startup_bias_rad = 0.0
+                    steering_scale = 1.0
                     normalized_steering = 0.0
                     curve_speed_mode = "goal"
                 else:
@@ -799,8 +820,9 @@ def run(localization_mode, arguments):
                     startup_bias_rad = _startup_lane_safety_bias_rad(
                         arguments, route_progress_m, raw_steering_rad
                     )
+                    steering_scale = _turn_steering_scale(arguments, raw_steering_rad)
                     filtered_steering_rad = steering_filter.update(
-                        raw_steering_rad + startup_bias_rad, now
+                        raw_steering_rad * steering_scale + startup_bias_rad, now
                     )
                     normalized_steering = arguments.morai_steer_sign * (
                         filtered_steering_rad
@@ -864,7 +886,7 @@ def run(localization_mode, arguments):
                         "vel_x={:+.2f}km/h "
                         "front={:.2f}m preview={:.1f}m "
                         "yaw/path={:+.1f}/{:+.1f}deg herr={:+.1f}deg "
-                        "cte={:+.2f}m steer(raw/bias/filt)={:+.2f}/{:+.2f}/{:+.2f}deg "
+                        "cte={:+.2f}m steer(raw/scale/bias/filt)={:+.2f}/{:.2f}/{:+.2f}/{:+.2f}deg "
                         "cmd=({:.2f},{:+.2f},{:.2f}) "
                         "feedback=({:.2f},{:+.2f}deg,{:.2f}) "
                         "remain={:.1f}m{}".format(
@@ -883,6 +905,7 @@ def run(localization_mode, arguments):
                             math.degrees(result.heading_error_rad),
                             result.cross_track_error_m,
                             math.degrees(raw_steering_rad),
+                            steering_scale,
                             math.degrees(startup_bias_rad),
                             math.degrees(filtered_steering_rad),
                             command.accel,
