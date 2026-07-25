@@ -319,7 +319,7 @@ cd ~/catkin_ws
 python3 -m pip install -r src/path_planning/requirements.txt
 catkin_make
 source devel/setup.bash
-roslaunch path_planning morai_pure_pursuit_udp.launch
+roslaunch path_planning morai_stanley_udp.launch
 ```
 
 기본 종방향 PID는 `main` 브랜치와 같은 30 Hz, `Kp=0.075`, `Ki=0.0001`,
@@ -328,7 +328,7 @@ steering과 함께 `longCmdType=1` 패킷으로 전송된다. launch 인자는 �
 덮어쓸 수 있다.
 
 ```bash
-roslaunch path_planning morai_pure_pursuit_udp.launch \
+roslaunch path_planning morai_stanley_udp.launch \
   target_speed_kmh:=30.0 \
   speed_kp:=0.075 speed_ki:=0.0001 speed_kd:=0.025
 ```

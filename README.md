@@ -176,14 +176,14 @@ cd ~/ROI
 source devel/setup.bash
 export MORAI_PC_IP=192.168.56.1
 
-roslaunch path_planning morai_pure_pursuit_udp.launch \
+roslaunch path_planning morai_stanley_udp.launch \
   control_ip:="$MORAI_PC_IP"
 ```
 
 MORAI와 알고리즘을 같은 PC에서 실행하는 경우:
 
 ```bash
-roslaunch path_planning morai_pure_pursuit_udp.launch \
+roslaunch path_planning morai_stanley_udp.launch \
   control_ip:=127.0.0.1
 ```
 
@@ -194,7 +194,7 @@ roslaunch path_planning morai_pure_pursuit_udp.launch \
 목표 속도와 PID 이득을 변경하는 예:
 
 ```bash
-roslaunch path_planning morai_pure_pursuit_udp.launch \
+roslaunch path_planning morai_stanley_udp.launch \
   control_ip:=192.168.56.1 \
   target_speed_kmh:=8.0 \
   speed_kp:=0.075 \
@@ -205,7 +205,7 @@ roslaunch path_planning morai_pure_pursuit_udp.launch \
 다른 경로 파일을 사용하는 예:
 
 ```bash
-roslaunch path_planning morai_pure_pursuit_udp.launch \
+roslaunch path_planning morai_stanley_udp.launch \
   control_ip:=192.168.56.1 \
   path:=/home/ubuntu/path/reference_path.csv
 ```
@@ -271,7 +271,7 @@ CSV에는 원본 위도, 경도, 고도와 변환된 map-local ENU, CRS 및 고�
 cd ~/ROI
 python3 -m pip install -r src/path_planning/requirements.txt
 
-python3 src/path_planning/src/morai_pure_pursuit_ins_udp.py \
+python3 src/path_planning/src/morai_stanley_ins_udp.py \
   --path src/path_planning/data/2026_molit_comp_global_path.txt \
   --control-ip 192.168.56.1
 ```
@@ -279,7 +279,7 @@ python3 src/path_planning/src/morai_pure_pursuit_ins_udp.py \
 Competition 속도 보조 추측 항법 실행기는 다음과 같다.
 
 ```bash
-python3 src/path_planning/src/morai_pure_pursuit_dead_reckoning_udp.py \
+python3 src/path_planning/src/morai_stanley_dead_reckoning_udp.py \
   --path src/path_planning/data/2026_molit_comp_global_path.txt \
   --control-ip 192.168.56.1
 ```
