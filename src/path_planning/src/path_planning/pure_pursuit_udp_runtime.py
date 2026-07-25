@@ -44,6 +44,7 @@ from path_planning.morai_udp_ctrl_cmd import (
 from path_planning.morai_udp_gps import GpsPacketError, parse_nmea_datagram
 from path_planning.morai_udp_imu import ImuPacketError, parse_imu_packet
 from path_planning.stanley_controller import (
+    PathPoint,
     StanleyController,
     SteeringCommandFilter,
     load_gps_path_projection,
@@ -100,6 +101,39 @@ def _curve_limited_target_speed_mps(arguments, base_target_speed_mps, steering_r
     return base_target_speed_mps, "straight"
 
 
+def _offset_path_points_laterally(points, offset_m):
+    """Shift path points by a signed left-normal offset in the path frame."""
+    offset = float(offset_m)
+    if abs(offset) < 1e-6:
+        return points
+    shifted = []
+    last_index = len(points) - 1
+    for index, point in enumerate(points):
+        if index == 0:
+            before, after = points[index], points[index + 1]
+        elif index == last_index:
+            before, after = points[index - 1], points[index]
+        else:
+            before, after = points[index - 1], points[index + 1]
+        dx = after.x_m - before.x_m
+        dy = after.y_m - before.y_m
+        norm = math.hypot(dx, dy)
+        if norm < 1e-9:
+            shifted.append(point)
+            continue
+        left_x = -dy / norm
+        left_y = dx / norm
+        shifted.append(
+            PathPoint(
+                point.x_m + offset * left_x,
+                point.y_m + offset * left_y,
+                point.z_m,
+                point.target_speed_mps,
+            )
+        )
+    return shifted
+
+
 def _startup_lane_safety_bias_rad(arguments, route_progress_m, steering_rad):
     """Nudge left only in the initial near-straight segment."""
     if route_progress_m is None:
@@ -113,14 +147,14 @@ def _startup_lane_safety_bias_rad(arguments, route_progress_m, steering_rad):
 
 
 def _startup_straight_steering_guard_rad(arguments, route_progress_m, steering_rad):
-    """Suppress small initial steering drift before the first real turn."""
+    """Suppress only small initial right steering drift before the first real turn."""
     if route_progress_m is None:
         return steering_rad
     if route_progress_m >= arguments.startup_steering_guard_distance_m:
         return steering_rad
     if abs(math.degrees(steering_rad)) > arguments.startup_steering_guard_deg:
         return steering_rad
-    return 0.0
+    return max(0.0, steering_rad)
 
 
 def _turn_steering_scale(arguments, steering_rad):
@@ -212,6 +246,7 @@ def argument_parser(localization_mode):
     parser.add_argument("--stanley-gain", type=float, default=0.35)
     parser.add_argument("--softening-speed", type=float, default=2.2)
     parser.add_argument("--stanley-control-speed-floor-kmh", type=float, default=35.0)
+    parser.add_argument("--path-lateral-offset-m", type=float, default=0.45)
     parser.add_argument("--heading-error-gain", type=float, default=0.74)
     parser.add_argument("--cross-track-error-gain", type=float, default=0.58)
     parser.add_argument("--cross-track-deadband", type=float, default=0.02)
@@ -237,7 +272,7 @@ def argument_parser(localization_mode):
     parser.add_argument(
         "--heading-preview-distance",
         type=float,
-        default=5.0,
+        default=4.0,
         help="distance ahead of the nearest segment used for Stanley heading error",
     )
     parser.add_argument(
@@ -406,6 +441,8 @@ def _validate(arguments):
         raise ValueError("maximum-lookahead must be >= minimum-lookahead")
     if not math.isfinite(arguments.control_point_offset):
         raise ValueError("control-point-offset must be finite")
+    if not math.isfinite(arguments.path_lateral_offset_m):
+        raise ValueError("path-lateral-offset-m must be finite")
     if hasattr(arguments, "alignment_seconds"):
         if arguments.alignment_seconds < 0.0:
             raise ValueError("alignment-seconds cannot be negative")
@@ -449,6 +486,7 @@ def run(localization_mode, arguments):
     active_projection = csv_projection or projection
     recorded_origin = load_recorded_path_origin(arguments.path)
     points = load_path_csv(arguments.path, gps_projection=active_projection)
+    points = _offset_path_points_laterally(points, arguments.path_lateral_offset_m)
     stanley = StanleyController(
         points,
         gain=arguments.stanley_gain,
@@ -551,10 +589,11 @@ def run(localization_mode, arguments):
         )
     )
     print(
-        "  path: {} ({} -> {} points after spacing/smoothing)".format(
+        "  path: {} ({} -> {} points after spacing/smoothing, lateral offset {:+.2f} m)".format(
             os.path.abspath(arguments.path),
             stanley.original_point_count,
             len(stanley.points),
+            arguments.path_lateral_offset_m,
         )
     )
     if recorded_origin is not None:
@@ -650,7 +689,7 @@ def run(localization_mode, arguments):
         )
     )
     print(
-        "  startup steering guard: zero |raw steer| <= {:.1f} deg over {:.1f} m".format(
+        "  startup steering guard: zero small right raw steer up to {:.1f} deg over {:.1f} m".format(
             arguments.startup_steering_guard_deg,
             arguments.startup_steering_guard_distance_m,
         )
