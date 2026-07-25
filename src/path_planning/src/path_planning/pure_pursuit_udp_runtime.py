@@ -161,10 +161,10 @@ def argument_parser(localization_mode):
     parser.add_argument("--lookahead-speed-gain", type=float, default=0.15)
     parser.add_argument("--minimum-lookahead", type=float, default=2.0)
     parser.add_argument("--maximum-lookahead", type=float, default=4.0)
-    parser.add_argument("--stanley-gain", type=float, default=0.22)
-    parser.add_argument("--softening-speed", type=float, default=3.0)
+    parser.add_argument("--stanley-gain", type=float, default=0.35)
+    parser.add_argument("--softening-speed", type=float, default=2.0)
     parser.add_argument("--heading-error-gain", type=float, default=1.0)
-    parser.add_argument("--cross-track-error-gain", type=float, default=0.55)
+    parser.add_argument("--cross-track-error-gain", type=float, default=0.65)
     parser.add_argument("--cross-track-deadband", type=float, default=0.05)
     parser.add_argument("--goal-tolerance", type=float, default=2.0)
     parser.add_argument(
@@ -182,7 +182,7 @@ def argument_parser(localization_mode):
     parser.add_argument(
         "--control-point-offset",
         type=float,
-        default=VEHICLE_WHEELBASE_M,
+        default=2.0,
         help="front axle/control point offset from localization point",
     )
     parser.add_argument("--minimum-waypoint-spacing", type=float, default=0.5)
@@ -420,6 +420,9 @@ def run(localization_mode, arguments):
     status_speed_mps = 0.0
     status_vel_x_kmh = 0.0
     status_wheelbase_m = arguments.wheelbase
+    use_status_wheelbase_for_control_point = abs(
+        arguments.control_point_offset - VEHICLE_WHEELBASE_M
+    ) < 1e-6
     status_ctrl_mode = status_gear = None
     status_accel_pedal = status_brake_pedal = status_front_steer_deg = 0.0
     last_drive_state = None
@@ -594,11 +597,13 @@ def run(localization_mode, arguments):
                         status_front_steer_deg = status.front_steer_deg
                         if status.wheelbase_m > 0.5:
                             status_wheelbase_m = status.wheelbase_m
-                            # Stanley should use the front axle as the control
-                            # point.  Competition status provides wheelbase, so
-                            # if the localization point is the rear axle, this
-                            # keeps the projected control point on the front axle.
-                            stanley.control_point_offset_m = status_wheelbase_m
+                            if use_status_wheelbase_for_control_point:
+                                # Stanley should use the front axle as the
+                                # control point.  When the user keeps the
+                                # wheelbase default, follow the live status
+                                # wheelbase.  If an explicit offset is supplied
+                                # for earlier turn-in, preserve that tuning.
+                                stanley.control_point_offset_m = status_wheelbase_m
                         latest_status_time = received
                         drive_state = (status_ctrl_mode, status_gear)
                         if drive_state != last_drive_state:
