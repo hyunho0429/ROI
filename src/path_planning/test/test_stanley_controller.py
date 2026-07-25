@@ -316,6 +316,8 @@ class StanleyControllerTest(unittest.TestCase):
         self.assertEqual(arguments.lookahead_speed_gain, 0.5)
         self.assertEqual(arguments.minimum_lookahead, 2.0)
         self.assertEqual(arguments.maximum_lookahead, 12.0)
+        self.assertEqual(arguments.steering_filter_alpha, 0.15)
+        self.assertEqual(arguments.max_steering_rate_radps, 0.25)
         self.assertEqual(arguments.alignment_seconds, 2.0)
         self.assertEqual(arguments.alignment_min_samples, 20)
         self.assertEqual(arguments.morai_steer_sign, 1.0)

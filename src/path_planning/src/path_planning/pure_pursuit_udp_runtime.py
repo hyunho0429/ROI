@@ -189,8 +189,8 @@ def argument_parser(localization_mode):
         action="store_true",
         help="allow the nearest segment search to move up to five segments backward",
     )
-    parser.add_argument("--steering-filter-alpha", type=float, default=0.25)
-    parser.add_argument("--max-steering-rate-radps", type=float, default=0.4)
+    parser.add_argument("--steering-filter-alpha", type=float, default=0.15)
+    parser.add_argument("--max-steering-rate-radps", type=float, default=0.25)
     parser.add_argument(
         "--morai-steer-sign", type=float, choices=(-1.0, 1.0), default=1.0
     )
@@ -517,6 +517,12 @@ def run(localization_mode, arguments):
             arguments.wheelbase,
             arguments.steering_offset_deg,
             arguments.target_speed_kmh,
+        )
+    )
+    print(
+        "  steering smoothing: alpha={:.2f}, max_rate={:.2f} rad/s".format(
+            arguments.steering_filter_alpha,
+            arguments.max_steering_rate_radps,
         )
     )
     print(

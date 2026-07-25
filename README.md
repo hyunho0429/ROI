@@ -219,6 +219,7 @@ roslaunch path_planning morai_pure_pursuit_udp.launch \
 localization: GPS/IMU/status-aided 15-state error-state EKF INS
 alignment: hold brake for 2.0s (at least 20 IMU samples)
 Pure Pursuit: Ld=clip(2.00+0.50*speed, 2.00, 12.00)m, wheelbase=3.00m, steering_offset=+3.00deg, fixed speed 45.0 km/h
+steering smoothing: alpha=0.15, max_rate=0.25 rad/s
 requesting AV-ExternalCtrl (ctrl_mode=2) and Drive (gear=4)
 Competition control state: ctrl_mode=2 (AV-ExternalCtrl), gear=4 (D)
 ```
