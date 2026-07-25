@@ -54,7 +54,7 @@
     <arg name="startup_lane_bias_max_steering_deg" default="3.0"/>
     <arg name="startup_steering_guard_distance_m" default="15.0"/>
     <arg name="startup_steering_guard_deg" default="3.0"/>
-    <arg name="turn_steering_scale" default="0.92"/>
+    <arg name="turn_steering_scale" default="0.94"/>
     <arg name="turn_steering_scale_min_deg" default="3.0"/>
     <arg name="morai_steer_sign" default="1.0"/>
 
