@@ -622,7 +622,9 @@ def run(localization_mode, arguments):
     if arguments.lane_center_shift_m is not None:
         print(
             "  lane recentering: global path shifted by {:+.2f} m "
-            "along the path left normal".format(effective_lateral_offset_m)
+            "along the path left normal (+left, -right)".format(
+                effective_lateral_offset_m
+            )
         )
     if recorded_origin is not None:
         print(
