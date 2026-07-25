@@ -1,6 +1,7 @@
 """Shared standalone UDP runtime for MORAI Stanley localization variants."""
 
 import argparse
+import bisect
 import math
 import os
 import selectors
@@ -140,11 +141,72 @@ def _curve_limited_target_speed_mps(
     return base_target_speed_mps, "straight"
 
 
-def _offset_path_points_laterally(points, offset_m):
-    """Shift path points by a signed left-normal offset in the path frame."""
+def _offset_path_points_laterally(
+    points,
+    offset_m,
+    straight_heading_deg=None,
+    turn_heading_deg=None,
+    heading_window_m=16.0,
+):
+    """Shift path points by a signed left-normal offset in the path frame.
+
+    When heading thresholds are provided, the full offset is applied on
+    near-straight sections and smoothly faded out on turns.  This keeps the
+    vehicle centered on straights without distorting left/right turn geometry.
+    """
     offset = float(offset_m)
     if abs(offset) < 1e-6:
         return points
+    straight_threshold = (
+        None if straight_heading_deg is None else math.radians(straight_heading_deg)
+    )
+    turn_threshold = None if turn_heading_deg is None else math.radians(turn_heading_deg)
+    cumulative = [0.0]
+    for first, second in zip(points, points[1:]):
+        cumulative.append(
+            cumulative[-1] + math.hypot(second.x_m - first.x_m, second.y_m - first.y_m)
+        )
+
+    def offset_weight(index, tangent_heading):
+        if (
+            straight_threshold is None
+            or turn_threshold is None
+            or turn_threshold <= straight_threshold
+        ):
+            return 1.0
+        half_window = max(0.5, float(heading_window_m)) * 0.5
+        center_distance = cumulative[index]
+        before_index = max(
+            0, bisect.bisect_left(cumulative, center_distance - half_window)
+        )
+        after_index = min(
+            len(points) - 1,
+            max(index + 1, bisect.bisect_right(cumulative, center_distance + half_window) - 1),
+        )
+        before = points[before_index]
+        center = points[index]
+        after = points[after_index]
+        before_heading = tangent_heading
+        after_heading = tangent_heading
+        before_dx = center.x_m - before.x_m
+        before_dy = center.y_m - before.y_m
+        after_dx = after.x_m - center.x_m
+        after_dy = after.y_m - center.y_m
+        if math.hypot(before_dx, before_dy) > 1e-6:
+            before_heading = math.atan2(before_dy, before_dx)
+        if math.hypot(after_dx, after_dy) > 1e-6:
+            after_heading = math.atan2(after_dy, after_dx)
+        heading_change = abs(wrap_angle(after_heading - before_heading))
+        if heading_change <= straight_threshold:
+            return 1.0
+        if heading_change >= turn_threshold:
+            return 0.0
+        blend = (heading_change - straight_threshold) / (
+            turn_threshold - straight_threshold
+        )
+        smooth = blend * blend * (3.0 - 2.0 * blend)
+        return 1.0 - smooth
+
     shifted = []
     last_index = len(points) - 1
     for index, point in enumerate(points):
@@ -162,10 +224,12 @@ def _offset_path_points_laterally(points, offset_m):
             continue
         left_x = -dy / norm
         left_y = dx / norm
+        tangent_heading = math.atan2(dy, dx)
+        effective_offset = offset * offset_weight(index, tangent_heading)
         shifted.append(
             PathPoint(
-                point.x_m + offset * left_x,
-                point.y_m + offset * left_y,
+                point.x_m + effective_offset * left_x,
+                point.y_m + effective_offset * left_y,
                 point.z_m,
                 point.target_speed_mps,
             )
@@ -304,6 +368,9 @@ def argument_parser(localization_mode):
         default=0.45,
         help="legacy signed left-normal path shift used when lane-center-shift-m is unset",
     )
+    parser.add_argument("--lane-center-heading-window-m", type=float, default=16.0)
+    parser.add_argument("--lane-center-straight-heading-deg", type=float, default=3.0)
+    parser.add_argument("--lane-center-turn-heading-deg", type=float, default=10.0)
     parser.add_argument("--heading-error-gain", type=float, default=0.74)
     parser.add_argument("--cross-track-error-gain", type=float, default=0.72)
     parser.add_argument("--cross-track-deadband", type=float, default=0.02)
@@ -451,6 +518,9 @@ def _validate(arguments):
         "curve_preview_step_m",
         "medium_curve_heading_deg",
         "sharp_curve_heading_deg",
+        "lane_center_heading_window_m",
+        "lane_center_straight_heading_deg",
+        "lane_center_turn_heading_deg",
         "startup_lane_bias_distance_m",
         "startup_lane_bias_max_steering_deg",
         "startup_steering_guard_distance_m",
@@ -474,6 +544,11 @@ def _validate(arguments):
     if arguments.sharp_curve_heading_deg <= arguments.medium_curve_heading_deg:
         raise ValueError(
             "sharp-curve-heading-deg must be greater than medium-curve-heading-deg"
+        )
+    if arguments.lane_center_turn_heading_deg <= arguments.lane_center_straight_heading_deg:
+        raise ValueError(
+            "lane-center-turn-heading-deg must be greater than "
+            "lane-center-straight-heading-deg"
         )
     if not 0.0 < arguments.turn_steering_scale <= 1.0:
         raise ValueError("turn-steering-scale must be in (0, 1]")
@@ -560,7 +635,13 @@ def run(localization_mode, arguments):
         if arguments.lane_center_shift_m is None
         else arguments.lane_center_shift_m
     )
-    points = _offset_path_points_laterally(points, effective_lateral_offset_m)
+    points = _offset_path_points_laterally(
+        points,
+        effective_lateral_offset_m,
+        arguments.lane_center_straight_heading_deg,
+        arguments.lane_center_turn_heading_deg,
+        arguments.lane_center_heading_window_m,
+    )
     stanley = StanleyController(
         points,
         gain=arguments.stanley_gain,
@@ -663,7 +744,7 @@ def run(localization_mode, arguments):
         )
     )
     print(
-        "  path: {} ({} -> {} points after spacing/smoothing, lane-center shift {:+.2f} m)".format(
+        "  path: {} ({} -> {} points after spacing/smoothing, max lane-center shift {:+.2f} m)".format(
             os.path.abspath(arguments.path),
             stanley.original_point_count,
             len(stanley.points),
@@ -672,9 +753,13 @@ def run(localization_mode, arguments):
     )
     if arguments.lane_center_shift_m is not None:
         print(
-            "  lane recentering: global path shifted by {:+.2f} m "
-            "along the path left normal (+left, -right)".format(
-                effective_lateral_offset_m
+            "  lane recentering: straight sections shifted by up to {:+.2f} m "
+            "along the path left normal (+left, -right); fades from {:.1f} to {:.1f} deg "
+            "heading change over {:.1f} m".format(
+                effective_lateral_offset_m,
+                arguments.lane_center_straight_heading_deg,
+                arguments.lane_center_turn_heading_deg,
+                arguments.lane_center_heading_window_m,
             )
         )
     if recorded_origin is not None:

@@ -35,8 +35,11 @@
     <arg name="stanley_gain" default="0.35"/>
     <arg name="softening_speed" default="2.2"/>
     <arg name="stanley_control_speed_floor_kmh" default="35.0"/>
-    <arg name="lane_center_shift_m" default="0.80"/>
+    <arg name="lane_center_shift_m" default="1.10"/>
     <arg name="path_lateral_offset_m" default="0.0"/>
+    <arg name="lane_center_heading_window_m" default="16.0"/>
+    <arg name="lane_center_straight_heading_deg" default="3.0"/>
+    <arg name="lane_center_turn_heading_deg" default="10.0"/>
     <arg name="control_point_offset" default="1.5"/>
     <arg name="heading_preview_distance" default="4.0"/>
     <arg name="heading_preview_start_distance" default="20.0"/>
@@ -99,6 +102,9 @@
                 --stanley-control-speed-floor-kmh $(arg stanley_control_speed_floor_kmh)
                 --lane-center-shift-m $(arg lane_center_shift_m)
                 --path-lateral-offset-m $(arg path_lateral_offset_m)
+                --lane-center-heading-window-m $(arg lane_center_heading_window_m)
+                --lane-center-straight-heading-deg $(arg lane_center_straight_heading_deg)
+                --lane-center-turn-heading-deg $(arg lane_center_turn_heading_deg)
                 --control-point-offset $(arg control_point_offset)
                 --heading-preview-distance $(arg heading_preview_distance)
                 --heading-preview-start-distance $(arg heading_preview_start_distance)
