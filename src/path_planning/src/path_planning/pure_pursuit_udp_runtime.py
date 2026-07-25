@@ -112,6 +112,17 @@ def _startup_lane_safety_bias_rad(arguments, route_progress_m, steering_rad):
     return math.radians(arguments.startup_lane_bias_deg) * max(0.0, min(1.0, fade))
 
 
+def _startup_straight_steering_guard_rad(arguments, route_progress_m, steering_rad):
+    """Suppress small initial steering drift before the first real turn."""
+    if route_progress_m is None:
+        return steering_rad
+    if route_progress_m >= arguments.startup_steering_guard_distance_m:
+        return steering_rad
+    if abs(math.degrees(steering_rad)) > arguments.startup_steering_guard_deg:
+        return steering_rad
+    return 0.0
+
+
 def _turn_steering_scale(arguments, steering_rad):
     """Soften large steering commands equally for left and right turns."""
     if abs(math.degrees(steering_rad)) < arguments.turn_steering_scale_min_deg:
@@ -226,7 +237,7 @@ def argument_parser(localization_mode):
     parser.add_argument(
         "--heading-preview-distance",
         type=float,
-        default=6.0,
+        default=5.0,
         help="distance ahead of the nearest segment used for Stanley heading error",
     )
     parser.add_argument(
@@ -254,6 +265,8 @@ def argument_parser(localization_mode):
     parser.add_argument("--startup-lane-bias-deg", type=float, default=0.0)
     parser.add_argument("--startup-lane-bias-distance-m", type=float, default=25.0)
     parser.add_argument("--startup-lane-bias-max-steering-deg", type=float, default=3.0)
+    parser.add_argument("--startup-steering-guard-distance-m", type=float, default=15.0)
+    parser.add_argument("--startup-steering-guard-deg", type=float, default=3.0)
     parser.add_argument("--turn-steering-scale", type=float, default=1.0)
     parser.add_argument("--turn-steering-scale-min-deg", type=float, default=3.0)
     parser.add_argument(
@@ -344,6 +357,8 @@ def _validate(arguments):
         "sharp_curve_steering_deg",
         "startup_lane_bias_distance_m",
         "startup_lane_bias_max_steering_deg",
+        "startup_steering_guard_distance_m",
+        "startup_steering_guard_deg",
         "turn_steering_scale_min_deg",
         "goal_tolerance",
     )
@@ -635,6 +650,12 @@ def run(localization_mode, arguments):
         )
     )
     print(
+        "  startup steering guard: zero |raw steer| <= {:.1f} deg over {:.1f} m".format(
+            arguments.startup_steering_guard_deg,
+            arguments.startup_steering_guard_distance_m,
+        )
+    )
+    print(
         "  turn steering limit: scale {:.2f} "
         "when |raw steer| >= {:.1f} deg".format(
             arguments.turn_steering_scale,
@@ -782,7 +803,7 @@ def run(localization_mode, arguments):
                 command = brake_command()
                 result = None
                 target_speed_mps = 0.0
-                raw_steering_rad = filtered_steering_rad = 0.0
+                raw_steering_rad = guarded_steering_rad = filtered_steering_rad = 0.0
                 startup_bias_rad = 0.0
                 steering_scale = 1.0
                 normalized_steering = 0.0
@@ -804,7 +825,7 @@ def run(localization_mode, arguments):
                     steering_filter.reset()
                     command = brake_command()
                     target_speed_mps = 0.0
-                    raw_steering_rad = filtered_steering_rad = 0.0
+                    raw_steering_rad = guarded_steering_rad = filtered_steering_rad = 0.0
                     startup_bias_rad = 0.0
                     steering_scale = 1.0
                     normalized_steering = 0.0
@@ -817,12 +838,15 @@ def run(localization_mode, arguments):
                         0.0,
                         route_initial_remaining_m - result.remaining_distance_m,
                     )
-                    startup_bias_rad = _startup_lane_safety_bias_rad(
+                    guarded_steering_rad = _startup_straight_steering_guard_rad(
                         arguments, route_progress_m, raw_steering_rad
                     )
-                    steering_scale = _turn_steering_scale(arguments, raw_steering_rad)
+                    startup_bias_rad = _startup_lane_safety_bias_rad(
+                        arguments, route_progress_m, guarded_steering_rad
+                    )
+                    steering_scale = _turn_steering_scale(arguments, guarded_steering_rad)
                     filtered_steering_rad = steering_filter.update(
-                        raw_steering_rad * steering_scale + startup_bias_rad, now
+                        guarded_steering_rad * steering_scale + startup_bias_rad, now
                     )
                     normalized_steering = arguments.morai_steer_sign * (
                         filtered_steering_rad
@@ -886,7 +910,7 @@ def run(localization_mode, arguments):
                         "vel_x={:+.2f}km/h "
                         "front={:.2f}m preview={:.1f}m "
                         "yaw/path={:+.1f}/{:+.1f}deg herr={:+.1f}deg "
-                        "cte={:+.2f}m steer(raw/scale/bias/filt)={:+.2f}/{:.2f}/{:+.2f}/{:+.2f}deg "
+                        "cte={:+.2f}m steer(raw/guard/scale/bias/filt)={:+.2f}/{:+.2f}/{:.2f}/{:+.2f}/{:+.2f}deg "
                         "cmd=({:.2f},{:+.2f},{:.2f}) "
                         "feedback=({:.2f},{:+.2f}deg,{:.2f}) "
                         "remain={:.1f}m{}".format(
@@ -905,6 +929,7 @@ def run(localization_mode, arguments):
                             math.degrees(result.heading_error_rad),
                             result.cross_track_error_m,
                             math.degrees(raw_steering_rad),
+                            math.degrees(guarded_steering_rad),
                             steering_scale,
                             math.degrees(startup_bias_rad),
                             math.degrees(filtered_steering_rad),

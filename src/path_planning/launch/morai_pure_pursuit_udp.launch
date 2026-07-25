@@ -32,7 +32,7 @@
     <arg name="softening_speed" default="2.2"/>
     <arg name="stanley_control_speed_floor_kmh" default="35.0"/>
     <arg name="control_point_offset" default="1.5"/>
-    <arg name="heading_preview_distance" default="6.0"/>
+    <arg name="heading_preview_distance" default="5.0"/>
     <arg name="heading_preview_start_distance" default="20.0"/>
     <arg name="heading_preview_deadband_deg" default="2.0"/>
     <arg name="heading_error_gain" default="0.74"/>
@@ -45,6 +45,8 @@
     <arg name="startup_lane_bias_deg" default="0.0"/>
     <arg name="startup_lane_bias_distance_m" default="25.0"/>
     <arg name="startup_lane_bias_max_steering_deg" default="3.0"/>
+    <arg name="startup_steering_guard_distance_m" default="15.0"/>
+    <arg name="startup_steering_guard_deg" default="3.0"/>
     <arg name="turn_steering_scale" default="1.0"/>
     <arg name="turn_steering_scale_min_deg" default="3.0"/>
     <arg name="morai_steer_sign" default="1.0"/>
@@ -99,6 +101,8 @@
                 --startup-lane-bias-deg $(arg startup_lane_bias_deg)
                 --startup-lane-bias-distance-m $(arg startup_lane_bias_distance_m)
                 --startup-lane-bias-max-steering-deg $(arg startup_lane_bias_max_steering_deg)
+                --startup-steering-guard-distance-m $(arg startup_steering_guard_distance_m)
+                --startup-steering-guard-deg $(arg startup_steering_guard_deg)
                 --turn-steering-scale $(arg turn_steering_scale)
                 --turn-steering-scale-min-deg $(arg turn_steering_scale_min_deg)
                 --morai-steer-sign $(arg morai_steer_sign)
