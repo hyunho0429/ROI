@@ -152,9 +152,9 @@ def argument_parser(localization_mode):
     )
     parser.add_argument("--target-speed-kmh", type=float, default=TARGET_SPEED_KMH)
     parser.add_argument("--wheelbase", type=float, default=VEHICLE_WHEELBASE_M)
-    parser.add_argument("--lookahead-distance", type=float, default=3.0)
+    parser.add_argument("--lookahead-distance", type=float, default=2.5)
     parser.add_argument("--lookahead-speed-gain", type=float, default=0.5)
-    parser.add_argument("--minimum-lookahead", type=float, default=3.0)
+    parser.add_argument("--minimum-lookahead", type=float, default=2.5)
     parser.add_argument("--maximum-lookahead", type=float, default=12.0)
     parser.add_argument("--goal-tolerance", type=float, default=2.0)
     parser.add_argument(

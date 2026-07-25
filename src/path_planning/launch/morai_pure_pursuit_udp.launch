@@ -25,9 +25,9 @@
     <arg name="max_brake_pedal" default="1.0"/>
 
     <arg name="wheelbase" default="3.0"/>
-    <arg name="lookahead_distance" default="3.0"/>
+    <arg name="lookahead_distance" default="2.5"/>
     <arg name="lookahead_speed_gain" default="0.5"/>
-    <arg name="minimum_lookahead" default="3.0"/>
+    <arg name="minimum_lookahead" default="2.5"/>
     <arg name="maximum_lookahead" default="12.0"/>
     <arg name="max_steering_deg" default="21.77"/>
     <arg name="vehicle_max_steering_deg" default="36.25"/>

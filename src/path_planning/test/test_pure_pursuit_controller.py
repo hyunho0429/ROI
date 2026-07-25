@@ -104,7 +104,8 @@ class PurePursuitControllerTest(unittest.TestCase):
 
         self.assertFalse(result.goal_reached)
         self.assertGreater(result.target_index, result.segment_index)
-        self.assertGreater(result.lookahead_distance_m, 4.0)
+        self.assertGreater(result.lookahead_distance_m, 3.0)
+        self.assertLess(result.lookahead_distance_m, 5.0)
         self.assertTrue(math.isfinite(result.steering_rad))
 
     def test_competition_route_completes_bicycle_model_lap(self):
