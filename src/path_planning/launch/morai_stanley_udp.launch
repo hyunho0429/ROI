@@ -19,10 +19,10 @@
     <arg name="control_rate_hz" default="30.0"/>
     <arg name="target_speed_kmh" default="40.0"/>
     <arg name="medium_curve_speed_kmh" default="25.0"/>
-    <arg name="sharp_curve_speed_kmh" default="16.0"/>
+    <arg name="sharp_curve_speed_kmh" default="18.0"/>
     <arg name="medium_curve_steering_deg" default="5.0"/>
     <arg name="sharp_curve_steering_deg" default="9.0"/>
-    <arg name="curve_preview_distance_m" default="26.0"/>
+    <arg name="curve_preview_distance_m" default="22.0"/>
     <arg name="curve_preview_step_m" default="4.0"/>
     <arg name="medium_curve_heading_deg" default="8.0"/>
     <arg name="sharp_curve_heading_deg" default="16.0"/>
