@@ -1,7 +1,8 @@
-"""Compatibility import for the Pure Pursuit UDP runtime.
+"""Compatibility import for the Stanley UDP runtime.
 
-The competition controller was changed from Stanley to Pure Pursuit.  This
-module remains so older launch commands and imports do not fail.
+The latest UDP runner implementation lives in ``pure_pursuit_udp_runtime`` for
+backward-compatible file names, but the controller used on this branch is
+Stanley.
 """
 
 from path_planning.pure_pursuit_udp_runtime import (  # noqa: F401

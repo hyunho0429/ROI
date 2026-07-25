@@ -1,4 +1,4 @@
-"""Shared standalone UDP runtime for MORAI Pure Pursuit localization variants."""
+"""Shared standalone UDP runtime for MORAI Stanley localization variants."""
 
 import argparse
 import math
@@ -43,8 +43,8 @@ from path_planning.morai_udp_ctrl_cmd import (
 )
 from path_planning.morai_udp_gps import GpsPacketError, parse_nmea_datagram
 from path_planning.morai_udp_imu import ImuPacketError, parse_imu_packet
-from path_planning.pure_pursuit_controller import PurePursuitController
 from path_planning.stanley_controller import (
+    StanleyController,
     SteeringCommandFilter,
     load_gps_path_projection,
     load_path_csv,
@@ -89,7 +89,7 @@ def _projection(arguments):
 def argument_parser(localization_mode):
     parser = argparse.ArgumentParser(
         description=(
-            "MORAI UDP Pure Pursuit controller using {} localization".format(
+            "MORAI UDP Stanley controller using {} localization".format(
                 "15-state INS ESKF"
                 if localization_mode == "ins"
                 else "vehicle-speed dead reckoning"
@@ -151,17 +151,27 @@ def argument_parser(localization_mode):
         help="control loop rate; main branch PID was configured for 30 Hz",
     )
     parser.add_argument("--target-speed-kmh", type=float, default=TARGET_SPEED_KMH)
-    parser.add_argument("--wheelbase", type=float, default=VEHICLE_WHEELBASE_M)
+    parser.add_argument(
+        "--wheelbase",
+        type=float,
+        default=VEHICLE_WHEELBASE_M,
+        help="deprecated compatibility option; Stanley uses control-point-offset",
+    )
     parser.add_argument("--lookahead-distance", type=float, default=2.0)
     parser.add_argument("--lookahead-speed-gain", type=float, default=0.15)
     parser.add_argument("--minimum-lookahead", type=float, default=2.0)
     parser.add_argument("--maximum-lookahead", type=float, default=4.0)
+    parser.add_argument("--stanley-gain", type=float, default=0.22)
+    parser.add_argument("--softening-speed", type=float, default=3.0)
+    parser.add_argument("--heading-error-gain", type=float, default=1.0)
+    parser.add_argument("--cross-track-error-gain", type=float, default=0.55)
+    parser.add_argument("--cross-track-deadband", type=float, default=0.05)
     parser.add_argument("--goal-tolerance", type=float, default=2.0)
     parser.add_argument(
         "--max-steering-deg",
         type=float,
         default=21.77,
-        help="Pure Pursuit controller steering limit in degrees",
+        help="Stanley controller steering limit in degrees",
     )
     parser.add_argument(
         "--vehicle-max-steering-deg",
@@ -172,8 +182,8 @@ def argument_parser(localization_mode):
     parser.add_argument(
         "--control-point-offset",
         type=float,
-        default=0.0,
-        help="distance from localization point to Pure Pursuit control point",
+        default=3.0,
+        help="front axle/control point offset from localization point",
     )
     parser.add_argument("--minimum-waypoint-spacing", type=float, default=0.5)
     parser.add_argument("--waypoint-smoothing-window", type=int, default=9)
@@ -263,6 +273,7 @@ def _validate(arguments):
         "lookahead_distance",
         "minimum_lookahead",
         "maximum_lookahead",
+        "softening_speed",
         "goal_tolerance",
     )
     for name in positive_names:
@@ -272,6 +283,10 @@ def _validate(arguments):
         raise ValueError("target-speed-kmh cannot be negative")
     for name in (
         "lookahead_speed_gain",
+        "stanley_gain",
+        "heading_error_gain",
+        "cross_track_error_gain",
+        "cross_track_deadband",
         "minimum_waypoint_spacing",
         "max_steering_rate_radps",
         "speed_kp",
@@ -336,15 +351,15 @@ def run(localization_mode, arguments):
     active_projection = csv_projection or projection
     recorded_origin = load_recorded_path_origin(arguments.path)
     points = load_path_csv(arguments.path, gps_projection=active_projection)
-    pure_pursuit = PurePursuitController(
+    stanley = StanleyController(
         points,
-        wheelbase_m=arguments.wheelbase,
-        lookahead_distance_m=arguments.lookahead_distance,
-        lookahead_speed_gain_s=arguments.lookahead_speed_gain,
-        minimum_lookahead_m=arguments.minimum_lookahead,
-        maximum_lookahead_m=arguments.maximum_lookahead,
+        gain=arguments.stanley_gain,
+        softening_speed_mps=arguments.softening_speed,
         max_steering_deg=arguments.max_steering_deg,
         control_point_offset_m=arguments.control_point_offset,
+        heading_error_gain=arguments.heading_error_gain,
+        cross_track_error_gain=arguments.cross_track_error_gain,
+        cross_track_deadband_m=arguments.cross_track_deadband,
         minimum_waypoint_spacing_m=arguments.minimum_waypoint_spacing,
         waypoint_smoothing_window=arguments.waypoint_smoothing_window,
         search_back_segments=5 if arguments.allow_target_backtrack else 0,
@@ -354,7 +369,7 @@ def run(localization_mode, arguments):
     steering_filter = SteeringCommandFilter(
         alpha=arguments.steering_filter_alpha,
         max_rate_radps=arguments.max_steering_rate_radps,
-        max_abs_rad=pure_pursuit.max_steering_rad,
+        max_abs_rad=stanley.max_steering_rad,
     )
     speed_controller = PedalSpeedController(
         kp=arguments.speed_kp,
@@ -425,15 +440,15 @@ def run(localization_mode, arguments):
     last_log = 0.0
 
     print(
-        "MORAI Pure Pursuit {} controller started".format(
+        "MORAI Stanley {} controller started".format(
             localization_mode.upper()
         )
     )
     print(
         "  path: {} ({} -> {} points after spacing/smoothing)".format(
             os.path.abspath(arguments.path),
-            pure_pursuit.original_point_count,
-            len(pure_pursuit.points),
+            stanley.original_point_count,
+            len(stanley.points),
         )
     )
     if recorded_origin is not None:
@@ -486,13 +501,15 @@ def run(localization_mode, arguments):
     else:
         print("  localization: GPS/IMU/status-aided dead reckoning")
     print(
-        "  Pure Pursuit: Ld=clip({:.2f}+{:.2f}*speed, {:.2f}, {:.2f})m, "
-        "wheelbase={:.2f}m, fixed speed {:.1f} km/h".format(
-            arguments.lookahead_distance,
-            arguments.lookahead_speed_gain,
-            arguments.minimum_lookahead,
-            arguments.maximum_lookahead,
-            arguments.wheelbase,
+        "  Stanley: front axle {:.2f} m, gain={:.3f}, softening={:.2f} m/s, "
+        "heading_gain={:.2f}, cte_gain={:.2f}, deadband={:.2f} m, "
+        "fixed speed {:.1f} km/h".format(
+            arguments.control_point_offset,
+            arguments.stanley_gain,
+            arguments.softening_speed,
+            arguments.heading_error_gain,
+            arguments.cross_track_error_gain,
+            arguments.cross_track_deadband,
             arguments.target_speed_kmh,
         )
     )
@@ -638,13 +655,12 @@ def run(localization_mode, arguments):
                 raw_steering_rad = filtered_steering_rad = 0.0
                 normalized_steering = 0.0
             else:
-                result = pure_pursuit.compute(
+                result = stanley.compute(
                     state.x_m,
                     state.y_m,
                     state.z_m,
                     state.yaw_rad,
                     state.speed_mps,
-                    wheelbase_m=status_wheelbase_m,
                 )
                 if result.goal_reached:
                     speed_controller.reset()
@@ -711,9 +727,8 @@ def run(localization_mode, arguments):
                     )
                     print(
                         "{} pos=({:.2f},{:.2f},{:.2f}) speed={:.2f}/{:.2f} "
-                        "yaw/path={:+.1f}/{:+.1f}deg alpha={:+.1f}deg "
-                        "cte={:+.2f}m Ld={:.2f}m target=({:.1f},{:.1f}) "
-                        "curv={:+.3f}/m steer(raw/filt)={:+.2f}/{:+.2f}deg "
+                        "yaw/path={:+.1f}/{:+.1f}deg herr={:+.1f}deg "
+                        "cte={:+.2f}m steer(raw/filt)={:+.2f}/{:+.2f}deg "
                         "cmd=({:.2f},{:+.2f},{:.2f}) "
                         "feedback=({:.2f},{:+.2f}deg,{:.2f}) "
                         "remain={:.1f}m{}".format(
@@ -725,12 +740,8 @@ def run(localization_mode, arguments):
                             target_speed_mps,
                             math.degrees(state.yaw_rad),
                             math.degrees(result.path_yaw_rad),
-                            math.degrees(result.alpha_rad),
+                            math.degrees(result.heading_error_rad),
                             result.cross_track_error_m,
-                            result.lookahead_distance_m,
-                            result.target_position_m[0],
-                            result.target_position_m[1],
-                            result.curvature_inv_m,
                             math.degrees(raw_steering_rad),
                             math.degrees(filtered_steering_rad),
                             command.accel,

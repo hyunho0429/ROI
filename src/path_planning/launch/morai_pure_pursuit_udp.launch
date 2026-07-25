@@ -17,18 +17,19 @@
     <arg name="control_protocol" default="25s4"/>
 
     <arg name="control_rate_hz" default="30.0"/>
-    <arg name="target_speed_kmh" default="30.0"/>
+    <arg name="target_speed_kmh" default="60.0"/>
     <arg name="speed_kp" default="0.075"/>
     <arg name="speed_ki" default="0.0001"/>
     <arg name="speed_kd" default="0.025"/>
     <arg name="max_accel_pedal" default="1.0"/>
     <arg name="max_brake_pedal" default="1.0"/>
 
-    <arg name="wheelbase" default="3.0"/>
-    <arg name="lookahead_distance" default="2.0"/>
-    <arg name="lookahead_speed_gain" default="0.15"/>
-    <arg name="minimum_lookahead" default="2.0"/>
-    <arg name="maximum_lookahead" default="4.0"/>
+    <arg name="stanley_gain" default="0.22"/>
+    <arg name="softening_speed" default="3.0"/>
+    <arg name="control_point_offset" default="3.0"/>
+    <arg name="heading_error_gain" default="1.0"/>
+    <arg name="cross_track_error_gain" default="0.55"/>
+    <arg name="cross_track_deadband" default="0.05"/>
     <arg name="max_steering_deg" default="21.77"/>
     <arg name="vehicle_max_steering_deg" default="36.25"/>
     <arg name="steering_filter_alpha" default="0.15"/>
@@ -40,8 +41,8 @@
     <arg name="max_gps_outage" default="120.0"/>
 
     <node pkg="path_planning"
-          type="morai_pure_pursuit_ins_udp.py"
-          name="morai_pure_pursuit_ins_udp"
+          type="morai_stanley_ins_udp.py"
+          name="morai_stanley_ins_udp"
           output="screen"
           required="true"
           args='--path "$(arg path)"
@@ -64,11 +65,12 @@
                 --speed-kd $(arg speed_kd)
                 --max-accel-pedal $(arg max_accel_pedal)
                 --max-brake-pedal $(arg max_brake_pedal)
-                --wheelbase $(arg wheelbase)
-                --lookahead-distance $(arg lookahead_distance)
-                --lookahead-speed-gain $(arg lookahead_speed_gain)
-                --minimum-lookahead $(arg minimum_lookahead)
-                --maximum-lookahead $(arg maximum_lookahead)
+                --stanley-gain $(arg stanley_gain)
+                --softening-speed $(arg softening_speed)
+                --control-point-offset $(arg control_point_offset)
+                --heading-error-gain $(arg heading_error_gain)
+                --cross-track-error-gain $(arg cross_track_error_gain)
+                --cross-track-deadband $(arg cross_track_deadband)
                 --max-steering-deg $(arg max_steering_deg)
                 --vehicle-max-steering-deg $(arg vehicle_max_steering_deg)
                 --steering-filter-alpha $(arg steering_filter_alpha)

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Compatibility command for the competition Pure Pursuit INS controller."""
+"""Compatibility command for the competition Stanley INS controller."""
 
-from path_planning.pure_pursuit_udp_runtime import main
+from path_planning.stanley_udp_runtime import main
 
 
 if __name__ == "__main__":
