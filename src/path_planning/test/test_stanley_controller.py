@@ -24,7 +24,6 @@ from path_planning.stanley_controller import (
     load_recorded_path_origin,
 )
 from path_planning.pure_pursuit_udp_runtime import (
-    apply_opposing_steering_offset,
     argument_parser,
     main,
 )
@@ -310,14 +309,14 @@ class StanleyControllerTest(unittest.TestCase):
             os.path.basename(arguments.path), "2026_molit_comp_global_path.txt"
         )
         self.assertEqual(arguments.control_point_offset, 0.0)
-        self.assertEqual(arguments.steering_offset_deg, 3.0)
+        self.assertFalse(hasattr(arguments, "steering_offset_deg"))
         self.assertEqual(arguments.wheelbase, 3.0)
         self.assertEqual(arguments.lookahead_distance, 2.0)
         self.assertEqual(arguments.lookahead_speed_gain, 0.15)
         self.assertEqual(arguments.minimum_lookahead, 2.0)
         self.assertEqual(arguments.maximum_lookahead, 4.0)
         self.assertEqual(arguments.steering_filter_alpha, 0.15)
-        self.assertEqual(arguments.steering_offset_max_apply_deg, 8.0)
+        self.assertFalse(hasattr(arguments, "steering_offset_max_apply_deg"))
         self.assertEqual(arguments.max_steering_rate_radps, 0.35)
         self.assertEqual(arguments.alignment_seconds, 2.0)
         self.assertEqual(arguments.alignment_min_samples, 20)
@@ -328,33 +327,6 @@ class StanleyControllerTest(unittest.TestCase):
         self.assertEqual(arguments.speed_kd, 0.025)
         self.assertFalse(hasattr(arguments, "stanley_gain"))
         self.assertEqual(arguments.target_search_window, 50)
-
-    def test_opposing_steering_offset_reduces_only_small_magnitude(self):
-        max_abs_rad = math.radians(20.0)
-        self.assertAlmostEqual(
-            apply_opposing_steering_offset(
-                math.radians(5.0), 3.0, max_abs_rad, 8.0
-            ),
-            math.radians(2.0),
-        )
-        self.assertAlmostEqual(
-            apply_opposing_steering_offset(
-                math.radians(-5.0), 3.0, max_abs_rad, 8.0
-            ),
-            math.radians(-2.0),
-        )
-        self.assertAlmostEqual(
-            apply_opposing_steering_offset(
-                math.radians(2.0), 3.0, max_abs_rad, 8.0
-            ),
-            0.0,
-        )
-        self.assertAlmostEqual(
-            apply_opposing_steering_offset(
-                math.radians(10.0), 3.0, max_abs_rad, 8.0
-            ),
-            math.radians(10.0),
-        )
 
     def test_planar_filter_requires_both_gps_and_imu(self):
         ekf = PlanarGpsImuEkf()

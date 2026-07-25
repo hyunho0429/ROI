@@ -27,7 +27,6 @@ Status, CollisionData 및 Ego Ctrl Cmd는 모두 UDP로 통신한다.
 | 차량 모델 | 2023 Hyundai IONIQ 5 | 대회 규정집 기준 |
 | wheelbase | 3.0 m | IONIQ 5 축간거리 |
 | 차폭 | 1.892 m | IONIQ 5 차폭 |
-| 조향각 offset | 3.0° | 조향 방향 반대로 적용해 크기 보정 |
 | PID Kp | 0.075 | 종방향 비례 이득 |
 | PID Ki | 0.0001 | 종방향 적분 이득 |
 | PID Kd | 0.025 | 종방향 미분 이득 |
@@ -218,9 +217,8 @@ roslaunch path_planning morai_pure_pursuit_udp.launch \
 ```text
 localization: GPS/IMU/status-aided 15-state error-state EKF INS
 alignment: hold brake for 2.0s (at least 20 IMU samples)
-Pure Pursuit: Ld=clip(2.00+0.15*speed, 2.00, 4.00)m, wheelbase=3.00m, steering_offset=+3.00deg, fixed speed 30.0 km/h
+Pure Pursuit: Ld=clip(2.00+0.15*speed, 2.00, 4.00)m, wheelbase=3.00m, fixed speed 30.0 km/h
 steering smoothing: alpha=0.15, max_rate=0.35 rad/s
-steering offset: 3.00deg below 8.00deg raw steering
 requesting AV-ExternalCtrl (ctrl_mode=2) and Drive (gear=4)
 Competition control state: ctrl_mode=2 (AV-ExternalCtrl), gear=4 (D)
 ```

@@ -170,18 +170,6 @@ def argument_parser(localization_mode):
         help="physical steering angle represented by MORAI command +/-1",
     )
     parser.add_argument(
-        "--steering-offset-deg",
-        type=float,
-        default=3.0,
-        help="steering correction in degrees; sign opposes steering direction",
-    )
-    parser.add_argument(
-        "--steering-offset-max-apply-deg",
-        type=float,
-        default=8.0,
-        help="apply steering-offset-deg only when raw steering magnitude is at or below this angle",
-    )
-    parser.add_argument(
         "--control-point-offset",
         type=float,
         default=0.0,
@@ -297,12 +285,6 @@ def _validate(arguments):
             raise ValueError("{} must be positive".format(name))
     if not 0.0 <= arguments.steering_filter_alpha <= 1.0:
         raise ValueError("steering-filter-alpha must be between 0 and 1")
-    if not math.isfinite(arguments.steering_offset_deg):
-        raise ValueError("steering-offset-deg must be finite")
-    if arguments.steering_offset_max_apply_deg < 0.0:
-        raise ValueError("steering-offset-max-apply-deg cannot be negative")
-    if not math.isfinite(arguments.steering_offset_max_apply_deg):
-        raise ValueError("steering-offset-max-apply-deg must be finite")
     if arguments.waypoint_smoothing_window < 1:
         raise ValueError("waypoint-smoothing-window must be at least 1")
     if arguments.target_search_window < 1:
@@ -345,26 +327,6 @@ def _localizer(localization_mode, arguments):
         orientation_correction_gain=arguments.orientation_correction_gain,
         gyro_bias_gain=arguments.gyro_bias_gain,
     )
-
-
-def apply_opposing_steering_offset(
-    steering_rad,
-    offset_deg,
-    max_abs_rad,
-    max_apply_deg=8.0,
-):
-    """Reduce small steering magnitude by offset_deg without weakening turns."""
-    if abs(steering_rad) <= 1e-9 or abs(offset_deg) <= 1e-9:
-        adjusted = steering_rad
-    elif abs(steering_rad) > math.radians(max(0.0, float(max_apply_deg))):
-        adjusted = steering_rad
-    else:
-        adjusted_magnitude = max(
-            0.0,
-            abs(steering_rad) - math.radians(abs(offset_deg)),
-        )
-        adjusted = math.copysign(adjusted_magnitude, steering_rad)
-    return max(-max_abs_rad, min(max_abs_rad, adjusted))
 
 
 def run(localization_mode, arguments):
@@ -525,14 +487,12 @@ def run(localization_mode, arguments):
         print("  localization: GPS/IMU/status-aided dead reckoning")
     print(
         "  Pure Pursuit: Ld=clip({:.2f}+{:.2f}*speed, {:.2f}, {:.2f})m, "
-        "wheelbase={:.2f}m, steering_offset={:+.2f}deg, "
-        "fixed speed {:.1f} km/h".format(
+        "wheelbase={:.2f}m, fixed speed {:.1f} km/h".format(
             arguments.lookahead_distance,
             arguments.lookahead_speed_gain,
             arguments.minimum_lookahead,
             arguments.maximum_lookahead,
             arguments.wheelbase,
-            arguments.steering_offset_deg,
             arguments.target_speed_kmh,
         )
     )
@@ -540,12 +500,6 @@ def run(localization_mode, arguments):
         "  steering smoothing: alpha={:.2f}, max_rate={:.2f} rad/s".format(
             arguments.steering_filter_alpha,
             arguments.max_steering_rate_radps,
-        )
-    )
-    print(
-        "  steering offset: {:.2f}deg below {:.2f}deg raw steering".format(
-            arguments.steering_offset_deg,
-            arguments.steering_offset_max_apply_deg,
         )
     )
     print(
@@ -700,12 +654,7 @@ def run(localization_mode, arguments):
                     raw_steering_rad = filtered_steering_rad = 0.0
                     normalized_steering = 0.0
                 else:
-                    raw_steering_rad = apply_opposing_steering_offset(
-                        result.steering_rad,
-                        arguments.steering_offset_deg,
-                        pure_pursuit.max_steering_rad,
-                        arguments.steering_offset_max_apply_deg,
-                    )
+                    raw_steering_rad = result.steering_rad
                     filtered_steering_rad = steering_filter.update(
                         raw_steering_rad, now
                     )
