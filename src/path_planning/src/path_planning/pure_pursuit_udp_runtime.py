@@ -86,6 +86,20 @@ def _projection(arguments):
     )
 
 
+def _curve_limited_target_speed_mps(arguments, base_target_speed_mps, steering_rad):
+    """Reduce only speed in curves, using Stanley steering demand as curvature cue."""
+    steering_deg = abs(math.degrees(steering_rad))
+    if steering_deg >= arguments.sharp_curve_steering_deg:
+        return min(
+            base_target_speed_mps, arguments.sharp_curve_speed_kmh / 3.6
+        ), "sharp"
+    if steering_deg >= arguments.medium_curve_steering_deg:
+        return min(
+            base_target_speed_mps, arguments.medium_curve_speed_kmh / 3.6
+        ), "medium"
+    return base_target_speed_mps, "straight"
+
+
 def argument_parser(localization_mode):
     parser = argparse.ArgumentParser(
         description=(
@@ -151,6 +165,10 @@ def argument_parser(localization_mode):
         help="control loop rate; main branch PID was configured for 30 Hz",
     )
     parser.add_argument("--target-speed-kmh", type=float, default=TARGET_SPEED_KMH)
+    parser.add_argument("--medium-curve-speed-kmh", type=float, default=30.0)
+    parser.add_argument("--sharp-curve-speed-kmh", type=float, default=22.0)
+    parser.add_argument("--medium-curve-steering-deg", type=float, default=5.0)
+    parser.add_argument("--sharp-curve-steering-deg", type=float, default=9.0)
     parser.add_argument(
         "--wheelbase",
         type=float,
@@ -294,6 +312,10 @@ def _validate(arguments):
         "softening_speed",
         "heading_preview_distance",
         "heading_preview_start_distance",
+        "medium_curve_speed_kmh",
+        "sharp_curve_speed_kmh",
+        "medium_curve_steering_deg",
+        "sharp_curve_steering_deg",
         "goal_tolerance",
     )
     for name in positive_names:
@@ -301,6 +323,14 @@ def _validate(arguments):
             raise ValueError("{} must be positive".format(name))
     if arguments.target_speed_kmh < 0.0:
         raise ValueError("target-speed-kmh cannot be negative")
+    if arguments.medium_curve_speed_kmh > arguments.target_speed_kmh:
+        raise ValueError("medium-curve-speed-kmh must be <= target-speed-kmh")
+    if arguments.sharp_curve_speed_kmh > arguments.medium_curve_speed_kmh:
+        raise ValueError("sharp-curve-speed-kmh must be <= medium-curve-speed-kmh")
+    if arguments.sharp_curve_steering_deg <= arguments.medium_curve_steering_deg:
+        raise ValueError(
+            "sharp-curve-steering-deg must be greater than medium-curve-steering-deg"
+        )
     for name in (
         "lookahead_speed_gain",
         "stanley_gain",
@@ -547,6 +577,15 @@ def run(localization_mode, arguments):
         )
     )
     print(
+        "  curve speed planner: medium {:.1f} km/h at {:.1f} deg, "
+        "sharp {:.1f} km/h at {:.1f} deg".format(
+            arguments.medium_curve_speed_kmh,
+            arguments.medium_curve_steering_deg,
+            arguments.sharp_curve_speed_kmh,
+            arguments.sharp_curve_steering_deg,
+        )
+    )
+    print(
         "  steering smoothing: alpha={:.2f}, max_rate={:.2f} rad/s".format(
             arguments.steering_filter_alpha,
             arguments.max_steering_rate_radps,
@@ -695,6 +734,7 @@ def run(localization_mode, arguments):
                 target_speed_mps = 0.0
                 raw_steering_rad = filtered_steering_rad = 0.0
                 normalized_steering = 0.0
+                curve_speed_mode = "stop"
             else:
                 result = stanley.compute(
                     state.x_m,
@@ -710,6 +750,7 @@ def run(localization_mode, arguments):
                     target_speed_mps = 0.0
                     raw_steering_rad = filtered_steering_rad = 0.0
                     normalized_steering = 0.0
+                    curve_speed_mode = "goal"
                 else:
                     raw_steering_rad = result.steering_rad
                     filtered_steering_rad = steering_filter.update(
@@ -722,10 +763,15 @@ def run(localization_mode, arguments):
                     normalized_steering = max(
                         -1.0, min(1.0, normalized_steering)
                     )
-                    target_speed_mps = (
+                    base_target_speed_mps = (
                         arguments.target_speed_kmh / 3.6
                         if result.target_speed_mps is None
                         else result.target_speed_mps
+                    )
+                    target_speed_mps, curve_speed_mode = (
+                        _curve_limited_target_speed_mps(
+                            arguments, base_target_speed_mps, raw_steering_rad
+                        )
                     )
                     accel, brake = speed_controller.compute(
                         target_speed_mps, state.speed_mps, now
@@ -768,6 +814,7 @@ def run(localization_mode, arguments):
                     )
                     print(
                         "{} pos=({:.2f},{:.2f},{:.2f}) speed={:.2f}/{:.2f} "
+                        "curve={} "
                         "vel_x={:+.2f}km/h "
                         "front={:.2f}m preview={:.1f}m "
                         "yaw/path={:+.1f}/{:+.1f}deg herr={:+.1f}deg "
@@ -781,6 +828,7 @@ def run(localization_mode, arguments):
                             state.z_m,
                             state.speed_mps,
                             target_speed_mps,
+                            curve_speed_mode,
                             status_vel_x_kmh,
                             stanley.control_point_offset_m,
                             stanley.heading_preview_distance_m,

@@ -18,6 +18,10 @@
 
     <arg name="control_rate_hz" default="30.0"/>
     <arg name="target_speed_kmh" default="40.0"/>
+    <arg name="medium_curve_speed_kmh" default="30.0"/>
+    <arg name="sharp_curve_speed_kmh" default="22.0"/>
+    <arg name="medium_curve_steering_deg" default="5.0"/>
+    <arg name="sharp_curve_steering_deg" default="9.0"/>
     <arg name="speed_kp" default="0.075"/>
     <arg name="speed_ki" default="0.0001"/>
     <arg name="speed_kd" default="0.025"/>
@@ -63,6 +67,10 @@
                 --control-protocol $(arg control_protocol)
                 --control-rate-hz $(arg control_rate_hz)
                 --target-speed-kmh $(arg target_speed_kmh)
+                --medium-curve-speed-kmh $(arg medium_curve_speed_kmh)
+                --sharp-curve-speed-kmh $(arg sharp_curve_speed_kmh)
+                --medium-curve-steering-deg $(arg medium_curve_steering_deg)
+                --sharp-curve-steering-deg $(arg sharp_curve_steering_deg)
                 --speed-kp $(arg speed_kp)
                 --speed-ki $(arg speed_ki)
                 --speed-kd $(arg speed_kd)
