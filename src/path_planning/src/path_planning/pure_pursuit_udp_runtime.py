@@ -173,6 +173,21 @@ def _offset_path_points_laterally(points, offset_m):
     return shifted
 
 
+def _vehicle_center_from_localization_pose(x_m, y_m, yaw_rad, lateral_offset_m):
+    """Convert the localization point into an estimated vehicle-center point.
+
+    ``lateral_offset_m`` is the localization point's lateral offset from the
+    vehicle center in the vehicle frame.  Positive means the localization point
+    is left of the vehicle center; negative means it is right of center.
+    """
+    offset = float(lateral_offset_m)
+    if abs(offset) < 1e-9:
+        return x_m, y_m
+    left_x = -math.sin(yaw_rad)
+    left_y = math.cos(yaw_rad)
+    return x_m - offset * left_x, y_m - offset * left_y
+
+
 def _startup_lane_safety_bias_rad(arguments, route_progress_m, steering_rad):
     """Nudge left only in the initial near-straight segment."""
     if route_progress_m is None:
@@ -325,6 +340,15 @@ def argument_parser(localization_mode):
         type=float,
         default=1.5,
         help="front axle/control point offset from localization point",
+    )
+    parser.add_argument(
+        "--localization-lateral-offset-m",
+        type=float,
+        default=0.35,
+        help=(
+            "localization point lateral offset from vehicle center; "
+            "positive means localization point is left of vehicle center"
+        ),
     )
     parser.add_argument(
         "--heading-preview-distance",
@@ -506,6 +530,8 @@ def _validate(arguments):
         raise ValueError("maximum-lookahead must be >= minimum-lookahead")
     if not math.isfinite(arguments.control_point_offset):
         raise ValueError("control-point-offset must be finite")
+    if not math.isfinite(arguments.localization_lateral_offset_m):
+        raise ValueError("localization-lateral-offset-m must be finite")
     if not math.isfinite(arguments.path_lateral_offset_m):
         raise ValueError("path-lateral-offset-m must be finite")
     if arguments.lane_center_shift_m is not None and not math.isfinite(
@@ -732,6 +758,7 @@ def run(localization_mode, arguments):
         "gain={:.3f}, softening={:.2f} m/s, "
         "control_speed_floor={:.1f} km/h, "
         "heading_gain={:.2f}, cte_gain={:.2f}, deadband={:.2f} m, "
+        "localization_lateral_offset={:+.2f} m, "
         "fixed speed {:.1f} km/h".format(
             arguments.control_point_offset,
             arguments.heading_preview_distance,
@@ -743,6 +770,7 @@ def run(localization_mode, arguments):
             arguments.heading_error_gain,
             arguments.cross_track_error_gain,
             arguments.cross_track_deadband,
+            arguments.localization_lateral_offset_m,
             arguments.target_speed_kmh,
         )
     )
@@ -926,6 +954,7 @@ def run(localization_mode, arguments):
                 steering_filter.reset()
                 command = brake_command()
                 result = None
+                vehicle_center_x_m = vehicle_center_y_m = 0.0
                 target_speed_mps = 0.0
                 raw_steering_rad = guarded_steering_rad = filtered_steering_rad = 0.0
                 startup_bias_rad = 0.0
@@ -937,9 +966,17 @@ def run(localization_mode, arguments):
                     state.speed_mps,
                     arguments.stanley_control_speed_floor_kmh / 3.6,
                 )
+                vehicle_center_x_m, vehicle_center_y_m = (
+                    _vehicle_center_from_localization_pose(
+                        state.x_m,
+                        state.y_m,
+                        state.yaw_rad,
+                        arguments.localization_lateral_offset_m,
+                    )
+                )
                 result = stanley.compute(
-                    state.x_m,
-                    state.y_m,
+                    vehicle_center_x_m,
+                    vehicle_center_y_m,
                     state.z_m,
                     state.yaw_rad,
                     stanley_control_speed_mps,
@@ -1033,7 +1070,8 @@ def run(localization_mode, arguments):
                         "GPS" if gps_outage <= 1.0 else "GPS-OUT {:.1f}s".format(gps_outage)
                     )
                     print(
-                        "{} pos=({:.2f},{:.2f},{:.2f}) speed={:.2f}/{:.2f} "
+                        "{} pos=({:.2f},{:.2f},{:.2f}) center=({:.2f},{:.2f}) "
+                        "speed={:.2f}/{:.2f} "
                         "curve={} "
                         "vel_x={:+.2f}km/h "
                         "front={:.2f}m preview={:.1f}m "
@@ -1046,6 +1084,8 @@ def run(localization_mode, arguments):
                             state.x_m,
                             state.y_m,
                             state.z_m,
+                            vehicle_center_x_m,
+                            vehicle_center_y_m,
                             state.speed_mps,
                             target_speed_mps,
                             curve_speed_mode,

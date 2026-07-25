@@ -38,6 +38,7 @@
     <arg name="lane_center_shift_m" default="0.80"/>
     <arg name="path_lateral_offset_m" default="0.0"/>
     <arg name="control_point_offset" default="1.5"/>
+    <arg name="localization_lateral_offset_m" default="0.35"/>
     <arg name="heading_preview_distance" default="4.0"/>
     <arg name="heading_preview_start_distance" default="20.0"/>
     <arg name="heading_preview_deadband_deg" default="2.0"/>
@@ -100,6 +101,7 @@
                 --lane-center-shift-m $(arg lane_center_shift_m)
                 --path-lateral-offset-m $(arg path_lateral_offset_m)
                 --control-point-offset $(arg control_point_offset)
+                --localization-lateral-offset-m $(arg localization_lateral_offset_m)
                 --heading-preview-distance $(arg heading_preview_distance)
                 --heading-preview-start-distance $(arg heading_preview_start_distance)
                 --heading-preview-deadband-deg $(arg heading_preview_deadband_deg)
