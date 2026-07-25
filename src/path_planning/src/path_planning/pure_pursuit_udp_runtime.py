@@ -184,8 +184,8 @@ def argument_parser(localization_mode):
         help="control loop rate; main branch PID was configured for 30 Hz",
     )
     parser.add_argument("--target-speed-kmh", type=float, default=TARGET_SPEED_KMH)
-    parser.add_argument("--medium-curve-speed-kmh", type=float, default=30.0)
-    parser.add_argument("--sharp-curve-speed-kmh", type=float, default=22.0)
+    parser.add_argument("--medium-curve-speed-kmh", type=float, default=25.0)
+    parser.add_argument("--sharp-curve-speed-kmh", type=float, default=18.0)
     parser.add_argument("--medium-curve-steering-deg", type=float, default=5.0)
     parser.add_argument("--sharp-curve-steering-deg", type=float, default=9.0)
     parser.add_argument(
