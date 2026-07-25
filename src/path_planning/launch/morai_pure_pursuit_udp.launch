@@ -37,7 +37,7 @@
     <arg name="heading_preview_start_distance" default="20.0"/>
     <arg name="heading_preview_deadband_deg" default="2.0"/>
     <arg name="heading_error_gain" default="0.74"/>
-    <arg name="cross_track_error_gain" default="0.58"/>
+    <arg name="cross_track_error_gain" default="0.72"/>
     <arg name="cross_track_deadband" default="0.02"/>
     <arg name="max_steering_deg" default="16.0"/>
     <arg name="vehicle_max_steering_deg" default="36.25"/>

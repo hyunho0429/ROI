@@ -248,7 +248,7 @@ def argument_parser(localization_mode):
     parser.add_argument("--stanley-control-speed-floor-kmh", type=float, default=35.0)
     parser.add_argument("--path-lateral-offset-m", type=float, default=0.45)
     parser.add_argument("--heading-error-gain", type=float, default=0.74)
-    parser.add_argument("--cross-track-error-gain", type=float, default=0.58)
+    parser.add_argument("--cross-track-error-gain", type=float, default=0.72)
     parser.add_argument("--cross-track-deadband", type=float, default=0.02)
     parser.add_argument("--goal-tolerance", type=float, default=2.0)
     parser.add_argument(
