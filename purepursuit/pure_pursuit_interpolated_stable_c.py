@@ -42,15 +42,16 @@ MAX_PATH_DISTANCE = 15.0
 GOAL_DISTANCE = 3.0
 
 # 속도 설정
-STRAIGHT_SPEED_KMH = 10.0
-MEDIUM_CURVE_SPEED_KMH = 7.0
-SHARP_CURVE_SPEED_KMH = 4.5
+STRAIGHT_SPEED_KMH = 40
+MEDIUM_CURVE_SPEED_KMH = 30
+SHARP_CURVE_SPEED_KMH = 20
 RECOVERY_SPEED_KMH = 3.0
 
 # Look-ahead 설정
 MIN_LOOKAHEAD = 3.0
 MAX_LOOKAHEAD = 9.0
-LOOKAHEAD_SPEED_GAIN = 0.35
+LOOKAHEAD_SPEED_GAIN = 0.15
+# LOOKAHEAD_SPEED_GAIN = 0.35
 
 # 경로 검색 범위
 SEARCH_BACKWARD = 8
@@ -63,8 +64,8 @@ MAX_ACCEL_CHANGE_PER_SEC = 0.60
 MAX_BRAKE_CHANGE_PER_SEC = 0.80
 
 # 조향 비대칭 보정
-LEFT_STEER_GAIN = 1.0
-RIGHT_STEER_GAIN = 1.35
+#LEFT_STEER_GAIN = 1.0
+#RIGHT_STEER_GAIN = 1.35
 
 # 경로 전처리 설정
 INTERPOLATION_SPACING = 0.20
@@ -357,8 +358,8 @@ def calculate_curve_angle(path, nearest_index):
     last = len(path) - 1
 
     i0 = min(nearest_index, last)
-    i1 = min(nearest_index + 10, last)
-    i2 = min(nearest_index + 30, last)
+    i1 = min(nearest_index + 20, last)
+    i2 = min(nearest_index + 60, last)
 
     if i0 == i1 or i1 == i2:
         return 0.0
@@ -372,6 +373,25 @@ def calculate_curve_angle(path, nearest_index):
 
     return normalize_angle_rad(h2 - h1)
     
+def calculate_preview_curve_angle(path, nearest_index):
+
+    last = len(path) - 1
+
+    preview_offsets = [0, 20, 40, 60]   # 0m, 4m, 8m, 12m 정도
+
+    max_curve = 0.0
+
+    for offset in preview_offsets:
+
+        idx = min(nearest_index + offset, last)
+
+        curve = abs(calculate_curve_angle(path, idx))
+
+        if curve > max_curve:
+            max_curve = curve
+
+    return max_curve
+        
 def point_to_segment_signed_distance(px, py, x1, y1, x2, y2):
     dx = x2 - x1
     dy = y2 - y1
@@ -516,10 +536,10 @@ def calculate_pure_pursuit_steer(
 
     steering_rad *= STEER_SIGN
 
-    if steering_rad >= 0.0:
-        steering_rad *= LEFT_STEER_GAIN
-    else:
-        steering_rad *= RIGHT_STEER_GAIN
+#    if steering_rad >= 0.0:
+#        steering_rad *= LEFT_STEER_GAIN
+#    else:
+#        steering_rad *= RIGHT_STEER_GAIN
 
     steering = clamp(
         steering_rad / MAX_STEER_RAD,
@@ -539,7 +559,7 @@ def calculate_longitudinal_control(speed_kmh, target_speed_kmh):
         brake = 0.0
     elif error < -0.8:
         accel = 0.0
-        brake = clamp(0.02 * abs(error), 0.0, 0.20)
+        brake = clamp(0.02 * abs(error), 0.0, 0.2)
     else:
         # 데드밴드에서 급격한 가감속 반복을 막는다.
         accel = 0.015
@@ -759,7 +779,7 @@ def main():
                 previous_brake = brake
                 continue
 
-            curve_angle = calculate_curve_angle(
+            curve_angle = calculate_preview_curve_angle(
                 path,
                 nearest_index
             )
