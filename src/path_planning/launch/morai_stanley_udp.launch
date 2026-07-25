@@ -22,6 +22,10 @@
     <arg name="sharp_curve_speed_kmh" default="18.0"/>
     <arg name="medium_curve_steering_deg" default="5.0"/>
     <arg name="sharp_curve_steering_deg" default="9.0"/>
+    <arg name="curve_preview_distance_m" default="22.0"/>
+    <arg name="curve_preview_step_m" default="4.0"/>
+    <arg name="medium_curve_heading_deg" default="8.0"/>
+    <arg name="sharp_curve_heading_deg" default="16.0"/>
     <arg name="speed_kp" default="0.075"/>
     <arg name="speed_ki" default="0.0001"/>
     <arg name="speed_kd" default="0.025"/>
@@ -31,7 +35,7 @@
     <arg name="stanley_gain" default="0.35"/>
     <arg name="softening_speed" default="2.2"/>
     <arg name="stanley_control_speed_floor_kmh" default="35.0"/>
-    <arg name="lane_center_shift_m" default="0.85"/>
+    <arg name="lane_center_shift_m" default="0.80"/>
     <arg name="path_lateral_offset_m" default="0.0"/>
     <arg name="control_point_offset" default="1.5"/>
     <arg name="heading_preview_distance" default="4.0"/>
@@ -81,6 +85,10 @@
                 --sharp-curve-speed-kmh $(arg sharp_curve_speed_kmh)
                 --medium-curve-steering-deg $(arg medium_curve_steering_deg)
                 --sharp-curve-steering-deg $(arg sharp_curve_steering_deg)
+                --curve-preview-distance-m $(arg curve_preview_distance_m)
+                --curve-preview-step-m $(arg curve_preview_step_m)
+                --medium-curve-heading-deg $(arg medium_curve_heading_deg)
+                --sharp-curve-heading-deg $(arg sharp_curve_heading_deg)
                 --speed-kp $(arg speed_kp)
                 --speed-ki $(arg speed_ki)
                 --speed-kd $(arg speed_kd)

@@ -9,6 +9,7 @@ import sys
 import time
 
 from path_planning.coordinates import GpsToMapEnu, GpsToRecordedLocalEnu, MapProjection
+from path_planning.localization import wrap_angle
 from path_planning.localization_dead_reckoning import SpeedAidedDeadReckoning
 from path_planning.localization_ins import InsErrorStateEkf
 from path_planning.longitudinal_controller import PedalSpeedController
@@ -87,14 +88,52 @@ def _projection(arguments):
     )
 
 
-def _curve_limited_target_speed_mps(arguments, base_target_speed_mps, steering_rad):
-    """Reduce only speed in curves, using Stanley steering demand as curvature cue."""
+def _path_heading_at_progress(stanley, progress_m):
+    index = stanley._segment_at_progress(progress_m)
+    first = stanley.points[index]
+    second = stanley.points[index + 1]
+    return math.atan2(second.y_m - first.y_m, second.x_m - first.x_m)
+
+
+def _upcoming_path_heading_change_deg(arguments, stanley, remaining_distance_m):
+    """Estimate the largest heading change ahead of the current path progress."""
+    if remaining_distance_m is None or not math.isfinite(remaining_distance_m):
+        return 0.0
+    total_distance_m = stanley._cumulative[-1]
+    progress_m = max(0.0, total_distance_m - remaining_distance_m)
+    current_heading = _path_heading_at_progress(stanley, progress_m)
+    max_heading_change = 0.0
+    preview_distance = max(0.0, arguments.curve_preview_distance_m)
+    step = max(0.5, arguments.curve_preview_step_m)
+    sample_distance = step
+    while sample_distance <= preview_distance + 1e-6:
+        ahead_progress = min(total_distance_m, progress_m + sample_distance)
+        ahead_heading = _path_heading_at_progress(stanley, ahead_progress)
+        heading_change = abs(wrap_angle(ahead_heading - current_heading))
+        max_heading_change = max(max_heading_change, heading_change)
+        sample_distance += step
+    return math.degrees(max_heading_change)
+
+
+def _curve_limited_target_speed_mps(
+    arguments, stanley, base_target_speed_mps, steering_rad, remaining_distance_m
+):
+    """Reduce speed in curves using current Stanley demand and upcoming path heading."""
     steering_deg = abs(math.degrees(steering_rad))
-    if steering_deg >= arguments.sharp_curve_steering_deg:
+    upcoming_heading_deg = _upcoming_path_heading_change_deg(
+        arguments, stanley, remaining_distance_m
+    )
+    if (
+        steering_deg >= arguments.sharp_curve_steering_deg
+        or upcoming_heading_deg >= arguments.sharp_curve_heading_deg
+    ):
         return min(
             base_target_speed_mps, arguments.sharp_curve_speed_kmh / 3.6
         ), "sharp"
-    if steering_deg >= arguments.medium_curve_steering_deg:
+    if (
+        steering_deg >= arguments.medium_curve_steering_deg
+        or upcoming_heading_deg >= arguments.medium_curve_heading_deg
+    ):
         return min(
             base_target_speed_mps, arguments.medium_curve_speed_kmh / 3.6
         ), "medium"
@@ -233,6 +272,10 @@ def argument_parser(localization_mode):
     parser.add_argument("--sharp-curve-speed-kmh", type=float, default=18.0)
     parser.add_argument("--medium-curve-steering-deg", type=float, default=5.0)
     parser.add_argument("--sharp-curve-steering-deg", type=float, default=9.0)
+    parser.add_argument("--curve-preview-distance-m", type=float, default=22.0)
+    parser.add_argument("--curve-preview-step-m", type=float, default=4.0)
+    parser.add_argument("--medium-curve-heading-deg", type=float, default=8.0)
+    parser.add_argument("--sharp-curve-heading-deg", type=float, default=16.0)
     parser.add_argument(
         "--wheelbase",
         type=float,
@@ -404,6 +447,10 @@ def _validate(arguments):
         "sharp_curve_speed_kmh",
         "medium_curve_steering_deg",
         "sharp_curve_steering_deg",
+        "curve_preview_distance_m",
+        "curve_preview_step_m",
+        "medium_curve_heading_deg",
+        "sharp_curve_heading_deg",
         "startup_lane_bias_distance_m",
         "startup_lane_bias_max_steering_deg",
         "startup_steering_guard_distance_m",
@@ -423,6 +470,10 @@ def _validate(arguments):
     if arguments.sharp_curve_steering_deg <= arguments.medium_curve_steering_deg:
         raise ValueError(
             "sharp-curve-steering-deg must be greater than medium-curve-steering-deg"
+        )
+    if arguments.sharp_curve_heading_deg <= arguments.medium_curve_heading_deg:
+        raise ValueError(
+            "sharp-curve-heading-deg must be greater than medium-curve-heading-deg"
         )
     if not 0.0 < arguments.turn_steering_scale <= 1.0:
         raise ValueError("turn-steering-scale must be in (0, 1]")
@@ -697,11 +748,15 @@ def run(localization_mode, arguments):
     )
     print(
         "  curve speed planner: medium {:.1f} km/h at {:.1f} deg, "
-        "sharp {:.1f} km/h at {:.1f} deg".format(
+        "sharp {:.1f} km/h at {:.1f} deg; preview {:.1f} m "
+        "heading medium/sharp {:.1f}/{:.1f} deg".format(
             arguments.medium_curve_speed_kmh,
             arguments.medium_curve_steering_deg,
             arguments.sharp_curve_speed_kmh,
             arguments.sharp_curve_steering_deg,
+            arguments.curve_preview_distance_m,
+            arguments.medium_curve_heading_deg,
+            arguments.sharp_curve_heading_deg,
         )
     )
     print(
@@ -931,7 +986,11 @@ def run(localization_mode, arguments):
                     )
                     target_speed_mps, curve_speed_mode = (
                         _curve_limited_target_speed_mps(
-                            arguments, base_target_speed_mps, raw_steering_rad
+                            arguments,
+                            stanley,
+                            base_target_speed_mps,
+                            raw_steering_rad,
+                            result.remaining_distance_m,
                         )
                     )
                     accel, brake = speed_controller.compute(
