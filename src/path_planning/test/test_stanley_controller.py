@@ -295,7 +295,7 @@ class StanleyControllerTest(unittest.TestCase):
 
     def test_ins_runtime_defaults_to_competition_pure_pursuit(self):
         arguments = argument_parser("ins").parse_args([])
-        self.assertEqual(arguments.target_speed_kmh, 45.0)
+        self.assertEqual(arguments.target_speed_kmh, 30.0)
         self.assertEqual(arguments.gps_port, 3001)
         self.assertEqual(arguments.imu_port, 4001)
         self.assertEqual(arguments.competition_status_host_port, 9080)

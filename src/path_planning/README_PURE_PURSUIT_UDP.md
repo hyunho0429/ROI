@@ -121,7 +121,7 @@ CSV에는 `latitude/longitude/altitude`, `global_enu_x/y/z`, 고정
 경로 형상이 아니며 현재 위치추정에도 재사용할 수 없으므로 저장하지 않는다.
 
 `target_speed` 열이 있으면 lookahead target의 속도를 사용하고, 대회 기본
-3열 경로처럼 속도 열이 없으면 `--target-speed-kmh`(기본 45 km/h)를 사용한다.
+3열 경로처럼 속도 열이 없으면 `--target-speed-kmh`(기본 30 km/h)를 사용한다.
 
 ## Pure Pursuit 조향
 
@@ -330,7 +330,7 @@ steering과 함께 `longCmdType=1` 패킷으로 전송된다. launch 인자는 �
 
 ```bash
 roslaunch path_planning morai_pure_pursuit_udp.launch \
-  target_speed_kmh:=45.0 \
+  target_speed_kmh:=30.0 \
   speed_kp:=0.075 speed_ki:=0.0001 speed_kd:=0.025
 ```
 
@@ -350,7 +350,7 @@ python3 src/path_planning/src/morai_pure_pursuit_ins_udp.py \
 위 명령에서 생략한 기본값은 코드의 `morai_competition_config.py`에 있다.
 GPS `3001`, IMU `4001`, Competition Status `9080 -> 9081`, CollisionData
 `9091 -> 9092`, Ego Ctrl Cmd `9094 -> 192.168.56.1:9093`, 목표 속도
-`45 km/h`이다. 목표 속도는
+`30 km/h`이다. 목표 속도는
 고정값이고, INS가 추정한 현재 속도와의 오차로 accel/brake를 계산한다.
 
 `--control-ip`에는 MORAI가 실행되는 PC의 IPv4 주소를 넣는다. 같은 PC라면
@@ -372,7 +372,7 @@ python3 src/path_planning/src/morai_udp_control_check.py
 ```text
 localization: GPS/IMU/status-aided 15-state error-state EKF INS
 alignment: hold brake for 2.0s (at least 20 IMU samples)
-Pure Pursuit: Ld=clip(2.00+0.50*speed, 2.00, 12.00)m, wheelbase=3.00m, steering_offset=+3.00deg, fixed speed 45.0 km/h
+Pure Pursuit: Ld=clip(2.00+0.50*speed, 2.00, 12.00)m, wheelbase=3.00m, steering_offset=+3.00deg, fixed speed 30.0 km/h
 steering smoothing: alpha=0.15, max_rate=0.25 rad/s
 requesting AV-ExternalCtrl (ctrl_mode=2) and Drive (gear=4)
 Competition control state: ctrl_mode=2 (AV-ExternalCtrl), gear=4 (D)
