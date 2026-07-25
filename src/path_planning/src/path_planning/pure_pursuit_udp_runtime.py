@@ -161,10 +161,10 @@ def argument_parser(localization_mode):
     parser.add_argument("--lookahead-speed-gain", type=float, default=0.15)
     parser.add_argument("--minimum-lookahead", type=float, default=2.0)
     parser.add_argument("--maximum-lookahead", type=float, default=4.0)
-    parser.add_argument("--stanley-gain", type=float, default=0.35)
-    parser.add_argument("--softening-speed", type=float, default=2.0)
+    parser.add_argument("--stanley-gain", type=float, default=0.45)
+    parser.add_argument("--softening-speed", type=float, default=1.5)
     parser.add_argument("--heading-error-gain", type=float, default=1.0)
-    parser.add_argument("--cross-track-error-gain", type=float, default=0.65)
+    parser.add_argument("--cross-track-error-gain", type=float, default=0.75)
     parser.add_argument("--cross-track-deadband", type=float, default=0.05)
     parser.add_argument("--goal-tolerance", type=float, default=2.0)
     parser.add_argument(
@@ -182,8 +182,14 @@ def argument_parser(localization_mode):
     parser.add_argument(
         "--control-point-offset",
         type=float,
-        default=2.0,
+        default=1.5,
         help="front axle/control point offset from localization point",
+    )
+    parser.add_argument(
+        "--heading-preview-distance",
+        type=float,
+        default=8.0,
+        help="distance ahead of the nearest segment used for Stanley heading error",
     )
     parser.add_argument("--minimum-waypoint-spacing", type=float, default=0.5)
     parser.add_argument("--waypoint-smoothing-window", type=int, default=9)
@@ -274,6 +280,7 @@ def _validate(arguments):
         "minimum_lookahead",
         "maximum_lookahead",
         "softening_speed",
+        "heading_preview_distance",
         "goal_tolerance",
     )
     for name in positive_names:
@@ -357,6 +364,7 @@ def run(localization_mode, arguments):
         softening_speed_mps=arguments.softening_speed,
         max_steering_deg=arguments.max_steering_deg,
         control_point_offset_m=arguments.control_point_offset,
+        heading_preview_distance_m=arguments.heading_preview_distance,
         heading_error_gain=arguments.heading_error_gain,
         cross_track_error_gain=arguments.cross_track_error_gain,
         cross_track_deadband_m=arguments.cross_track_deadband,
@@ -505,10 +513,12 @@ def run(localization_mode, arguments):
     else:
         print("  localization: GPS/IMU/status-aided dead reckoning")
     print(
-        "  Stanley: front axle {:.2f} m, gain={:.3f}, softening={:.2f} m/s, "
+        "  Stanley: front {:.2f} m, heading_preview={:.2f} m, "
+        "gain={:.3f}, softening={:.2f} m/s, "
         "heading_gain={:.2f}, cte_gain={:.2f}, deadband={:.2f} m, "
         "fixed speed {:.1f} km/h".format(
             arguments.control_point_offset,
+            arguments.heading_preview_distance,
             arguments.stanley_gain,
             arguments.softening_speed,
             arguments.heading_error_gain,
@@ -740,7 +750,8 @@ def run(localization_mode, arguments):
                     print(
                         "{} pos=({:.2f},{:.2f},{:.2f}) speed={:.2f}/{:.2f} "
                         "vel_x={:+.2f}km/h "
-                        "front={:.2f}m yaw/path={:+.1f}/{:+.1f}deg herr={:+.1f}deg "
+                        "front={:.2f}m preview={:.1f}m "
+                        "yaw/path={:+.1f}/{:+.1f}deg herr={:+.1f}deg "
                         "cte={:+.2f}m steer(raw/filt)={:+.2f}/{:+.2f}deg "
                         "cmd=({:.2f},{:+.2f},{:.2f}) "
                         "feedback=({:.2f},{:+.2f}deg,{:.2f}) "
@@ -753,6 +764,7 @@ def run(localization_mode, arguments):
                             target_speed_mps,
                             status_vel_x_kmh,
                             stanley.control_point_offset_m,
+                            stanley.heading_preview_distance_m,
                             math.degrees(state.yaw_rad),
                             math.degrees(result.path_yaw_rad),
                             math.degrees(result.heading_error_rad),

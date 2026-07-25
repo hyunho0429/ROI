@@ -607,6 +607,7 @@ class StanleyController:
         softening_speed_mps=3.0,
         max_steering_deg=21.77,
         control_point_offset_m=3.0,
+        heading_preview_distance_m=0.0,
         heading_error_gain=1.0,
         cross_track_error_gain=0.55,
         cross_track_deadband_m=0.05,
@@ -629,6 +630,7 @@ class StanleyController:
         self.softening_speed_mps = float(softening_speed_mps)
         self.max_steering_rad = math.radians(float(max_steering_deg))
         self.control_point_offset_m = float(control_point_offset_m)
+        self.heading_preview_distance_m = max(0.0, float(heading_preview_distance_m))
         self.heading_error_gain = float(heading_error_gain)
         self.cross_track_error_gain = float(cross_track_error_gain)
         self.cross_track_deadband_m = max(0.0, float(cross_track_deadband_m))
@@ -643,6 +645,15 @@ class StanleyController:
                 self._cumulative[-1]
                 + math.dist((first.x_m, first.y_m, first.z_m), (second.x_m, second.y_m, second.z_m))
             )
+
+    def _segment_at_progress(self, progress_m):
+        progress = max(0.0, min(self._cumulative[-1], float(progress_m)))
+        if progress >= self._cumulative[-1]:
+            return max(0, len(self.points) - 2)
+        for index in range(len(self._cumulative) - 1):
+            if self._cumulative[index] <= progress <= self._cumulative[index + 1]:
+                return min(index, len(self.points) - 2)
+        return max(0, len(self.points) - 2)
 
     def _nearest_segment(self, x_m, y_m, z_m):
         if self._last_segment is None:
@@ -689,9 +700,18 @@ class StanleyController:
         tangent_x, tangent_y = dx / length_xy, dy / length_xy
         segment_3d = self._cumulative[index + 1] - self._cumulative[index]
         progress = self._cumulative[index] + fraction * segment_3d
-        # Strict Stanley: the nearest path segment supplies the desired
-        # heading.  No Pure Pursuit-style look-ahead target is used.
-        path_yaw = math.atan2(tangent_y, tangent_x)
+        # Stanley CTE is still calculated at the nearest/control segment, but
+        # heading can optionally preview a segment farther along the path.
+        # This makes turn-in start earlier without switching to Pure Pursuit.
+        heading_index = self._segment_at_progress(
+            progress + self.heading_preview_distance_m
+        )
+        heading_first = self.points[heading_index]
+        heading_second = self.points[heading_index + 1]
+        path_yaw = math.atan2(
+            heading_second.y_m - heading_first.y_m,
+            heading_second.x_m - heading_first.x_m,
+        )
         heading_error = wrap_angle(path_yaw - yaw_rad)
         # Positive means the control point is to the left of the directed path.
         cross_track_error = (

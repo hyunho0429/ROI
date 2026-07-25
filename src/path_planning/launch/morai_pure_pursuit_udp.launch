@@ -24,11 +24,12 @@
     <arg name="max_accel_pedal" default="1.0"/>
     <arg name="max_brake_pedal" default="1.0"/>
 
-    <arg name="stanley_gain" default="0.35"/>
-    <arg name="softening_speed" default="2.0"/>
-    <arg name="control_point_offset" default="2.0"/>
+    <arg name="stanley_gain" default="0.45"/>
+    <arg name="softening_speed" default="1.5"/>
+    <arg name="control_point_offset" default="1.5"/>
+    <arg name="heading_preview_distance" default="8.0"/>
     <arg name="heading_error_gain" default="1.0"/>
-    <arg name="cross_track_error_gain" default="0.65"/>
+    <arg name="cross_track_error_gain" default="0.75"/>
     <arg name="cross_track_deadband" default="0.05"/>
     <arg name="max_steering_deg" default="21.77"/>
     <arg name="vehicle_max_steering_deg" default="36.25"/>
@@ -68,6 +69,7 @@
                 --stanley-gain $(arg stanley_gain)
                 --softening-speed $(arg softening_speed)
                 --control-point-offset $(arg control_point_offset)
+                --heading-preview-distance $(arg heading_preview_distance)
                 --heading-error-gain $(arg heading_error_gain)
                 --cross-track-error-gain $(arg cross_track_error_gain)
                 --cross-track-deadband $(arg cross_track_deadband)
