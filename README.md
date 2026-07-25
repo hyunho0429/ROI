@@ -23,7 +23,7 @@ Status, CollisionData 및 Ego Ctrl Cmd는 모두 UDP로 통신한다.
 | `gear` | 4 | Drive |
 | `longCmdType` | 1 | accel/brake 직접 제어 |
 | 제어 주기 | 30 Hz | PID 및 Pure Pursuit 계산 주기 |
-| 목표 속도 | 10 km/h | launch 인자로 변경 가능 |
+| 목표 속도 | 45 km/h | launch 인자로 변경 가능 |
 | 차량 모델 | 2023 Hyundai IONIQ 5 | 대회 규정집 기준 |
 | wheelbase | 3.0 m | IONIQ 5 축간거리 |
 | 차폭 | 1.892 m | IONIQ 5 차폭 |
@@ -190,7 +190,7 @@ roslaunch path_planning morai_pure_pursuit_udp.launch \
 
 기본 전역 경로는
 `src/path_planning/data/2026_molit_comp_global_path.txt`이고 목표 속도는
-`10 km/h`이다.
+`45 km/h`이다.
 
 목표 속도와 PID 이득을 변경하는 예:
 
@@ -218,7 +218,7 @@ roslaunch path_planning morai_pure_pursuit_udp.launch \
 ```text
 localization: GPS/IMU/status-aided 15-state error-state EKF INS
 alignment: hold brake for 2.0s (at least 20 IMU samples)
-Pure Pursuit: Ld=clip(2.50+0.50*speed, 2.50, 12.00)m, wheelbase=3.00m, steering_offset=+3.00deg, fixed speed 10.0 km/h
+Pure Pursuit: Ld=clip(2.50+0.50*speed, 2.50, 12.00)m, wheelbase=3.00m, steering_offset=+3.00deg, fixed speed 45.0 km/h
 requesting AV-ExternalCtrl (ctrl_mode=2) and Drive (gear=4)
 Competition control state: ctrl_mode=2 (AV-ExternalCtrl), gear=4 (D)
 ```

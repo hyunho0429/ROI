@@ -40,7 +40,7 @@ MGeo 원점 기준 ENU 변환을 사용한다.
 
 경로는 최소 0.5 m 간격과 9점 이동평균을 적용한다. 횡제어는 속도 비례 lookahead
 target과 kinematic bicycle model을 사용하는 Pure Pursuit이다. 경로에
-`target_speed`가 없으면 기본 10 km/h를 `longCmdType 1`의 accel/brake PID 제어로
+`target_speed`가 없으면 기본 45 km/h를 `longCmdType 1`의 accel/brake PID 제어로
 추종한다.
 
 ## 1. INS error-state EKF 버전
@@ -122,7 +122,7 @@ GPS Blackout의 `(0,0,0)` NMEA 위치는 유효한 측정으로 사용하지 않
 1. 외부 제어를 끄고 네 UDP 수신 로그와 패킷 길이를 확인한다.
 2. 차량 정지 상태에서 INS Z drift와 DR 위치 정지를 확인한다.
 3. 직선에서 5 km/h로 조향 부호와 ENU 축을 확인한다.
-4. 10 km/h에서 짧은 GPS Blackout 구간을 시험한다.
+4. 45 km/h에서 짧은 GPS Blackout 구간을 시험한다.
 5. INS와 DR의 터널 출구 위치 오차를 비교한 후 gain/noise를 조정한다.
 
 `Competition Vehicle Status`는 공개 `Ego Vehicle Status`와 다른 대회 전용
