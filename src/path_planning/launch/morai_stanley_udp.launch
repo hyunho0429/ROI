@@ -31,7 +31,7 @@
     <arg name="stanley_gain" default="0.35"/>
     <arg name="softening_speed" default="2.2"/>
     <arg name="stanley_control_speed_floor_kmh" default="35.0"/>
-    <arg name="lane_center_shift_m" default="1.00"/>
+    <arg name="lane_center_shift_m" default="0.85"/>
     <arg name="path_lateral_offset_m" default="0.0"/>
     <arg name="control_point_offset" default="1.5"/>
     <arg name="heading_preview_distance" default="4.0"/>
