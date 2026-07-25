@@ -100,6 +100,18 @@ def _curve_limited_target_speed_mps(arguments, base_target_speed_mps, steering_r
     return base_target_speed_mps, "straight"
 
 
+def _startup_lane_safety_bias_rad(arguments, route_progress_m, steering_rad):
+    """Nudge left only in the initial near-straight segment."""
+    if route_progress_m is None:
+        return 0.0
+    if route_progress_m >= arguments.startup_lane_bias_distance_m:
+        return 0.0
+    if abs(math.degrees(steering_rad)) > arguments.startup_lane_bias_max_steering_deg:
+        return 0.0
+    fade = 1.0 - route_progress_m / arguments.startup_lane_bias_distance_m
+    return math.radians(arguments.startup_lane_bias_deg) * max(0.0, min(1.0, fade))
+
+
 def argument_parser(localization_mode):
     parser = argparse.ArgumentParser(
         description=(
@@ -232,6 +244,9 @@ def argument_parser(localization_mode):
     )
     parser.add_argument("--steering-filter-alpha", type=float, default=0.15)
     parser.add_argument("--max-steering-rate-radps", type=float, default=0.35)
+    parser.add_argument("--startup-lane-bias-deg", type=float, default=0.8)
+    parser.add_argument("--startup-lane-bias-distance-m", type=float, default=25.0)
+    parser.add_argument("--startup-lane-bias-max-steering-deg", type=float, default=3.0)
     parser.add_argument(
         "--morai-steer-sign", type=float, choices=(-1.0, 1.0), default=1.0
     )
@@ -318,6 +333,8 @@ def _validate(arguments):
         "sharp_curve_speed_kmh",
         "medium_curve_steering_deg",
         "sharp_curve_steering_deg",
+        "startup_lane_bias_distance_m",
+        "startup_lane_bias_max_steering_deg",
         "goal_tolerance",
     )
     for name in positive_names:
@@ -340,6 +357,7 @@ def _validate(arguments):
         "cross_track_error_gain",
         "cross_track_deadband",
         "heading_preview_deadband_deg",
+        "startup_lane_bias_deg",
         "minimum_waypoint_spacing",
         "max_steering_rate_radps",
         "speed_kp",
@@ -482,6 +500,7 @@ def run(localization_mode, arguments):
     status_ctrl_mode = status_gear = None
     status_accel_pedal = status_brake_pedal = status_front_steer_deg = 0.0
     last_drive_state = None
+    route_initial_remaining_m = None
     collision_brake_until = 0.0
     invalid_counts = {name: 0 for name, _port in channels}
     unexpected_source_counts = {"status": 0, "collision": 0}
@@ -593,6 +612,14 @@ def run(localization_mode, arguments):
         "  steering smoothing: alpha={:.2f}, max_rate={:.2f} rad/s".format(
             arguments.steering_filter_alpha,
             arguments.max_steering_rate_radps,
+        )
+    )
+    print(
+        "  startup lane safety: left bias {:.2f} deg over {:.1f} m "
+        "when |raw steer| <= {:.1f} deg".format(
+            arguments.startup_lane_bias_deg,
+            arguments.startup_lane_bias_distance_m,
+            arguments.startup_lane_bias_max_steering_deg,
         )
     )
     print(
@@ -737,6 +764,7 @@ def run(localization_mode, arguments):
                 result = None
                 target_speed_mps = 0.0
                 raw_steering_rad = filtered_steering_rad = 0.0
+                startup_bias_rad = 0.0
                 normalized_steering = 0.0
                 curve_speed_mode = "stop"
             else:
@@ -757,12 +785,22 @@ def run(localization_mode, arguments):
                     command = brake_command()
                     target_speed_mps = 0.0
                     raw_steering_rad = filtered_steering_rad = 0.0
+                    startup_bias_rad = 0.0
                     normalized_steering = 0.0
                     curve_speed_mode = "goal"
                 else:
                     raw_steering_rad = result.steering_rad
+                    if route_initial_remaining_m is None:
+                        route_initial_remaining_m = result.remaining_distance_m
+                    route_progress_m = max(
+                        0.0,
+                        route_initial_remaining_m - result.remaining_distance_m,
+                    )
+                    startup_bias_rad = _startup_lane_safety_bias_rad(
+                        arguments, route_progress_m, raw_steering_rad
+                    )
                     filtered_steering_rad = steering_filter.update(
-                        raw_steering_rad, now
+                        raw_steering_rad + startup_bias_rad, now
                     )
                     normalized_steering = arguments.morai_steer_sign * (
                         filtered_steering_rad
@@ -826,7 +864,7 @@ def run(localization_mode, arguments):
                         "vel_x={:+.2f}km/h "
                         "front={:.2f}m preview={:.1f}m "
                         "yaw/path={:+.1f}/{:+.1f}deg herr={:+.1f}deg "
-                        "cte={:+.2f}m steer(raw/filt)={:+.2f}/{:+.2f}deg "
+                        "cte={:+.2f}m steer(raw/bias/filt)={:+.2f}/{:+.2f}/{:+.2f}deg "
                         "cmd=({:.2f},{:+.2f},{:.2f}) "
                         "feedback=({:.2f},{:+.2f}deg,{:.2f}) "
                         "remain={:.1f}m{}".format(
@@ -845,6 +883,7 @@ def run(localization_mode, arguments):
                             math.degrees(result.heading_error_rad),
                             result.cross_track_error_m,
                             math.degrees(raw_steering_rad),
+                            math.degrees(startup_bias_rad),
                             math.degrees(filtered_steering_rad),
                             command.accel,
                             command.steering_normalized,

@@ -42,6 +42,9 @@
     <arg name="vehicle_max_steering_deg" default="36.25"/>
     <arg name="steering_filter_alpha" default="0.15"/>
     <arg name="max_steering_rate_radps" default="0.35"/>
+    <arg name="startup_lane_bias_deg" default="0.8"/>
+    <arg name="startup_lane_bias_distance_m" default="25.0"/>
+    <arg name="startup_lane_bias_max_steering_deg" default="3.0"/>
     <arg name="morai_steer_sign" default="1.0"/>
 
     <arg name="alignment_seconds" default="2.0"/>
@@ -91,6 +94,9 @@
                 --vehicle-max-steering-deg $(arg vehicle_max_steering_deg)
                 --steering-filter-alpha $(arg steering_filter_alpha)
                 --max-steering-rate-radps $(arg max_steering_rate_radps)
+                --startup-lane-bias-deg $(arg startup_lane_bias_deg)
+                --startup-lane-bias-distance-m $(arg startup_lane_bias_distance_m)
+                --startup-lane-bias-max-steering-deg $(arg startup_lane_bias_max_steering_deg)
                 --morai-steer-sign $(arg morai_steer_sign)
                 --alignment-seconds $(arg alignment_seconds)
                 --alignment-min-samples $(arg alignment_min_samples)
