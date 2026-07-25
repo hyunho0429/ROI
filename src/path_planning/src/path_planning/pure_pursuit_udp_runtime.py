@@ -182,7 +182,7 @@ def argument_parser(localization_mode):
     parser.add_argument(
         "--control-point-offset",
         type=float,
-        default=3.0,
+        default=VEHICLE_WHEELBASE_M,
         help="front axle/control point offset from localization point",
     )
     parser.add_argument("--minimum-waypoint-spacing", type=float, default=0.5)
@@ -594,6 +594,11 @@ def run(localization_mode, arguments):
                         status_front_steer_deg = status.front_steer_deg
                         if status.wheelbase_m > 0.5:
                             status_wheelbase_m = status.wheelbase_m
+                            # Stanley should use the front axle as the control
+                            # point.  Competition status provides wheelbase, so
+                            # if the localization point is the rear axle, this
+                            # keeps the projected control point on the front axle.
+                            stanley.control_point_offset_m = status_wheelbase_m
                         latest_status_time = received
                         drive_state = (status_ctrl_mode, status_gear)
                         if drive_state != last_drive_state:
@@ -730,7 +735,7 @@ def run(localization_mode, arguments):
                     print(
                         "{} pos=({:.2f},{:.2f},{:.2f}) speed={:.2f}/{:.2f} "
                         "vel_x={:+.2f}km/h "
-                        "yaw/path={:+.1f}/{:+.1f}deg herr={:+.1f}deg "
+                        "front={:.2f}m yaw/path={:+.1f}/{:+.1f}deg herr={:+.1f}deg "
                         "cte={:+.2f}m steer(raw/filt)={:+.2f}/{:+.2f}deg "
                         "cmd=({:.2f},{:+.2f},{:.2f}) "
                         "feedback=({:.2f},{:+.2f}deg,{:.2f}) "
@@ -742,6 +747,7 @@ def run(localization_mode, arguments):
                             state.speed_mps,
                             target_speed_mps,
                             status_vel_x_kmh,
+                            stanley.control_point_offset_m,
                             math.degrees(state.yaw_rad),
                             math.degrees(result.path_yaw_rad),
                             math.degrees(result.heading_error_rad),

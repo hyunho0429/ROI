@@ -17,7 +17,7 @@
     <arg name="control_protocol" default="25s4"/>
 
     <arg name="control_rate_hz" default="30.0"/>
-    <arg name="target_speed_kmh" default="60.0"/>
+    <arg name="target_speed_kmh" default="50.0"/>
     <arg name="speed_kp" default="0.075"/>
     <arg name="speed_ki" default="0.0001"/>
     <arg name="speed_kd" default="0.025"/>
