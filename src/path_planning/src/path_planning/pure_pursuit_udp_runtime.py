@@ -272,7 +272,7 @@ def argument_parser(localization_mode):
     parser.add_argument(
         "--heading-preview-distance",
         type=float,
-        default=4.0,
+        default=3.5,
         help="distance ahead of the nearest segment used for Stanley heading error",
     )
     parser.add_argument(
