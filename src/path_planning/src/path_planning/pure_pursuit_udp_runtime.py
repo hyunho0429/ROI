@@ -246,7 +246,7 @@ def argument_parser(localization_mode):
     parser.add_argument("--stanley-gain", type=float, default=0.35)
     parser.add_argument("--softening-speed", type=float, default=2.2)
     parser.add_argument("--stanley-control-speed-floor-kmh", type=float, default=35.0)
-    parser.add_argument("--path-lateral-offset-m", type=float, default=0.90)
+    parser.add_argument("--path-lateral-offset-m", type=float, default=0.45)
     parser.add_argument("--heading-error-gain", type=float, default=0.74)
     parser.add_argument("--cross-track-error-gain", type=float, default=0.58)
     parser.add_argument("--cross-track-deadband", type=float, default=0.02)
@@ -272,7 +272,7 @@ def argument_parser(localization_mode):
     parser.add_argument(
         "--heading-preview-distance",
         type=float,
-        default=3.5,
+        default=4.0,
         help="distance ahead of the nearest segment used for Stanley heading error",
     )
     parser.add_argument(
@@ -297,7 +297,6 @@ def argument_parser(localization_mode):
     )
     parser.add_argument("--steering-filter-alpha", type=float, default=0.35)
     parser.add_argument("--max-steering-rate-radps", type=float, default=0.75)
-    parser.add_argument("--steering-trim-deg", type=float, default=0.75)
     parser.add_argument("--startup-lane-bias-deg", type=float, default=0.0)
     parser.add_argument("--startup-lane-bias-distance-m", type=float, default=25.0)
     parser.add_argument("--startup-lane-bias-max-steering-deg", type=float, default=3.0)
@@ -444,8 +443,6 @@ def _validate(arguments):
         raise ValueError("control-point-offset must be finite")
     if not math.isfinite(arguments.path_lateral_offset_m):
         raise ValueError("path-lateral-offset-m must be finite")
-    if not math.isfinite(arguments.steering_trim_deg):
-        raise ValueError("steering-trim-deg must be finite")
     if hasattr(arguments, "alignment_seconds"):
         if arguments.alignment_seconds < 0.0:
             raise ValueError("alignment-seconds cannot be negative")
@@ -683,7 +680,6 @@ def run(localization_mode, arguments):
             arguments.max_steering_rate_radps,
         )
     )
-    print("  steering trim: {:+.2f} deg".format(arguments.steering_trim_deg))
     print(
         "  startup lane safety: left bias {:.2f} deg over {:.1f} m "
         "when |raw steer| <= {:.1f} deg".format(
@@ -846,7 +842,7 @@ def run(localization_mode, arguments):
                 command = brake_command()
                 result = None
                 target_speed_mps = 0.0
-                raw_steering_rad = guarded_steering_rad = filtered_steering_rad = trimmed_steering_rad = 0.0
+                raw_steering_rad = guarded_steering_rad = filtered_steering_rad = 0.0
                 startup_bias_rad = 0.0
                 steering_scale = 1.0
                 normalized_steering = 0.0
@@ -868,7 +864,7 @@ def run(localization_mode, arguments):
                     steering_filter.reset()
                     command = brake_command()
                     target_speed_mps = 0.0
-                    raw_steering_rad = guarded_steering_rad = filtered_steering_rad = trimmed_steering_rad = 0.0
+                    raw_steering_rad = guarded_steering_rad = filtered_steering_rad = 0.0
                     startup_bias_rad = 0.0
                     steering_scale = 1.0
                     normalized_steering = 0.0
@@ -891,16 +887,8 @@ def run(localization_mode, arguments):
                     filtered_steering_rad = steering_filter.update(
                         guarded_steering_rad * steering_scale + startup_bias_rad, now
                     )
-                    trimmed_steering_rad = max(
-                        -stanley.max_steering_rad,
-                        min(
-                            stanley.max_steering_rad,
-                            filtered_steering_rad
-                            + math.radians(arguments.steering_trim_deg),
-                        ),
-                    )
                     normalized_steering = arguments.morai_steer_sign * (
-                        trimmed_steering_rad
+                        filtered_steering_rad
                         / math.radians(arguments.vehicle_max_steering_deg)
                     )
                     normalized_steering = max(
@@ -961,7 +949,7 @@ def run(localization_mode, arguments):
                         "vel_x={:+.2f}km/h "
                         "front={:.2f}m preview={:.1f}m "
                         "yaw/path={:+.1f}/{:+.1f}deg herr={:+.1f}deg "
-                        "cte={:+.2f}m steer(raw/guard/scale/bias/filt/trim)={:+.2f}/{:+.2f}/{:.2f}/{:+.2f}/{:+.2f}/{:+.2f}deg "
+                        "cte={:+.2f}m steer(raw/guard/scale/bias/filt)={:+.2f}/{:+.2f}/{:.2f}/{:+.2f}/{:+.2f}deg "
                         "cmd=({:.2f},{:+.2f},{:.2f}) "
                         "feedback=({:.2f},{:+.2f}deg,{:.2f}) "
                         "remain={:.1f}m{}".format(
@@ -984,7 +972,6 @@ def run(localization_mode, arguments):
                             steering_scale,
                             math.degrees(startup_bias_rad),
                             math.degrees(filtered_steering_rad),
-                            math.degrees(trimmed_steering_rad),
                             command.accel,
                             command.steering_normalized,
                             command.brake,
