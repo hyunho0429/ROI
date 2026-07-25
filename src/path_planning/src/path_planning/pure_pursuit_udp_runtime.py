@@ -176,6 +176,12 @@ def argument_parser(localization_mode):
         help="steering correction in degrees; sign opposes steering direction",
     )
     parser.add_argument(
+        "--steering-offset-max-apply-deg",
+        type=float,
+        default=8.0,
+        help="apply steering-offset-deg only when raw steering magnitude is at or below this angle",
+    )
+    parser.add_argument(
         "--control-point-offset",
         type=float,
         default=0.0,
@@ -190,7 +196,7 @@ def argument_parser(localization_mode):
         help="allow the nearest segment search to move up to five segments backward",
     )
     parser.add_argument("--steering-filter-alpha", type=float, default=0.15)
-    parser.add_argument("--max-steering-rate-radps", type=float, default=0.25)
+    parser.add_argument("--max-steering-rate-radps", type=float, default=0.35)
     parser.add_argument(
         "--morai-steer-sign", type=float, choices=(-1.0, 1.0), default=1.0
     )
@@ -293,6 +299,10 @@ def _validate(arguments):
         raise ValueError("steering-filter-alpha must be between 0 and 1")
     if not math.isfinite(arguments.steering_offset_deg):
         raise ValueError("steering-offset-deg must be finite")
+    if arguments.steering_offset_max_apply_deg < 0.0:
+        raise ValueError("steering-offset-max-apply-deg cannot be negative")
+    if not math.isfinite(arguments.steering_offset_max_apply_deg):
+        raise ValueError("steering-offset-max-apply-deg must be finite")
     if arguments.waypoint_smoothing_window < 1:
         raise ValueError("waypoint-smoothing-window must be at least 1")
     if arguments.target_search_window < 1:
@@ -337,9 +347,16 @@ def _localizer(localization_mode, arguments):
     )
 
 
-def apply_opposing_steering_offset(steering_rad, offset_deg, max_abs_rad):
-    """Reduce steering magnitude by offset_deg without flipping steer sign."""
+def apply_opposing_steering_offset(
+    steering_rad,
+    offset_deg,
+    max_abs_rad,
+    max_apply_deg=8.0,
+):
+    """Reduce small steering magnitude by offset_deg without weakening turns."""
     if abs(steering_rad) <= 1e-9 or abs(offset_deg) <= 1e-9:
+        adjusted = steering_rad
+    elif abs(steering_rad) > math.radians(max(0.0, float(max_apply_deg))):
         adjusted = steering_rad
     else:
         adjusted_magnitude = max(
@@ -526,6 +543,12 @@ def run(localization_mode, arguments):
         )
     )
     print(
+        "  steering offset: {:.2f}deg below {:.2f}deg raw steering".format(
+            arguments.steering_offset_deg,
+            arguments.steering_offset_max_apply_deg,
+        )
+    )
+    print(
         "  longitudinal PID: Kp={:.6f}, Ki={:.6f}, Kd={:.6f} at {:.1f} Hz".format(
             arguments.speed_kp,
             arguments.speed_ki,
@@ -681,6 +704,7 @@ def run(localization_mode, arguments):
                         result.steering_rad,
                         arguments.steering_offset_deg,
                         pure_pursuit.max_steering_rad,
+                        arguments.steering_offset_max_apply_deg,
                     )
                     filtered_steering_rad = steering_filter.update(
                         raw_steering_rad, now

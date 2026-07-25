@@ -32,8 +32,9 @@
     <arg name="max_steering_deg" default="21.77"/>
     <arg name="vehicle_max_steering_deg" default="36.25"/>
     <arg name="steering_offset_deg" default="3.0"/>
+    <arg name="steering_offset_max_apply_deg" default="8.0"/>
     <arg name="steering_filter_alpha" default="0.15"/>
-    <arg name="max_steering_rate_radps" default="0.25"/>
+    <arg name="max_steering_rate_radps" default="0.35"/>
     <arg name="morai_steer_sign" default="1.0"/>
 
     <arg name="alignment_seconds" default="2.0"/>
@@ -73,6 +74,7 @@
                 --max-steering-deg $(arg max_steering_deg)
                 --vehicle-max-steering-deg $(arg vehicle_max_steering_deg)
                 --steering-offset-deg $(arg steering_offset_deg)
+                --steering-offset-max-apply-deg $(arg steering_offset_max_apply_deg)
                 --steering-filter-alpha $(arg steering_filter_alpha)
                 --max-steering-rate-radps $(arg max_steering_rate_radps)
                 --morai-steer-sign $(arg morai_steer_sign)

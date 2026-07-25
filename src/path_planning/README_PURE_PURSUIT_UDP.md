@@ -52,7 +52,7 @@ CollisionData ──────────────────────
 - 한 제어 주기에서 최대 50개 segment만 검색
 - 전륜축 제어점 기본 오프셋 3.0 m
 - CTE 0.05 m deadband
-- 조향 저역통과 필터와 최대 변화율 0.25 rad/s
+- 조향 저역통과 필터와 최대 변화율 0.35 rad/s
 
 로컬 ENU 변환은 AutoVehicle과 동일한 근거리 식이다.
 
@@ -373,7 +373,8 @@ python3 src/path_planning/src/morai_udp_control_check.py
 localization: GPS/IMU/status-aided 15-state error-state EKF INS
 alignment: hold brake for 2.0s (at least 20 IMU samples)
 Pure Pursuit: Ld=clip(2.00+0.50*speed, 2.00, 12.00)m, wheelbase=3.00m, steering_offset=+3.00deg, fixed speed 30.0 km/h
-steering smoothing: alpha=0.15, max_rate=0.25 rad/s
+steering smoothing: alpha=0.15, max_rate=0.35 rad/s
+steering offset: 3.00deg below 8.00deg raw steering
 requesting AV-ExternalCtrl (ctrl_mode=2) and Drive (gear=4)
 Competition control state: ctrl_mode=2 (AV-ExternalCtrl), gear=4 (D)
 ```
@@ -390,7 +391,8 @@ Cmd Control의 Host IP/Port를 점검한다. feedback에도 accel이 들어오�
 - `--minimum-lookahead`, `--maximum-lookahead`: lookahead 제한
 - `--wheelbase`: 상태 패킷 수신 전 사용할 기본 wheelbase
 - `--control-point-offset`: GPS/INS 위치에서 제어점까지 전방(+)·후방(-) 거리
-- `--steering-offset-deg`: Pure Pursuit 조향 방향 반대로 적용해 조향각 크기를 줄이는 offset
+- `--steering-offset-deg`: 작은 Pure Pursuit 조향각에만 반대로 적용해 미세조향을 줄이는 offset
+- `--steering-offset-max-apply-deg`: 이 각도보다 큰 코너 조향에는 offset을 적용하지 않음
 - `--max-steering-deg`: Pure Pursuit이 낼 수 있는 조향각 제한
 - `--vehicle-max-steering-deg`: MORAI normalized steering ±1의 실제 조향각
 - `--alignment-seconds`, `--alignment-min-samples`: 정지 bias 초기화 조건

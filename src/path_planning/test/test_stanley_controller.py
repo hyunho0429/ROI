@@ -317,7 +317,8 @@ class StanleyControllerTest(unittest.TestCase):
         self.assertEqual(arguments.minimum_lookahead, 2.0)
         self.assertEqual(arguments.maximum_lookahead, 12.0)
         self.assertEqual(arguments.steering_filter_alpha, 0.15)
-        self.assertEqual(arguments.max_steering_rate_radps, 0.25)
+        self.assertEqual(arguments.steering_offset_max_apply_deg, 8.0)
+        self.assertEqual(arguments.max_steering_rate_radps, 0.35)
         self.assertEqual(arguments.alignment_seconds, 2.0)
         self.assertEqual(arguments.alignment_min_samples, 20)
         self.assertEqual(arguments.morai_steer_sign, 1.0)
@@ -328,25 +329,31 @@ class StanleyControllerTest(unittest.TestCase):
         self.assertFalse(hasattr(arguments, "stanley_gain"))
         self.assertEqual(arguments.target_search_window, 50)
 
-    def test_opposing_steering_offset_reduces_magnitude(self):
+    def test_opposing_steering_offset_reduces_only_small_magnitude(self):
         max_abs_rad = math.radians(20.0)
         self.assertAlmostEqual(
             apply_opposing_steering_offset(
-                math.radians(10.0), 3.0, max_abs_rad
+                math.radians(5.0), 3.0, max_abs_rad, 8.0
             ),
-            math.radians(7.0),
+            math.radians(2.0),
         )
         self.assertAlmostEqual(
             apply_opposing_steering_offset(
-                math.radians(-10.0), 3.0, max_abs_rad
+                math.radians(-5.0), 3.0, max_abs_rad, 8.0
             ),
-            math.radians(-7.0),
+            math.radians(-2.0),
         )
         self.assertAlmostEqual(
             apply_opposing_steering_offset(
-                math.radians(2.0), 3.0, max_abs_rad
+                math.radians(2.0), 3.0, max_abs_rad, 8.0
             ),
             0.0,
+        )
+        self.assertAlmostEqual(
+            apply_opposing_steering_offset(
+                math.radians(10.0), 3.0, max_abs_rad, 8.0
+            ),
+            math.radians(10.0),
         )
 
     def test_planar_filter_requires_both_gps_and_imu(self):
