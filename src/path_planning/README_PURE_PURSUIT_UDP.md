@@ -147,9 +147,9 @@ steering = atan(wheelbase * curvature)
 | vehicle | 2023 Hyundai IONIQ 5 |
 | length / width | 4.635 m / 1.892 m |
 | wheelbase | 3.0 m (Competition Status 수신값 우선) |
-| base lookahead | 2.5 m |
+| base lookahead | 2.0 m |
 | speed lookahead gain | 0.5 s |
-| lookahead limits | 2.5~12.0 m |
+| lookahead limits | 2.0~12.0 m |
 | control point offset | 0.0 m |
 | steering offset | +3.0° |
 | controller steering limit | 21.77° |
@@ -372,7 +372,7 @@ python3 src/path_planning/src/morai_udp_control_check.py
 ```text
 localization: GPS/IMU/status-aided 15-state error-state EKF INS
 alignment: hold brake for 2.0s (at least 20 IMU samples)
-Pure Pursuit: Ld=clip(2.50+0.50*speed, 2.50, 12.00)m, wheelbase=3.00m, steering_offset=+3.00deg, fixed speed 45.0 km/h
+Pure Pursuit: Ld=clip(2.00+0.50*speed, 2.00, 12.00)m, wheelbase=3.00m, steering_offset=+3.00deg, fixed speed 45.0 km/h
 requesting AV-ExternalCtrl (ctrl_mode=2) and Drive (gear=4)
 Competition control state: ctrl_mode=2 (AV-ExternalCtrl), gear=4 (D)
 ```
