@@ -17,7 +17,7 @@
     <arg name="control_protocol" default="25s4"/>
 
     <arg name="control_rate_hz" default="30.0"/>
-    <arg name="target_speed_kmh" default="50.0"/>
+    <arg name="target_speed_kmh" default="40.0"/>
     <arg name="speed_kp" default="0.075"/>
     <arg name="speed_ki" default="0.0001"/>
     <arg name="speed_kd" default="0.025"/>
@@ -28,6 +28,8 @@
     <arg name="softening_speed" default="1.5"/>
     <arg name="control_point_offset" default="1.5"/>
     <arg name="heading_preview_distance" default="8.0"/>
+    <arg name="heading_preview_start_distance" default="20.0"/>
+    <arg name="heading_preview_deadband_deg" default="2.0"/>
     <arg name="heading_error_gain" default="1.0"/>
     <arg name="cross_track_error_gain" default="0.75"/>
     <arg name="cross_track_deadband" default="0.05"/>
@@ -70,6 +72,8 @@
                 --softening-speed $(arg softening_speed)
                 --control-point-offset $(arg control_point_offset)
                 --heading-preview-distance $(arg heading_preview_distance)
+                --heading-preview-start-distance $(arg heading_preview_start_distance)
+                --heading-preview-deadband-deg $(arg heading_preview_deadband_deg)
                 --heading-error-gain $(arg heading_error_gain)
                 --cross-track-error-gain $(arg cross_track_error_gain)
                 --cross-track-deadband $(arg cross_track_deadband)

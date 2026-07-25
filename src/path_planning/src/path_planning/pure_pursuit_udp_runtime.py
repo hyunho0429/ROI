@@ -191,6 +191,18 @@ def argument_parser(localization_mode):
         default=8.0,
         help="distance ahead of the nearest segment used for Stanley heading error",
     )
+    parser.add_argument(
+        "--heading-preview-start-distance",
+        type=float,
+        default=20.0,
+        help="path progress before heading preview is allowed",
+    )
+    parser.add_argument(
+        "--heading-preview-deadband-deg",
+        type=float,
+        default=2.0,
+        help="disable heading preview for smaller preview-vs-nearest heading deltas",
+    )
     parser.add_argument("--minimum-waypoint-spacing", type=float, default=0.5)
     parser.add_argument("--waypoint-smoothing-window", type=int, default=9)
     parser.add_argument("--target-search-window", type=int, default=50)
@@ -281,6 +293,7 @@ def _validate(arguments):
         "maximum_lookahead",
         "softening_speed",
         "heading_preview_distance",
+        "heading_preview_start_distance",
         "goal_tolerance",
     )
     for name in positive_names:
@@ -294,6 +307,7 @@ def _validate(arguments):
         "heading_error_gain",
         "cross_track_error_gain",
         "cross_track_deadband",
+        "heading_preview_deadband_deg",
         "minimum_waypoint_spacing",
         "max_steering_rate_radps",
         "speed_kp",
@@ -365,6 +379,8 @@ def run(localization_mode, arguments):
         max_steering_deg=arguments.max_steering_deg,
         control_point_offset_m=arguments.control_point_offset,
         heading_preview_distance_m=arguments.heading_preview_distance,
+        heading_preview_start_distance_m=arguments.heading_preview_start_distance,
+        heading_preview_deadband_rad=math.radians(arguments.heading_preview_deadband_deg),
         heading_error_gain=arguments.heading_error_gain,
         cross_track_error_gain=arguments.cross_track_error_gain,
         cross_track_deadband_m=arguments.cross_track_deadband,
@@ -513,12 +529,15 @@ def run(localization_mode, arguments):
     else:
         print("  localization: GPS/IMU/status-aided dead reckoning")
     print(
-        "  Stanley: front {:.2f} m, heading_preview={:.2f} m, "
+        "  Stanley: front {:.2f} m, heading_preview={:.2f} m "
+        "(start {:.1f} m, deadband {:.1f} deg), "
         "gain={:.3f}, softening={:.2f} m/s, "
         "heading_gain={:.2f}, cte_gain={:.2f}, deadband={:.2f} m, "
         "fixed speed {:.1f} km/h".format(
             arguments.control_point_offset,
             arguments.heading_preview_distance,
+            arguments.heading_preview_start_distance,
+            arguments.heading_preview_deadband_deg,
             arguments.stanley_gain,
             arguments.softening_speed,
             arguments.heading_error_gain,
