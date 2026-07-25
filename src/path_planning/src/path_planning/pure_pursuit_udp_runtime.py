@@ -181,6 +181,7 @@ def argument_parser(localization_mode):
     parser.add_argument("--maximum-lookahead", type=float, default=4.0)
     parser.add_argument("--stanley-gain", type=float, default=0.35)
     parser.add_argument("--softening-speed", type=float, default=2.2)
+    parser.add_argument("--stanley-control-speed-floor-kmh", type=float, default=35.0)
     parser.add_argument("--heading-error-gain", type=float, default=0.74)
     parser.add_argument("--cross-track-error-gain", type=float, default=0.58)
     parser.add_argument("--cross-track-deadband", type=float, default=0.02)
@@ -310,6 +311,7 @@ def _validate(arguments):
         "minimum_lookahead",
         "maximum_lookahead",
         "softening_speed",
+        "stanley_control_speed_floor_kmh",
         "heading_preview_distance",
         "heading_preview_start_distance",
         "medium_curve_speed_kmh",
@@ -562,6 +564,7 @@ def run(localization_mode, arguments):
         "  Stanley: front {:.2f} m, heading_preview={:.2f} m "
         "(start {:.1f} m, deadband {:.1f} deg), "
         "gain={:.3f}, softening={:.2f} m/s, "
+        "control_speed_floor={:.1f} km/h, "
         "heading_gain={:.2f}, cte_gain={:.2f}, deadband={:.2f} m, "
         "fixed speed {:.1f} km/h".format(
             arguments.control_point_offset,
@@ -570,6 +573,7 @@ def run(localization_mode, arguments):
             arguments.heading_preview_deadband_deg,
             arguments.stanley_gain,
             arguments.softening_speed,
+            arguments.stanley_control_speed_floor_kmh,
             arguments.heading_error_gain,
             arguments.cross_track_error_gain,
             arguments.cross_track_deadband,
@@ -736,12 +740,16 @@ def run(localization_mode, arguments):
                 normalized_steering = 0.0
                 curve_speed_mode = "stop"
             else:
+                stanley_control_speed_mps = max(
+                    state.speed_mps,
+                    arguments.stanley_control_speed_floor_kmh / 3.6,
+                )
                 result = stanley.compute(
                     state.x_m,
                     state.y_m,
                     state.z_m,
                     state.yaw_rad,
-                    state.speed_mps,
+                    stanley_control_speed_mps,
                 )
                 if result.goal_reached:
                     speed_controller.reset()
