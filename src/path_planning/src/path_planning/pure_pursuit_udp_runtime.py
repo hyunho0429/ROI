@@ -297,7 +297,7 @@ def argument_parser(localization_mode):
     )
     parser.add_argument("--steering-filter-alpha", type=float, default=0.35)
     parser.add_argument("--max-steering-rate-radps", type=float, default=0.75)
-    parser.add_argument("--steering-trim-deg", type=float, default=1.25)
+    parser.add_argument("--steering-trim-deg", type=float, default=0.75)
     parser.add_argument("--startup-lane-bias-deg", type=float, default=0.0)
     parser.add_argument("--startup-lane-bias-distance-m", type=float, default=25.0)
     parser.add_argument("--startup-lane-bias-max-steering-deg", type=float, default=3.0)
