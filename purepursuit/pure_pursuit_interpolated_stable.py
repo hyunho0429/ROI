@@ -1,78 +1,129 @@
 #!/usr/bin/env python3
+"""Competition Pure Pursuit runner using UDP GPS/IMU/Competition Status.
+
+This file keeps the path preprocessing and interpolated Pure Pursuit idea from
+the original ``pure_pursuit_interpolated_stable.py`` while replacing the public
+EgoVehicleStatus dependency with the competition-only UDP interfaces:
+
+GPS + IMU -> 15-state INS error-state EKF -> Pure Pursuit
+Competition Vehicle Status -> vehicle speed, wheelbase and control-state guard
+Ego Ctrl Cmd UDP -> longCmdType=1 accel/brake/steering command
+"""
 
 import math
+import selectors
+import socket
 import sys
 import time
-import socket
-import ctypes
 from pathlib import Path
 
+
 ROOT = Path(__file__).resolve().parent
-sys.path.append(str(ROOT))
+REPO_ROOT = ROOT.parent
+PACKAGE_SRC = REPO_ROOT / "src" / "path_planning" / "src"
+if str(PACKAGE_SRC) not in sys.path:
+    sys.path.insert(0, str(PACKAGE_SRC))
 
-from lib.network.UDP import Sender
-from lib.define.EgoVehicleStatus import EgoVehicleStatus
-from lib.define.EgoCtrlCmd import EgoCtrlCmd
+from path_planning.coordinates import GpsToMapEnu, MapProjection
+from path_planning.localization_ins import InsErrorStateEkf
+from path_planning.longitudinal_controller import PedalSpeedController
+from path_planning.morai_competition_config import (
+    BIND_IP,
+    COLLISION_PORT,
+    COMPETITION_STATUS_PORT,
+    CONTROL_DESTINATION_PORT,
+    CONTROL_IP,
+    CONTROL_PORT,
+    GPS_PORT,
+    IMU_PORT,
+    VEHICLE_LENGTH_M,
+    VEHICLE_WIDTH_M,
+    VEHICLE_WHEELBASE_M,
+)
+from path_planning.morai_udp_collision_data import (
+    CollisionPacketError,
+    parse_collision_data,
+)
+from path_planning.morai_udp_competition_status import (
+    CompetitionStatusPacketError,
+    parse_competition_vehicle_status,
+)
+from path_planning.morai_udp_ctrl_cmd import (
+    CONTROL_PROTOCOL_25S4,
+    brake_command,
+    encode_ego_ctrl_cmd,
+    external_control_ready,
+    pedal_command,
+)
+from path_planning.morai_udp_gps import GpsPacketError, parse_nmea_datagram
+from path_planning.morai_udp_imu import ImuPacketError, parse_imu_packet
 
 
-# ============================================================
-# 네트워크 설정
-# ============================================================
+# ---------------------------------------------------------------------------
+# Network settings for the current competition network.
+# MORAI publisher Host Port -> algorithm Destination Port:
+#   GPS 3001, IMU 4001, Competition Status 9080 -> 9081, Collision 9091 -> 9092
+# Ego Ctrl Cmd:
+#   algorithm source/destination port 9094 -> MORAI host 192.168.56.1:9093
+# ---------------------------------------------------------------------------
 
-UBUNTU_IP = "192.168.0.200"
-EGO_STATUS_PORT = 1911
-
-MORAI_IP = "192.168.0.151"
-CMD_CONTROL_PORT = 9093
+MORAI_HOST_IP = CONTROL_IP  # 192.168.56.1
+ALGORITHM_IP = "192.168.56.101"
+COMMAND_PROTOCOL = CONTROL_PROTOCOL_25S4
 
 
-# ============================================================
-# 경로 및 차량 설정
-# ============================================================
+# ---------------------------------------------------------------------------
+# Path, vehicle and controller settings.
+# ---------------------------------------------------------------------------
 
 PATH_FILE = ROOT / "2026_molit_comp_global_path.txt"
 PROCESSED_PATH_FILE = ROOT / "processed_global_path.txt"
 LOG_FILE = ROOT / "driving_log.csv"
+GLOBAL_INFO_FILE = (
+    REPO_ROOT
+    / "src"
+    / "path_planning"
+    / "mgeo"
+    / "R_KR_PR_K-city_2025"
+    / "global_info.json"
+)
 
-WHEELBASE = 2.7
-MAX_STEER_RAD = math.radians(30.0)
+WHEELBASE = VEHICLE_WHEELBASE_M  # 2023 Hyundai IONIQ 5: 3.0 m
+VEHICLE_MAX_STEER_RAD = math.radians(36.25)
+CONTROLLER_MAX_STEER_RAD = math.radians(21.77)
 STEER_SIGN = 1.0
 
 MAX_PATH_DISTANCE = 15.0
 GOAL_DISTANCE = 3.0
 
-# 속도 설정
+# Original stable branch speed policy, now driven by a PID pedal controller.
 STRAIGHT_SPEED_KMH = 10.0
 MEDIUM_CURVE_SPEED_KMH = 7.0
 SHARP_CURVE_SPEED_KMH = 4.5
 RECOVERY_SPEED_KMH = 3.0
 
-# Look-ahead 설정
-MIN_LOOKAHEAD = 3.0
-MAX_LOOKAHEAD = 9.0
-LOOKAHEAD_SPEED_GAIN = 0.35
+# Shorter lookahead prevents early turn-in on the competition route.
+MIN_LOOKAHEAD = 2.0
+MAX_LOOKAHEAD = 4.0
+LOOKAHEAD_SPEED_GAIN = 0.15
 
-# 경로 검색 범위
 SEARCH_BACKWARD = 8
 SEARCH_FORWARD = 80
 MAX_INDEX_ADVANCE_PER_CYCLE = 15
 
-# 명령 변화율 제한
-MAX_STEER_CHANGE_PER_SEC = 1.8
-MAX_ACCEL_CHANGE_PER_SEC = 0.60
-MAX_BRAKE_CHANGE_PER_SEC = 0.80
+MAX_STEER_RATE_RADPS = 0.35
+STEER_LOW_PASS_ALPHA = 0.15
 
-# 조향 비대칭 보정
-LEFT_STEER_GAIN = 1.0
-RIGHT_STEER_GAIN = 1.35
-
-# 경로 전처리 설정
 INTERPOLATION_SPACING = 0.20
 DUPLICATE_MIN_DISTANCE = 0.05
 SMOOTHING_WINDOW = 5
 SMOOTHING_PASSES = 1
 
-CONTROL_PERIOD = 0.02
+CONTROL_RATE_HZ = 30.0
+CONTROL_PERIOD = 1.0 / CONTROL_RATE_HZ
+PRINT_PERIOD = 0.2
+SENSOR_TIMEOUT = 0.8
+COLLISION_BRAKE_SECONDS = 3.0
 
 
 def clamp(value, minimum, maximum):
@@ -80,71 +131,37 @@ def clamp(value, minimum, maximum):
 
 
 def normalize_angle_rad(angle):
-    while angle > math.pi:
-        angle -= 2.0 * math.pi
-    while angle < -math.pi:
-        angle += 2.0 * math.pi
-    return angle
-
-
-def rate_limit(target, previous, max_rate_per_sec, dt):
-    max_change = max_rate_per_sec * max(dt, 1e-3)
-    return clamp(
-        target,
-        previous - max_change,
-        previous + max_change
-    )
+    return (angle + math.pi) % (2.0 * math.pi) - math.pi
 
 
 def remove_duplicate_points(path, min_distance):
-    """
-    연속된 중복점 또는 지나치게 가까운 점을 제거한다.
-    """
     if not path:
         return []
-
     cleaned = [path[0]]
-
     for point in path[1:]:
         previous = cleaned[-1]
-
-        if distance(
-            previous[0],
-            previous[1],
-            point[0],
-            point[1]
-        ) >= min_distance:
+        if distance(previous[0], previous[1], point[0], point[1]) >= min_distance:
             cleaned.append(point)
-
     return cleaned
 
 
 def interpolate_path_by_distance(path, spacing):
-    """
-    경로 누적거리를 기준으로 일정 간격의 웨이포인트를 생성한다.
-    선형 보간을 사용하되, 이후 스무딩 단계에서 급격한 꺾임을 완화한다.
-    """
     if len(path) < 2:
         return path[:]
 
     cumulative = [0.0]
-
     for index in range(1, len(path)):
         x0, y0, _ = path[index - 1]
         x1, y1, _ = path[index]
-
-        segment = distance(x0, y0, x1, y1)
-        cumulative.append(cumulative[-1] + segment)
+        cumulative.append(cumulative[-1] + distance(x0, y0, x1, y1))
 
     total_length = cumulative[-1]
-
     if total_length <= spacing:
         return path[:]
 
     interpolated = []
     target_distance = 0.0
     segment_index = 0
-
     while target_distance < total_length:
         while (
             segment_index < len(path) - 2
@@ -154,66 +171,56 @@ def interpolate_path_by_distance(path, spacing):
 
         d0 = cumulative[segment_index]
         d1 = cumulative[segment_index + 1]
-
         x0, y0, z0 = path[segment_index]
         x1, y1, z1 = path[segment_index + 1]
-
-        if d1 <= d0:
-            ratio = 0.0
-        else:
-            ratio = (target_distance - d0) / (d1 - d0)
-
+        ratio = 0.0 if d1 <= d0 else (target_distance - d0) / (d1 - d0)
         ratio = clamp(ratio, 0.0, 1.0)
-
-        x = x0 + ratio * (x1 - x0)
-        y = y0 + ratio * (y1 - y0)
-        z = z0 + ratio * (z1 - z0)
-
-        interpolated.append((x, y, z))
+        interpolated.append(
+            (
+                x0 + ratio * (x1 - x0),
+                y0 + ratio * (y1 - y0),
+                z0 + ratio * (z1 - z0),
+            )
+        )
         target_distance += spacing
 
-    # 마지막 점은 원본 경로의 마지막 점으로 정확히 유지
     if interpolated[-1] != path[-1]:
         interpolated.append(path[-1])
-
     return interpolated
 
 
 def smooth_path_moving_average(path, window_size, passes):
-    """
-    이동평균으로 경로의 급격한 방향 변화를 완화한다.
-
-    시작점과 끝점은 원본 좌표를 유지한다.
-    """
     if len(path) < 3 or window_size < 3 or passes <= 0:
         return path[:]
-
     if window_size % 2 == 0:
         window_size += 1
 
     half_window = window_size // 2
     smoothed = path[:]
-
     for _ in range(passes):
         next_path = smoothed[:]
-
         for index in range(1, len(smoothed) - 1):
             start = max(0, index - half_window)
             end = min(len(smoothed), index + half_window + 1)
-
             points = smoothed[start:end]
-
-            x = sum(point[0] for point in points) / len(points)
-            y = sum(point[1] for point in points) / len(points)
-            z = sum(point[2] for point in points) / len(points)
-
-            next_path[index] = (x, y, z)
-
+            next_path[index] = (
+                sum(point[0] for point in points) / len(points),
+                sum(point[1] for point in points) / len(points),
+                sum(point[2] for point in points) / len(points),
+            )
         next_path[0] = path[0]
         next_path[-1] = path[-1]
         smoothed = next_path
-
     return smoothed
+
+
+def preprocess_path(raw_path):
+    cleaned = remove_duplicate_points(raw_path, DUPLICATE_MIN_DISTANCE)
+    interpolated = interpolate_path_by_distance(cleaned, INTERPOLATION_SPACING)
+    smoothed = smooth_path_moving_average(
+        interpolated, SMOOTHING_WINDOW, SMOOTHING_PASSES
+    )
+    return cleaned, interpolated, smoothed
 
 
 def save_path(path, output_file):
@@ -222,60 +229,26 @@ def save_path(path, output_file):
             file.write(f"{x:.9f} {y:.9f} {z:.9f}\n")
 
 
-def preprocess_path(raw_path):
-    """
-    원본 경로에 다음 순서로 전처리를 적용한다.
-
-    1. 중복점 제거
-    2. 일정 간격 재보간
-    3. 약한 이동평균 스무딩
-    """
-    cleaned = remove_duplicate_points(
-        raw_path,
-        DUPLICATE_MIN_DISTANCE
-    )
-
-    interpolated = interpolate_path_by_distance(
-        cleaned,
-        INTERPOLATION_SPACING
-    )
-
-    smoothed = smooth_path_moving_average(
-        interpolated,
-        SMOOTHING_WINDOW,
-        SMOOTHING_PASSES
-    )
-
-    return cleaned, interpolated, smoothed
-
-
 def load_path(path_file):
     path = []
-
     with open(path_file, "r", encoding="utf-8") as file:
         for line_number, line in enumerate(file, start=1):
             line = line.strip()
-
             if not line or line.startswith("#"):
                 continue
-
             values = line.replace(",", " ").split()
-
             if len(values) < 2:
-                print(f"[경고] {line_number}번째 줄 건너뜀: {line}")
+                print(f"[path warning] skip line {line_number}: {line}")
                 continue
-
             try:
                 x = float(values[0])
                 y = float(values[1])
                 z = float(values[2]) if len(values) >= 3 else 0.0
                 path.append((x, y, z))
             except ValueError:
-                print(f"[경고] 숫자 변환 실패: {line}")
-
+                print(f"[path warning] invalid number at line {line_number}: {line}")
     if len(path) < 2:
-        raise RuntimeError("경로점이 2개 미만입니다.")
-
+        raise RuntimeError("path file needs at least two points")
     return path
 
 
@@ -284,585 +257,521 @@ def distance(x1, y1, x2, y2):
 
 
 def path_heading(path, index, step=3):
-    i0 = clamp(index, 0, len(path) - 1)
-    i1 = clamp(index + step, 0, len(path) - 1)
-
-    i0 = int(i0)
-    i1 = int(i1)
-
+    i0 = int(clamp(index, 0, len(path) - 1))
+    i1 = int(clamp(index + step, 0, len(path) - 1))
     if i0 == i1:
         i0 = max(0, i0 - 1)
-
     x0, y0, _ = path[i0]
     x1, y1, _ = path[i1]
     return math.atan2(y1 - y0, x1 - x0)
 
 
-def find_nearest_index(
-    path,
-    ego_x,
-    ego_y,
-    ego_yaw_deg,
-    previous_index
-):
-    """
-    거리뿐 아니라 차량 진행 방향과 경로 방향도 함께 사용한다.
-    가까이 겹치는 경로에서 다른 가지로 인덱스가 튀는 현상을 억제한다.
-    """
+def find_nearest_index(path, ego_x, ego_y, ego_yaw_rad, previous_index):
     search_start = max(0, previous_index - SEARCH_BACKWARD)
-    search_end = min(
-        len(path),
-        previous_index + SEARCH_FORWARD + 1
-    )
+    search_end = min(len(path), previous_index + SEARCH_FORWARD + 1)
 
-    ego_yaw = math.radians(ego_yaw_deg)
     best_index = previous_index
     best_score = float("inf")
-    best_distance = float("inf")
-
     for index in range(search_start, search_end):
         px, py, _ = path[index]
         dist = distance(ego_x, ego_y, px, py)
-
         heading = path_heading(path, index)
-        heading_error = abs(normalize_angle_rad(heading - ego_yaw))
-
-        # 방향이 100도 이상 반대인 경로점은 강하게 배제
+        heading_error = abs(normalize_angle_rad(heading - ego_yaw_rad))
         heading_penalty = 8.0 * heading_error
-
-        # 이전 인덱스보다 뒤로 가는 후보에는 작은 페널티
         backward_penalty = 0.15 * max(0, previous_index - index)
-
         score = dist + heading_penalty + backward_penalty
-
         if score < best_score:
             best_score = score
             best_index = index
-            best_distance = dist
 
-    # 한 주기에 인덱스가 지나치게 멀리 점프하지 못하도록 제한
-    best_index = min(
-        best_index,
-        previous_index + MAX_INDEX_ADVANCE_PER_CYCLE
-    )
-
+    best_index = min(best_index, previous_index + MAX_INDEX_ADVANCE_PER_CYCLE)
     px, py, _ = path[best_index]
-    best_distance = distance(ego_x, ego_y, px, py)
-
-    return best_index, best_distance
+    return best_index, distance(ego_x, ego_y, px, py)
 
 
 def calculate_curve_angle(path, nearest_index):
     last = len(path) - 1
-
     i0 = min(nearest_index, last)
     i1 = min(nearest_index + 10, last)
     i2 = min(nearest_index + 30, last)
-
     if i0 == i1 or i1 == i2:
         return 0.0
-
     x0, y0, _ = path[i0]
     x1, y1, _ = path[i1]
     x2, y2, _ = path[i2]
-
     h1 = math.atan2(y1 - y0, x1 - x0)
     h2 = math.atan2(y2 - y1, x2 - x1)
-
     return normalize_angle_rad(h2 - h1)
 
 
 def select_target_speed(curve_angle, path_distance):
     curve_deg = abs(math.degrees(curve_angle))
-
     if path_distance > 4.0:
         return RECOVERY_SPEED_KMH
-
     if curve_deg >= 14.0:
         return SHARP_CURVE_SPEED_KMH
-
     if curve_deg >= 6.0:
         return MEDIUM_CURVE_SPEED_KMH
-
     return STRAIGHT_SPEED_KMH
 
 
 def select_lookahead(speed_kmh, curve_angle):
     curve_deg = abs(math.degrees(curve_angle))
-
-    lookahead = MIN_LOOKAHEAD + LOOKAHEAD_SPEED_GAIN * speed_kmh
-
+    lookahead = MIN_LOOKAHEAD + LOOKAHEAD_SPEED_GAIN * max(0.0, speed_kmh / 3.6)
     if curve_deg >= 14.0:
         lookahead *= 0.65
     elif curve_deg >= 6.0:
         lookahead *= 0.82
-
     return clamp(lookahead, MIN_LOOKAHEAD, MAX_LOOKAHEAD)
 
 
 def find_lookahead_index(path, nearest_index, lookahead_distance):
-    """
-    경로 누적거리 기준으로 목표점을 선택한다.
-    가까운 다른 경로 가지를 직선거리로 잘못 선택하는 것을 방지한다.
-    """
     accumulated = 0.0
-
     for index in range(nearest_index, len(path) - 1):
         x1, y1, _ = path[index]
         x2, y2, _ = path[index + 1]
-
         accumulated += distance(x1, y1, x2, y2)
-
         if accumulated >= lookahead_distance:
             return index + 1
-
     return len(path) - 1
 
 
-def calculate_pure_pursuit_steer(
-    ego_x,
-    ego_y,
-    ego_yaw_deg,
-    target_x,
-    target_y
-):
-    yaw_rad = math.radians(ego_yaw_deg)
-
+def calculate_pure_pursuit_steer_rad(ego_x, ego_y, ego_yaw_rad, target_x, target_y):
     dx = target_x - ego_x
     dy = target_y - ego_y
-
-    local_x = (
-        math.cos(yaw_rad) * dx
-        + math.sin(yaw_rad) * dy
-    )
-    local_y = (
-        -math.sin(yaw_rad) * dx
-        + math.cos(yaw_rad) * dy
-    )
-
+    local_x = math.cos(ego_yaw_rad) * dx + math.sin(ego_yaw_rad) * dy
+    local_y = -math.sin(ego_yaw_rad) * dx + math.cos(ego_yaw_rad) * dy
     target_distance = max(math.hypot(local_x, local_y), 0.1)
-
-    # 목표점이 약간 뒤에 있어도 즉시 조향 0으로 만들지 않는다.
-    # 완전히 뒤쪽일 때만 안전하게 감속하도록 유효하지 않은 목표로 처리한다.
     target_valid = local_x > -0.5
-
     if not target_valid:
         return 0.0, local_x, local_y, False
 
-    effective_local_x = max(local_x, 0.3)
-
-    steering_rad = math.atan2(
-        2.0 * WHEELBASE * local_y,
-        target_distance ** 2
+    steering_rad = math.atan2(2.0 * WHEELBASE * local_y, target_distance ** 2)
+    steering_rad = clamp(
+        steering_rad, -CONTROLLER_MAX_STEER_RAD, CONTROLLER_MAX_STEER_RAD
     )
-
-    steering_rad *= STEER_SIGN
-
-    if steering_rad >= 0.0:
-        steering_rad *= LEFT_STEER_GAIN
-    else:
-        steering_rad *= RIGHT_STEER_GAIN
-
-    steering = clamp(
-        steering_rad / MAX_STEER_RAD,
-        -1.0,
-        1.0
-    )
-
-    return steering, effective_local_x, local_y, True
+    return steering_rad, local_x, local_y, True
 
 
-def calculate_longitudinal_control(speed_kmh, target_speed_kmh):
-    error = target_speed_kmh - speed_kmh
+class SteeringFilter:
+    def __init__(self, alpha, max_rate_radps, max_abs_rad):
+        self.alpha = float(alpha)
+        self.max_rate_radps = float(max_rate_radps)
+        self.max_abs_rad = float(max_abs_rad)
+        self._last_value = 0.0
+        self._last_time = None
 
-    # 가속과 브레이크를 동시에 사용하지 않는다.
-    if error > 0.4:
-        accel = clamp(0.04 + 0.025 * error, 0.0, 0.28)
-        brake = 0.0
-    elif error < -0.8:
-        accel = 0.0
-        brake = clamp(0.02 * abs(error), 0.0, 0.20)
-    else:
-        # 데드밴드에서 급격한 가감속 반복을 막는다.
-        accel = 0.015
-        brake = 0.0
+    def reset(self):
+        self._last_value = 0.0
+        self._last_time = None
 
-    return accel, brake
+    def update(self, target_rad, timestamp):
+        target = clamp(float(target_rad), -self.max_abs_rad, self.max_abs_rad)
+        if self._last_time is None:
+            self._last_time = float(timestamp)
+            self._last_value = target
+            return self._last_value
 
-
-def make_command(accel, brake, steer):
-    command = EgoCtrlCmd()
-
-    command.ctrl_mode = 2
-    command.gear = 4
-    command.cmd_type = 1
-
-    command.velocity = 0.0
-    command.acceleration = 0.0
-    command.accel = float(clamp(accel, 0.0, 1.0))
-    command.brake = float(clamp(brake, 0.0, 1.0))
-    command.steer = float(clamp(steer, -1.0, 1.0))
-
-    return command
+        dt = max(1e-3, min(0.2, float(timestamp) - self._last_time))
+        self._last_time = float(timestamp)
+        blended = self._last_value + self.alpha * (target - self._last_value)
+        max_delta = self.max_rate_radps * dt
+        self._last_value = clamp(
+            blended, self._last_value - max_delta, self._last_value + max_delta
+        )
+        self._last_value = clamp(self._last_value, -self.max_abs_rad, self.max_abs_rad)
+        return self._last_value
 
 
-def send_stop(sender, duration=2.0):
-    stop_command = make_command(
-        accel=0.0,
-        brake=1.0,
-        steer=0.0
-    )
+def receiver(bind_ip, port):
+    udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1024 * 1024)
+    udp_socket.bind((bind_ip, port))
+    udp_socket.setblocking(False)
+    return udp_socket
 
-    end_time = time.time() + duration
 
-    while time.time() < end_time:
-        sender.send(stop_command)
+def command_socket():
+    udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    udp_socket.bind((BIND_IP, CONTROL_DESTINATION_PORT))
+    return udp_socket
+
+
+def send_command(udp_socket, command):
+    packet = encode_ego_ctrl_cmd(command, COMMAND_PROTOCOL)
+    udp_socket.sendto(packet, (MORAI_HOST_IP, CONTROL_PORT))
+
+
+def send_stop(udp_socket, duration=1.0):
+    command = brake_command(1.0)
+    end_time = time.monotonic() + duration
+    while time.monotonic() < end_time:
+        send_command(udp_socket, command)
         time.sleep(0.05)
 
 
 def initialize_log():
     with open(LOG_FILE, "w", encoding="utf-8") as file:
         file.write(
-            "time,x,y,yaw,speed,target_speed,"
-            "nearest,target,path_distance,curve_deg,"
-            "lookahead,steer,accel,brake\n"
+            "time,x,y,z,yaw_deg,speed_kmh,target_speed_kmh,"
+            "nearest,target,path_distance,curve_deg,lookahead,"
+            "steer_rad,steer_normalized,accel,brake,ctrl_mode,gear,link_id\n"
         )
 
 
 def append_log(
     now,
-    ego_x,
-    ego_y,
-    ego_yaw,
-    speed_kmh,
-    target_speed,
+    state,
+    status,
+    target_speed_kmh,
     nearest_index,
     lookahead_index,
     nearest_distance,
     curve_angle,
     lookahead,
-    steer,
+    steer_rad,
+    steer_normalized,
     accel,
-    brake
+    brake,
 ):
+    link_id = "" if status is None else status.link_id
+    ctrl_mode = "" if status is None else status.ctrl_mode
+    gear = "" if status is None else status.gear
     with open(LOG_FILE, "a", encoding="utf-8") as file:
         file.write(
-            f"{now:.3f},{ego_x:.6f},{ego_y:.6f},"
-            f"{ego_yaw:.3f},{speed_kmh:.3f},"
-            f"{target_speed:.3f},{nearest_index},"
-            f"{lookahead_index},{nearest_distance:.3f},"
-            f"{math.degrees(curve_angle):.3f},"
-            f"{lookahead:.3f},{steer:.5f},"
-            f"{accel:.5f},{brake:.5f}\n"
+            f"{now:.3f},{state.x_m:.6f},{state.y_m:.6f},{state.z_m:.3f},"
+            f"{math.degrees(state.yaw_rad):.3f},{state.speed_mps * 3.6:.3f},"
+            f"{target_speed_kmh:.3f},{nearest_index},{lookahead_index},"
+            f"{nearest_distance:.3f},{math.degrees(curve_angle):.3f},"
+            f"{lookahead:.3f},{steer_rad:.6f},{steer_normalized:.5f},"
+            f"{accel:.5f},{brake:.5f},{ctrl_mode},{gear},{link_id}\n"
         )
+
+
+def build_localizer():
+    return InsErrorStateEkf(
+        gps_position_sigma_m=1.5,
+        gps_altitude_sigma_m=3.0,
+        gps_speed_sigma_mps=0.8,
+        imu_orientation_sigma_deg=4.0,
+        gyro_noise_sigma_degps=0.8,
+        accel_noise_sigma_mps2=0.25,
+        gyro_bias_walk_sigma_degps=0.03,
+        accel_bias_walk_sigma_mps2=0.02,
+        vehicle_speed_sigma_mps=0.25,
+        nhc_lateral_sigma_mps=0.35,
+        nhc_vertical_sigma_mps=0.25,
+        alignment_duration_s=2.0,
+        alignment_min_samples=20,
+    )
 
 
 def main():
     raw_path = load_path(PATH_FILE)
-
-    cleaned_path, interpolated_path, path = preprocess_path(
-        raw_path
-    )
-
+    cleaned_path, interpolated_path, path = preprocess_path(raw_path)
     save_path(path, PROCESSED_PATH_FILE)
     initialize_log()
 
-    print("=" * 72)
-    print("MORAI Stable Pure Pursuit UDP Controller")
-    print(f"원본 경로 파일 : {PATH_FILE}")
-    print(f"가공 경로 파일 : {PROCESSED_PATH_FILE}")
-    print(f"원본 경로점    : {len(raw_path)}개")
-    print(f"중복 제거 후   : {len(cleaned_path)}개")
-    print(f"보간 후        : {len(interpolated_path)}개")
-    print(f"최종 경로점    : {len(path)}개")
-    print(
-        f"보간 간격      : {INTERPOLATION_SPACING:.2f} m / "
-        f"스무딩 창 {SMOOTHING_WINDOW} / "
-        f"반복 {SMOOTHING_PASSES}"
+    projection = MapProjection.from_mgeo_global_info(GLOBAL_INFO_FILE)
+    gps_converter = GpsToMapEnu(projection)
+    localizer = build_localizer()
+    speed_controller = PedalSpeedController(
+        kp=0.075,
+        ki=0.0001,
+        kd=0.025,
+        nominal_dt=CONTROL_PERIOD,
+        max_accel=1.0,
+        max_brake=1.0,
     )
-    print(f"주행 로그      : {LOG_FILE}")
-    print(f"직선 목표속도  : {STRAIGHT_SPEED_KMH:.1f} km/h")
-    print(f"급곡선 목표속도: {SHARP_CURVE_SPEED_KMH:.1f} km/h")
-    print("=" * 72)
-    print("MORAI에서 Q를 눌러 AV-ExternalCtrl로 설정하세요.")
-    print("종료: Ctrl+C")
-    print()
-
-    status_socket = socket.socket(
-        socket.AF_INET,
-        socket.SOCK_DGRAM
+    steering_filter = SteeringFilter(
+        alpha=STEER_LOW_PASS_ALPHA,
+        max_rate_radps=MAX_STEER_RATE_RADPS,
+        max_abs_rad=CONTROLLER_MAX_STEER_RAD,
     )
-    status_socket.setsockopt(
-        socket.SOL_SOCKET,
-        socket.SO_REUSEADDR,
-        1
-    )
-    status_socket.setsockopt(
-        socket.SOL_SOCKET,
-        socket.SO_RCVBUF,
-        2 ** 20
-    )
-    status_socket.bind((UBUNTU_IP, EGO_STATUS_PORT))
-    print("bind ok")
-    status_socket.settimeout(1.0)
 
-    status_size = ctypes.sizeof(EgoVehicleStatus)
+    selector = selectors.DefaultSelector()
+    sockets = {
+        "gps": receiver(BIND_IP, GPS_PORT),
+        "imu": receiver(BIND_IP, IMU_PORT),
+        "status": receiver(BIND_IP, COMPETITION_STATUS_PORT),
+        "collision": receiver(BIND_IP, COLLISION_PORT),
+    }
+    for name, udp_socket in sockets.items():
+        selector.register(udp_socket, selectors.EVENT_READ, name)
+    ctrl_socket = command_socket()
 
-    sender = Sender(MORAI_IP, CMD_CONTROL_PORT)
-
+    last_status = None
+    last_gps_time = None
+    last_imu_time = None
+    last_status_time = None
+    collision_until = 0.0
     previous_nearest_index = 0
     previous_print_time = 0.0
-    previous_time = time.monotonic()
 
-    previous_steer = 0.0
-    previous_accel = 0.0
-    previous_brake = 0.0
+    print("=" * 78)
+    print("MORAI Competition Pure Pursuit - INS/EKF UDP")
+    print(f"path                 : {PATH_FILE}")
+    print(f"processed path       : {PROCESSED_PATH_FILE}")
+    print(f"log                  : {LOG_FILE}")
+    print(f"path points          : raw={len(raw_path)}, final={len(path)}")
+    print(f"vehicle              : 2023 Hyundai IONIQ 5")
+    print(f"length/width/wheelbase: {VEHICLE_LENGTH_M:.3f} / {VEHICLE_WIDTH_M:.3f} / {WHEELBASE:.3f} m")
+    print(f"GPS/IMU/status ports : {GPS_PORT}, {IMU_PORT}, {COMPETITION_STATUS_PORT}")
+    print(f"Collision port       : {COLLISION_PORT}")
+    print(f"Ego Ctrl Cmd         : source {CONTROL_DESTINATION_PORT} -> {MORAI_HOST_IP}:{CONTROL_PORT}")
+    print(f"Algorithm PC IP      : {ALGORITHM_IP} (set this as MORAI destination IP)")
+    print("localization         : GPS + IMU + vehicle-speed aided 15-state INS EKF")
+    print("control              : longCmdType=1 accel/brake/steering UDP")
+    print("=" * 78)
 
     try:
         while True:
-            try:
-                raw_data, _ = status_socket.recvfrom(4096)
-            except socket.timeout:
-                print("[수신 대기] Ego Vehicle Status 패킷이 없습니다.")
-                continue
+            loop_start = time.monotonic()
+            for key, _mask in selector.select(timeout=0.0):
+                name = key.data
+                try:
+                    packet, _addr = key.fileobj.recvfrom(4096)
+                except BlockingIOError:
+                    continue
+                now = time.monotonic()
 
-            if len(raw_data) < status_size:
-                print(
-                    f"[패킷 오류] 수신={len(raw_data)}, "
-                    f"필요={status_size}"
-                )
-                continue
+                if name == "gps":
+                    try:
+                        gps = parse_nmea_datagram(packet)
+                        if gps.fix_valid:
+                            x_m, y_m, z_m = gps_converter.convert(
+                                gps.latitude_deg,
+                                gps.longitude_deg,
+                                gps.altitude_m,
+                            )
+                            localizer.add_gps(
+                                now,
+                                x_m,
+                                y_m,
+                                z_m,
+                                speed_mps=gps.speed_mps,
+                                course_deg=gps.course_deg,
+                            )
+                            last_gps_time = now
+                    except (GpsPacketError, RuntimeError) as error:
+                        print(f"[GPS] {error}")
 
-            status = EgoVehicleStatus.from_buffer_copy(
-                raw_data[:status_size]
+                elif name == "imu":
+                    try:
+                        imu = parse_imu_packet(packet)
+                        localizer.add_imu(
+                            now,
+                            imu.orientation_xyzw,
+                            imu.angular_velocity_radps,
+                            imu.linear_acceleration_mps2,
+                        )
+                        last_imu_time = now
+                    except ImuPacketError as error:
+                        print(f"[IMU] {error}")
+
+                elif name == "status":
+                    try:
+                        last_status = parse_competition_vehicle_status(packet)
+                        localizer.add_vehicle_speed(
+                            now, last_status.signed_velocity_kmh / 3.6
+                        )
+                        last_status_time = now
+                    except CompetitionStatusPacketError as error:
+                        print(f"[Competition Status] {error}")
+
+                elif name == "collision":
+                    try:
+                        collision = parse_collision_data(packet)
+                        if collision.collision_detected:
+                            collision_until = now + COLLISION_BRAKE_SECONDS
+                    except CollisionPacketError as error:
+                        print(f"[Collision] {error}")
+
+            now = time.monotonic()
+            state = localizer.state_at(now)
+
+            stale_gps = last_gps_time is None or now - last_gps_time > SENSOR_TIMEOUT
+            stale_imu = last_imu_time is None or now - last_imu_time > SENSOR_TIMEOUT
+            stale_status = (
+                last_status_time is None or now - last_status_time > SENSOR_TIMEOUT
             )
-            
-
-            now_monotonic = time.monotonic()
-            dt = clamp(
-                now_monotonic - previous_time,
-                0.005,
-                0.100
+            collision_active = now < collision_until
+            control_ready = (
+                last_status is not None
+                and external_control_ready(last_status.ctrl_mode, last_status.gear)
             )
-            previous_time = now_monotonic
 
-            ego_x = float(status.pos_x)
-            ego_y = float(status.pos_y)
-            ego_yaw = float(status.yaw)
-            speed_kmh = abs(float(status.signed_vel))
-
-            # 비정상 센서값은 해당 주기 명령에서 제외
-            if not all(
-                math.isfinite(value)
-                for value in (ego_x, ego_y, ego_yaw, speed_kmh)
+            if (
+                state is None
+                or stale_gps
+                or stale_imu
+                or stale_status
+                or collision_active
+                or not control_ready
             ):
-                print("[센서 오류] NaN 또는 Inf가 감지되었습니다.")
+                speed_controller.reset()
+                steering_filter.reset()
+                command = brake_command(1.0 if collision_active else 0.35)
+                send_command(ctrl_socket, command)
+                if time.time() - previous_print_time >= 0.5:
+                    reasons = []
+                    if state is None:
+                        reasons.append("INS not ready/alignment")
+                    if stale_gps:
+                        reasons.append("GPS stale")
+                    if stale_imu:
+                        reasons.append("IMU stale")
+                    if stale_status:
+                        reasons.append("Competition stale")
+                    if collision_active:
+                        reasons.append("collision")
+                    if not control_ready:
+                        mode = None if last_status is None else last_status.ctrl_mode
+                        gear = None if last_status is None else last_status.gear
+                        reasons.append(f"ctrl_mode/gear not ready ({mode}/{gear})")
+                    print("BRAKE active:", ", ".join(reasons))
+                    previous_print_time = time.time()
+                time.sleep(CONTROL_PERIOD)
                 continue
+
+            status_speed_kmh = abs(last_status.signed_velocity_kmh)
+            measured_speed_mps = status_speed_kmh / 3.6
+            wheelbase = (
+                last_status.wheelbase_m
+                if last_status.wheelbase_m > 0.5
+                else WHEELBASE
+            )
 
             nearest_index, nearest_distance = find_nearest_index(
                 path,
-                ego_x,
-                ego_y,
-                ego_yaw,
-                previous_nearest_index
-            )
-
-            previous_nearest_index = max(
+                state.x_m,
+                state.y_m,
+                state.yaw_rad,
                 previous_nearest_index,
-                nearest_index
             )
+            previous_nearest_index = max(previous_nearest_index, nearest_index)
 
             if nearest_distance > MAX_PATH_DISTANCE:
-                target_steer = 0.0
-                target_accel = 0.0
-                target_brake = 0.35
-
-                steer = rate_limit(
-                    target_steer,
-                    previous_steer,
-                    MAX_STEER_CHANGE_PER_SEC,
-                    dt
-                )
-                accel = rate_limit(
-                    target_accel,
-                    previous_accel,
-                    MAX_ACCEL_CHANGE_PER_SEC,
-                    dt
-                )
-                brake = rate_limit(
-                    target_brake,
-                    previous_brake,
-                    MAX_BRAKE_CHANGE_PER_SEC,
-                    dt
-                )
-
-                sender.send(make_command(accel, brake, steer))
-
-                previous_steer = steer
-                previous_accel = accel
-                previous_brake = brake
+                steering_filter.reset()
+                speed_controller.reset()
+                send_command(ctrl_socket, brake_command(0.35))
+                print(f"BRAKE active: path distance too large ({nearest_distance:.2f} m)")
+                time.sleep(CONTROL_PERIOD)
                 continue
 
-            curve_angle = calculate_curve_angle(
-                path,
-                nearest_index
-            )
-
-            target_speed = select_target_speed(
-                curve_angle,
-                nearest_distance
-            )
-
-            lookahead = select_lookahead(
-                speed_kmh,
-                curve_angle
-            )
-
-            lookahead_index = find_lookahead_index(
-                path,
-                nearest_index,
-                lookahead
-            )
-
+            curve_angle = calculate_curve_angle(path, nearest_index)
+            target_speed_kmh = select_target_speed(curve_angle, nearest_distance)
+            lookahead = select_lookahead(status_speed_kmh, curve_angle)
+            lookahead_index = find_lookahead_index(path, nearest_index, lookahead)
             target_x, target_y, _ = path[lookahead_index]
-
-            raw_steer, local_x, local_y, target_valid = (
-                calculate_pure_pursuit_steer(
-                    ego_x,
-                    ego_y,
-                    ego_yaw,
-                    target_x,
-                    target_y
-                )
+            raw_steer_rad, local_x, local_y, target_valid = calculate_pure_pursuit_steer_rad(
+                state.x_m,
+                state.y_m,
+                state.yaw_rad,
+                target_x,
+                target_y,
             )
 
             if not target_valid:
-                target_speed = min(
-                    target_speed,
-                    RECOVERY_SPEED_KMH
+                target_speed_kmh = min(target_speed_kmh, RECOVERY_SPEED_KMH)
+                raw_steer_rad = 0.0
+
+            # If the simulator reports a different wheelbase, preserve the
+            # original Pure Pursuit curvature while updating the bicycle model.
+            if abs(wheelbase - WHEELBASE) > 1e-3 and abs(raw_steer_rad) > 1e-9:
+                curvature = math.tan(raw_steer_rad) / WHEELBASE
+                raw_steer_rad = math.atan(wheelbase * curvature)
+                raw_steer_rad = clamp(
+                    raw_steer_rad,
+                    -CONTROLLER_MAX_STEER_RAD,
+                    CONTROLLER_MAX_STEER_RAD,
                 )
-                raw_steer = previous_steer
 
-            raw_accel, raw_brake = calculate_longitudinal_control(
-                speed_kmh,
-                target_speed
+            filtered_steer_rad = steering_filter.update(raw_steer_rad, now)
+            steering_normalized = STEER_SIGN * clamp(
+                filtered_steer_rad / VEHICLE_MAX_STEER_RAD,
+                -1.0,
+                1.0,
             )
 
-            # 경로 오차가 커질수록 가속 제한
+            target_speed_mps = target_speed_kmh / 3.6
+            accel, brake = speed_controller.compute(
+                target_speed_mps, measured_speed_mps, now
+            )
+
             if nearest_distance > 2.0:
-                raw_accel = min(raw_accel, 0.08)
-
+                accel = min(accel, 0.08)
             if nearest_distance > 4.0:
-                raw_accel = 0.0
-                raw_brake = max(raw_brake, 0.08)
-
-            # 조향이 큰 구간에서는 가속을 제한하되 갑작스러운 강제 브레이크는 하지 않는다.
-            if abs(raw_steer) > 0.65:
-                raw_accel = min(raw_accel, 0.06)
-
-            steer = rate_limit(
-                raw_steer,
-                previous_steer,
-                MAX_STEER_CHANGE_PER_SEC,
-                dt
-            )
-            accel = rate_limit(
-                raw_accel,
-                previous_accel,
-                MAX_ACCEL_CHANGE_PER_SEC,
-                dt
-            )
-            brake = rate_limit(
-                raw_brake,
-                previous_brake,
-                MAX_BRAKE_CHANGE_PER_SEC,
-                dt
-            )
-
-            # 가속/브레이크 동시 명령 완전 차단
+                accel = 0.0
+                brake = max(brake, 0.08)
+            if abs(steering_normalized) > 0.65:
+                accel = min(accel, 0.06)
             if brake > 0.01:
                 accel = 0.0
             elif accel > 0.01:
                 brake = 0.0
 
             goal_x, goal_y, _ = path[-1]
-            goal_distance = distance(
-                ego_x,
-                ego_y,
-                goal_x,
-                goal_y
-            )
-
-            if (
-                lookahead_index >= len(path) - 2
-                and goal_distance <= GOAL_DISTANCE
-            ):
-                print("최종 목적지에 도착했습니다.")
-                send_stop(sender)
+            goal_distance = distance(state.x_m, state.y_m, goal_x, goal_y)
+            if lookahead_index >= len(path) - 2 and goal_distance <= GOAL_DISTANCE:
+                print("Reached final waypoint. Sending stop command.")
+                send_stop(ctrl_socket)
                 break
 
-            sender.send(
-                make_command(
-                    accel=accel,
-                    brake=brake,
-                    steer=steer
-                )
+            send_command(
+                ctrl_socket,
+                pedal_command(accel, brake, steering_normalized),
             )
-
-            previous_steer = steer
-            previous_accel = accel
-            previous_brake = brake
-
             append_log(
                 time.time(),
-                ego_x,
-                ego_y,
-                ego_yaw,
-                speed_kmh,
-                target_speed,
+                state,
+                last_status,
+                target_speed_kmh,
                 nearest_index,
                 lookahead_index,
                 nearest_distance,
                 curve_angle,
                 lookahead,
-                steer,
+                filtered_steer_rad,
+                steering_normalized,
                 accel,
-                brake
+                brake,
             )
 
-            if time.time() - previous_print_time >= 0.2:
+            if time.time() - previous_print_time >= PRINT_PERIOD:
                 print(
-                    f"ego=({ego_x:8.2f},{ego_y:8.2f}) | "
-                    f"yaw={ego_yaw:7.2f} | "
-                    f"speed={speed_kmh:5.2f}/{target_speed:4.1f} | "
-                    f"idx={nearest_index:5d}->{lookahead_index:5d} | "
-                    f"dist={nearest_distance:5.2f} | "
-                    f"curve={math.degrees(curve_angle):6.1f} | "
-                    f"Ld={lookahead:4.1f} | "
-                    f"local=({local_x:5.2f},{local_y:5.2f}) | "
-                    f"steer={steer:6.3f} | "
-                    f"accel={accel:5.2f} | "
-                    f"brake={brake:5.2f}"
+                    f"ego=({state.x_m:8.2f},{state.y_m:8.2f}) "
+                    f"yaw={math.degrees(state.yaw_rad):7.2f} "
+                    f"speed={status_speed_kmh:5.2f}/{target_speed_kmh:4.1f}km/h "
+                    f"idx={nearest_index:5d}->{lookahead_index:5d} "
+                    f"dist={nearest_distance:5.2f} "
+                    f"curve={math.degrees(curve_angle):6.1f} "
+                    f"Ld={lookahead:4.2f} "
+                    f"local=({local_x:5.2f},{local_y:5.2f}) "
+                    f"steer={math.degrees(filtered_steer_rad):6.2f}deg/"
+                    f"{steering_normalized:+.3f} "
+                    f"cmd=({accel:.2f},{brake:.2f}) "
+                    f"link={last_status.link_id}"
                 )
                 previous_print_time = time.time()
 
-            sleep_time = CONTROL_PERIOD - (
-                time.monotonic() - now_monotonic
-            )
+            sleep_time = CONTROL_PERIOD - (time.monotonic() - loop_start)
             if sleep_time > 0.0:
                 time.sleep(sleep_time)
 
     except KeyboardInterrupt:
-        print("\n사용자가 제어를 중단했습니다.")
-
-    except Exception as error:
-        print(f"\n오류 발생: {error}")
-
+        print("\nUser interrupted control loop.")
     finally:
-        print("정지 명령 전송 중...")
-        send_stop(sender)
-        status_socket.close()
-        print("프로그램 종료")
+        print("Sending stop command...")
+        try:
+            send_stop(ctrl_socket)
+        finally:
+            for udp_socket in sockets.values():
+                udp_socket.close()
+            ctrl_socket.close()
+        print("Done.")
 
 
 if __name__ == "__main__":
