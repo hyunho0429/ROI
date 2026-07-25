@@ -103,9 +103,13 @@ class PurePursuitControllerTest(unittest.TestCase):
         )
 
         self.assertFalse(result.goal_reached)
-        self.assertGreater(result.target_index, result.segment_index)
-        self.assertGreater(result.lookahead_distance_m, 2.5)
-        self.assertLess(result.lookahead_distance_m, 4.5)
+        forward_distance = (
+            (result.target_position_m[0] - points[0].x_m) * math.cos(yaw)
+            + (result.target_position_m[1] - points[0].y_m) * math.sin(yaw)
+        )
+        self.assertGreater(forward_distance, 2.0)
+        self.assertGreater(result.lookahead_distance_m, 2.0)
+        self.assertLess(result.lookahead_distance_m, 3.0)
         self.assertTrue(math.isfinite(result.steering_rad))
 
     def test_competition_route_completes_bicycle_model_lap(self):

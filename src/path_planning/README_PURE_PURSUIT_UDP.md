@@ -148,8 +148,8 @@ steering = atan(wheelbase * curvature)
 | length / width | 4.635 m / 1.892 m |
 | wheelbase | 3.0 m (Competition Status 수신값 우선) |
 | base lookahead | 2.0 m |
-| speed lookahead gain | 0.5 s |
-| lookahead limits | 2.0~12.0 m |
+| speed lookahead gain | 0.15 s |
+| lookahead limits | 2.0~4.0 m |
 | control point offset | 0.0 m |
 | steering offset | +3.0° |
 | controller steering limit | 21.77° |
@@ -372,7 +372,7 @@ python3 src/path_planning/src/morai_udp_control_check.py
 ```text
 localization: GPS/IMU/status-aided 15-state error-state EKF INS
 alignment: hold brake for 2.0s (at least 20 IMU samples)
-Pure Pursuit: Ld=clip(2.00+0.50*speed, 2.00, 12.00)m, wheelbase=3.00m, steering_offset=+3.00deg, fixed speed 30.0 km/h
+Pure Pursuit: Ld=clip(2.00+0.15*speed, 2.00, 4.00)m, wheelbase=3.00m, steering_offset=+3.00deg, fixed speed 30.0 km/h
 steering smoothing: alpha=0.15, max_rate=0.35 rad/s
 steering offset: 3.00deg below 8.00deg raw steering
 requesting AV-ExternalCtrl (ctrl_mode=2) and Drive (gear=4)
@@ -387,7 +387,7 @@ Cmd Control의 Host IP/Port를 점검한다. feedback에도 accel이 들어오�
 
 ## 주요 튜닝 옵션
 
-- `--lookahead-distance`, `--lookahead-speed-gain`: 기본/속도 비례 lookahead
+- `--lookahead-distance`, `--lookahead-speed-gain`: 기본/속도 비례 lookahead. 조향 시작이 너무 빠르면 `lookahead-speed-gain`을 더 줄인다.
 - `--minimum-lookahead`, `--maximum-lookahead`: lookahead 제한
 - `--wheelbase`: 상태 패킷 수신 전 사용할 기본 wheelbase
 - `--control-point-offset`: GPS/INS 위치에서 제어점까지 전방(+)·후방(-) 거리
