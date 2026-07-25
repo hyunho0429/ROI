@@ -39,7 +39,7 @@
     <arg name="path_lateral_offset_m" default="0.0"/>
     <arg name="control_point_offset" default="1.5"/>
     <arg name="localization_lateral_offset_m" default="0.35"/>
-    <arg name="heading_preview_distance" default="4.0"/>
+    <arg name="heading_preview_distance" default="3.2"/>
     <arg name="heading_preview_start_distance" default="20.0"/>
     <arg name="heading_preview_deadband_deg" default="2.0"/>
     <arg name="heading_error_gain" default="0.74"/>
