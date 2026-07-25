@@ -418,6 +418,7 @@ def run(localization_mode, arguments):
 
     latest_gps_time = latest_imu_time = latest_status_time = None
     status_speed_mps = 0.0
+    status_vel_x_kmh = 0.0
     status_wheelbase_m = arguments.wheelbase
     status_ctrl_mode = status_gear = None
     status_accel_pedal = status_brake_pedal = status_front_steer_deg = 0.0
@@ -585,6 +586,7 @@ def run(localization_mode, arguments):
                         signed_speed_mps = status.signed_velocity_kmh / 3.6
                         localizer.add_vehicle_speed(received, signed_speed_mps)
                         status_speed_mps = abs(signed_speed_mps)
+                        status_vel_x_kmh = status.velocity_kmh[0]
                         status_ctrl_mode = status.ctrl_mode
                         status_gear = status.gear
                         status_accel_pedal = status.accel_pedal
@@ -727,6 +729,7 @@ def run(localization_mode, arguments):
                     )
                     print(
                         "{} pos=({:.2f},{:.2f},{:.2f}) speed={:.2f}/{:.2f} "
+                        "vel_x={:+.2f}km/h "
                         "yaw/path={:+.1f}/{:+.1f}deg herr={:+.1f}deg "
                         "cte={:+.2f}m steer(raw/filt)={:+.2f}/{:+.2f}deg "
                         "cmd=({:.2f},{:+.2f},{:.2f}) "
@@ -738,6 +741,7 @@ def run(localization_mode, arguments):
                             state.z_m,
                             state.speed_mps,
                             target_speed_mps,
+                            status_vel_x_kmh,
                             math.degrees(state.yaw_rad),
                             math.degrees(result.path_yaw_rad),
                             math.degrees(result.heading_error_rad),
