@@ -161,16 +161,16 @@ def argument_parser(localization_mode):
     parser.add_argument("--lookahead-speed-gain", type=float, default=0.15)
     parser.add_argument("--minimum-lookahead", type=float, default=2.0)
     parser.add_argument("--maximum-lookahead", type=float, default=4.0)
-    parser.add_argument("--stanley-gain", type=float, default=0.45)
-    parser.add_argument("--softening-speed", type=float, default=1.5)
-    parser.add_argument("--heading-error-gain", type=float, default=1.0)
-    parser.add_argument("--cross-track-error-gain", type=float, default=0.75)
+    parser.add_argument("--stanley-gain", type=float, default=0.38)
+    parser.add_argument("--softening-speed", type=float, default=2.0)
+    parser.add_argument("--heading-error-gain", type=float, default=0.85)
+    parser.add_argument("--cross-track-error-gain", type=float, default=0.60)
     parser.add_argument("--cross-track-deadband", type=float, default=0.05)
     parser.add_argument("--goal-tolerance", type=float, default=2.0)
     parser.add_argument(
         "--max-steering-deg",
         type=float,
-        default=21.77,
+        default=18.0,
         help="Stanley controller steering limit in degrees",
     )
     parser.add_argument(

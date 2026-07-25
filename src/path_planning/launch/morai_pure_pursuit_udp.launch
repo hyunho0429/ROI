@@ -24,16 +24,16 @@
     <arg name="max_accel_pedal" default="1.0"/>
     <arg name="max_brake_pedal" default="1.0"/>
 
-    <arg name="stanley_gain" default="0.45"/>
-    <arg name="softening_speed" default="1.5"/>
+    <arg name="stanley_gain" default="0.38"/>
+    <arg name="softening_speed" default="2.0"/>
     <arg name="control_point_offset" default="1.5"/>
     <arg name="heading_preview_distance" default="8.0"/>
     <arg name="heading_preview_start_distance" default="20.0"/>
     <arg name="heading_preview_deadband_deg" default="2.0"/>
-    <arg name="heading_error_gain" default="1.0"/>
-    <arg name="cross_track_error_gain" default="0.75"/>
+    <arg name="heading_error_gain" default="0.85"/>
+    <arg name="cross_track_error_gain" default="0.60"/>
     <arg name="cross_track_deadband" default="0.05"/>
-    <arg name="max_steering_deg" default="21.77"/>
+    <arg name="max_steering_deg" default="18.0"/>
     <arg name="vehicle_max_steering_deg" default="36.25"/>
     <arg name="steering_filter_alpha" default="0.15"/>
     <arg name="max_steering_rate_radps" default="0.35"/>
