@@ -30,6 +30,7 @@ catkin_install_python(PROGRAMS
   src/morai_stanley_udp.py
   src/morai_stanley_ins_udp.py
   src/morai_stanley_dead_reckoning_udp.py
+  src/morai_rrt_star_path_generator.py
   src/mgeo_json_pub.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )

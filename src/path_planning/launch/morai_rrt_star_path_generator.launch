@@ -1,0 +1,47 @@
+<launch>
+    <arg name="start_x" default="0.0"/>
+    <arg name="start_y" default="0.0"/>
+    <arg name="goal_x" default="30.0"/>
+    <arg name="goal_y" default="0.0"/>
+    <arg name="x_min" default="-10.0"/>
+    <arg name="x_max" default="40.0"/>
+    <arg name="y_min" default="-10.0"/>
+    <arg name="y_max" default="10.0"/>
+    <arg name="obstacles" default="none"/>
+    <arg name="step_size_m" default="1.0"/>
+    <arg name="max_iterations" default="1800"/>
+    <arg name="goal_sample_rate" default="0.15"/>
+    <arg name="search_radius_m" default="8.0"/>
+    <arg name="goal_tolerance_m" default="2.0"/>
+    <arg name="collision_margin_m" default="0.7"/>
+    <arg name="random_seed" default="20"/>
+    <arg name="smooth_iterations" default="60"/>
+    <arg name="target_speed_kmh" default="20.0"/>
+    <arg name="output" default="/tmp/morai_rrt_star_path.csv"/>
+
+    <node pkg="path_planning"
+          type="morai_rrt_star_path_generator.py"
+          name="morai_rrt_star_path_generator"
+          output="screen"
+          args="
+                --start-x $(arg start_x)
+                --start-y $(arg start_y)
+                --goal-x $(arg goal_x)
+                --goal-y $(arg goal_y)
+                --x-min $(arg x_min)
+                --x-max $(arg x_max)
+                --y-min $(arg y_min)
+                --y-max $(arg y_max)
+                --obstacles $(arg obstacles)
+                --step-size-m $(arg step_size_m)
+                --max-iterations $(arg max_iterations)
+                --goal-sample-rate $(arg goal_sample_rate)
+                --search-radius-m $(arg search_radius_m)
+                --goal-tolerance-m $(arg goal_tolerance_m)
+                --collision-margin-m $(arg collision_margin_m)
+                --random-seed $(arg random_seed)
+                --smooth-iterations $(arg smooth_iterations)
+                --target-speed-kmh $(arg target_speed_kmh)
+                --output $(arg output)
+          "/>
+</launch>

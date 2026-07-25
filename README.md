@@ -210,6 +210,49 @@ roslaunch path_planning morai_stanley_udp.launch \
   path:=/home/ubuntu/path/reference_path.csv
 ```
 
+## RRT* 경로 생성 후 주행
+
+`test/rrt` 브랜치에는 `devcourse` 코드의 RRT* 아이디어를 현재 UDP 주행 코드와
+호환되도록 병합한 경로 생성기가 포함되어 있다. RRT*는 먼저 ENU 좌표계의 CSV
+경로를 만들고, Stanley 주행 코드는 이 CSV를 `path:=...` 인자로 받아 추종한다.
+
+예시:
+
+```bash
+cd ~/ROI
+source devel/setup.bash
+
+roslaunch path_planning morai_rrt_star_path_generator.launch \
+  start_x:=0.0 \
+  start_y:=0.0 \
+  goal_x:=30.0 \
+  goal_y:=8.0 \
+  x_min:=-10.0 \
+  x_max:=40.0 \
+  y_min:=-10.0 \
+  y_max:=20.0 \
+  obstacles:="12.0,2.0,2.5;20.0,5.0,2.0" \
+  output:=/tmp/morai_rrt_star_path.csv
+```
+
+생성된 경로로 주행:
+
+```bash
+roslaunch path_planning morai_stanley_udp.launch \
+  control_ip:=192.168.56.1 \
+  path:=/tmp/morai_rrt_star_path.csv
+```
+
+`obstacles`는 `x,y,radius_m` 형식이며, 여러 개는 세미콜론으로 구분한다. 좌표는
+현재 Stanley 경로와 같은 map-local ENU 기준으로 넣어야 한다.
+
+RRT* 자체는 카메라나 라이다가 반드시 필요한 알고리즘은 아니다. 이미 알고 있는
+정적 장애물 좌표나 맵 기반 obstacle list가 있으면 센서 없이도 경로를 만들 수
+있다. 다만 주행 중 동적 장애물을 피하려면 RRT*에 넣을 장애물 좌표가 필요하므로,
+그 좌표를 만들기 위한 카메라/라이다/3D LiDAR 같은 검출 센서가 필요하다. 현재
+대회 허용 네트워크에는 ROS `/Object_topic`이 없으므로, `devcourse` 원본처럼
+ObjectStatusList를 직접 구독하는 방식은 사용하지 않았다.
+
 ## 정상 실행 로그
 
 정상 시작 시 다음과 비슷한 로그가 출력된다.
