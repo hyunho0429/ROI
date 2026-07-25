@@ -246,7 +246,21 @@ def argument_parser(localization_mode):
     parser.add_argument("--stanley-gain", type=float, default=0.35)
     parser.add_argument("--softening-speed", type=float, default=2.2)
     parser.add_argument("--stanley-control-speed-floor-kmh", type=float, default=35.0)
-    parser.add_argument("--path-lateral-offset-m", type=float, default=0.45)
+    parser.add_argument(
+        "--lane-center-shift-m",
+        type=float,
+        default=None,
+        help=(
+            "signed left-normal shift for recentering the supplied global path "
+            "onto the lane center; overrides path-lateral-offset-m when set"
+        ),
+    )
+    parser.add_argument(
+        "--path-lateral-offset-m",
+        type=float,
+        default=0.45,
+        help="legacy signed left-normal path shift used when lane-center-shift-m is unset",
+    )
     parser.add_argument("--heading-error-gain", type=float, default=0.74)
     parser.add_argument("--cross-track-error-gain", type=float, default=0.72)
     parser.add_argument("--cross-track-deadband", type=float, default=0.02)
@@ -443,6 +457,10 @@ def _validate(arguments):
         raise ValueError("control-point-offset must be finite")
     if not math.isfinite(arguments.path_lateral_offset_m):
         raise ValueError("path-lateral-offset-m must be finite")
+    if arguments.lane_center_shift_m is not None and not math.isfinite(
+        arguments.lane_center_shift_m
+    ):
+        raise ValueError("lane-center-shift-m must be finite")
     if hasattr(arguments, "alignment_seconds"):
         if arguments.alignment_seconds < 0.0:
             raise ValueError("alignment-seconds cannot be negative")
@@ -486,7 +504,12 @@ def run(localization_mode, arguments):
     active_projection = csv_projection or projection
     recorded_origin = load_recorded_path_origin(arguments.path)
     points = load_path_csv(arguments.path, gps_projection=active_projection)
-    points = _offset_path_points_laterally(points, arguments.path_lateral_offset_m)
+    effective_lateral_offset_m = (
+        arguments.path_lateral_offset_m
+        if arguments.lane_center_shift_m is None
+        else arguments.lane_center_shift_m
+    )
+    points = _offset_path_points_laterally(points, effective_lateral_offset_m)
     stanley = StanleyController(
         points,
         gain=arguments.stanley_gain,
@@ -589,13 +612,18 @@ def run(localization_mode, arguments):
         )
     )
     print(
-        "  path: {} ({} -> {} points after spacing/smoothing, lateral offset {:+.2f} m)".format(
+        "  path: {} ({} -> {} points after spacing/smoothing, lane-center shift {:+.2f} m)".format(
             os.path.abspath(arguments.path),
             stanley.original_point_count,
             len(stanley.points),
-            arguments.path_lateral_offset_m,
+            effective_lateral_offset_m,
         )
     )
+    if arguments.lane_center_shift_m is not None:
+        print(
+            "  lane recentering: global path shifted by {:+.2f} m "
+            "along the path left normal".format(effective_lateral_offset_m)
+        )
     if recorded_origin is not None:
         print(
             "  coordinate frame: recorded GPS origin "
