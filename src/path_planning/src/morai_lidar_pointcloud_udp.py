@@ -288,14 +288,8 @@ def _clusters_to_json(clusters):
     return json.dumps(fields, ensure_ascii=False)
 
 
-def _make_obstacle_markers(clusters, frame_id):
+def _make_obstacle_markers(clusters, frame_id, max_clusters):
     marker_array = MarkerArray()
-
-    clear_marker = Marker()
-    clear_marker.header.frame_id = frame_id
-    clear_marker.header.stamp = rospy.Time.now()
-    clear_marker.action = Marker.DELETEALL
-    marker_array.markers.append(clear_marker)
 
     stamp = rospy.Time.now()
     for cluster in clusters:
@@ -345,6 +339,20 @@ def _make_obstacle_markers(clusters, frame_id):
         text.lifetime = rospy.Duration(0.4)
         marker_array.markers.append(text)
 
+    for stale_id in range(len(clusters), max_clusters):
+        for marker_offset in (0, 1):
+            delete_marker = Marker()
+            delete_marker.header.frame_id = frame_id
+            delete_marker.header.stamp = stamp
+            delete_marker.ns = (
+                "morai_lidar_obstacles"
+                if marker_offset == 0
+                else "morai_lidar_obstacle_labels"
+            )
+            delete_marker.id = stale_id * 2 + marker_offset
+            delete_marker.action = Marker.DELETE
+            marker_array.markers.append(delete_marker)
+
     return marker_array
 
 
@@ -367,11 +375,11 @@ def main():
             "obstacle_marker_topic",
             "/morai/lidar/obstacle_markers",
         ),
-        "packets_per_cloud": int(_param("packets_per_cloud", 80)),
+        "packets_per_cloud": int(_param("packets_per_cloud", 15)),
         "rolling_clouds": int(_param("rolling_clouds", 1)),
-        "display_rolling_clouds": int(_param("display_rolling_clouds", 5)),
-        "display_history_s": float(_param("display_history_s", 0.35)),
-        "max_cloud_age_s": float(_param("max_cloud_age_s", 0.10)),
+        "display_rolling_clouds": int(_param("display_rolling_clouds", 10)),
+        "display_history_s": float(_param("display_history_s", 0.30)),
+        "max_cloud_age_s": float(_param("max_cloud_age_s", 0.05)),
         "socket_timeout_s": float(_param("socket_timeout_s", 1.0)),
         "lidar_yaw_offset_deg": float(_param("lidar_yaw_offset_deg", 0.0)),
         "fov_left_deg": float(_param("fov_left_deg", 180.0)),
@@ -555,7 +563,11 @@ def main():
                     )
                     obstacle_publisher.publish(String(data=_clusters_to_json(clusters)))
                     obstacle_marker_publisher.publish(
-                        _make_obstacle_markers(clusters, params["frame_id"])
+                        _make_obstacle_markers(
+                            clusters,
+                            params["frame_id"],
+                            params["cluster_max_clusters"],
+                        )
                     )
             if display_points:
                 display_publisher.publish(_make_cloud(display_points, params["frame_id"]))

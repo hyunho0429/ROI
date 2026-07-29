@@ -11,11 +11,11 @@
   <arg name="nearest_distance_topic" default="/morai/lidar/nearest_distance_m" />
   <arg name="obstacle_topic" default="/morai/lidar/obstacles" />
   <arg name="obstacle_marker_topic" default="/morai/lidar/obstacle_markers" />
-  <arg name="packets_per_cloud" default="80" />
+  <arg name="packets_per_cloud" default="15" />
   <arg name="rolling_clouds" default="1" />
-  <arg name="display_rolling_clouds" default="5" />
-  <arg name="display_history_s" default="0.35" />
-  <arg name="max_cloud_age_s" default="0.10" />
+  <arg name="display_rolling_clouds" default="10" />
+  <arg name="display_history_s" default="0.30" />
+  <arg name="max_cloud_age_s" default="0.05" />
 
   <!-- Near-360 scan by default, with only the ego rear sector hidden. -->
   <arg name="fov_left_deg" default="180.0" />

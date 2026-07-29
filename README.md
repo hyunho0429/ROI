@@ -300,9 +300,11 @@ roslaunch path_planning morai_lidar_rviz.launch \
 장애물이 여러 개로 쪼개져 보이면 `cluster_tolerance_m`을 키우고, 바닥/노이즈가
 군집으로 잡히면 `cluster_min_points`를 키우거나 `cluster_z_min_m`을 높인다.
 
-`display_rolling_clouds`를 크게 잡거나 RViz PointCloud2의 `Decay Time`을 길게
-잡으면 차량 이동 중 이전 scan이 겹쳐서 긴 무지개 궤적처럼 번져 보인다. 주행 중에는
-`display_history_s:=0.25~0.35`, 정지 디버깅에서는 `0.5` 정도까지만 추천한다.
+현재 LiDAR가 30 Hz라면 기본값은 `packets_per_cloud:=15`,
+`max_cloud_age_s:=0.05`, `display_history_s:=0.30`이다. 알고리즘용 live cloud는
+짧게 갱신하고, RViz용 display cloud만 약 0.3초 유지해서 깜빡임을 줄인다.
+`display_history_s`나 RViz PointCloud2의 `Decay Time`을 너무 길게 잡으면 차량
+이동 중 이전 scan이 겹쳐서 긴 무지개 궤적처럼 번져 보인다.
 
 점군 update가 느리거나 끊기면 `packets_per_cloud`를 60~80 범위에서 조정한다.
 값이 너무 크면 한 cloud를 만들 때 오래 걸리고, 너무 작으면 360도 scan이 듬성듬성
