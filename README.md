@@ -196,6 +196,32 @@ python3 src/path_planning/src/morai_lidar_intensity_inspect.py \
   --dump-csv /tmp/morai_lidar_points.csv
 ```
 
+전방 장애물 감지는 여러 UDP packet을 누적해서 확인하는 `lidar_monitor.py`를
+사용한다. 큰 박스를 설치했는데 `none`이 나오면 먼저 `--yaw-scan`으로 LiDAR
+장착 yaw 방향이 맞는지 확인한다.
+
+```bash
+PYTHONPATH=src/path_planning/src python3 src/path_planning/src/lidar_monitor.py \
+  --bind-ip 0.0.0.0 \
+  --host-port 2000 \
+  --destination-port 2001 \
+  --packets-per-window 80 \
+  --yaw-scan
+```
+
+정상적으로 장애물 후보가 잡히면 `front_points`, `object_like`, `front nearest`,
+`object-like nearest`가 출력된다. 특정 yaw offset에서만 후보가 많이 잡히면
+그 값을 다음 실행에 적용한다.
+
+```bash
+PYTHONPATH=src/path_planning/src python3 src/path_planning/src/lidar_monitor.py \
+  --bind-ip 0.0.0.0 \
+  --host-port 2000 \
+  --destination-port 2001 \
+  --packets-per-window 80 \
+  --lidar-yaw-offset-deg 90
+```
+
 ## 5. Ego Ctrl Cmd 통신 점검
 
 Competition Status 확인 프로그램을 종료한 뒤 실행한다. `MORAI_PC_IP`에는

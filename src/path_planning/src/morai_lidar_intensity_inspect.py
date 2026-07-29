@@ -8,6 +8,7 @@ control command.
 
 import argparse
 import csv
+import math
 import os
 import socket
 
@@ -99,7 +100,7 @@ def argument_parser():
     parser.add_argument(
         "--front-y-abs",
         type=float,
-        default=2.5,
+        default=4.0,
         help="half width of the forward corridor, using abs(y) <= this value",
     )
     parser.add_argument(
@@ -119,6 +120,20 @@ def argument_parser():
         type=int,
         default=5,
         help="number of closest non-zero/front-candidate points to print",
+    )
+    parser.add_argument(
+        "--lidar-yaw-offset-deg",
+        type=float,
+        default=0.0,
+        help=(
+            "extra yaw rotation from LiDAR-local vehicle frame to ego vehicle "
+            "frame; use this if MORAI sensor mounting yaw is not zero"
+        ),
+    )
+    parser.add_argument(
+        "--yaw-scan",
+        action="store_true",
+        help="print front-corridor counts for common yaw offsets to diagnose mounting",
     )
     return parser
 
@@ -239,17 +254,35 @@ def _valid_nonzero_points(points, min_distance_m=0.2):
     ]
 
 
+def _vehicle_xy_with_yaw_offset(point, yaw_offset_deg):
+    yaw_rad = math.radians(yaw_offset_deg)
+    cos_yaw = math.cos(yaw_rad)
+    sin_yaw = math.sin(yaw_rad)
+    x_forward = cos_yaw * point.x_m - sin_yaw * point.y_m
+    y_left = sin_yaw * point.x_m + cos_yaw * point.y_m
+    return x_forward, y_left
+
+
+def _point_in_front_corridor(point, arguments, yaw_offset_deg=None):
+    if yaw_offset_deg is None:
+        yaw_offset_deg = arguments.lidar_yaw_offset_deg
+    x_forward, y_left = _vehicle_xy_with_yaw_offset(point, yaw_offset_deg)
+    return (
+        arguments.front_x_min <= x_forward <= arguments.front_x_max
+        and abs(y_left) <= arguments.front_y_abs
+        and arguments.front_z_min <= point.z_m <= arguments.front_z_max
+    )
+
+
 def _front_corridor_points(points, arguments):
     return [
         point
         for point in _valid_nonzero_points(points)
-        if arguments.front_x_min <= point.x_m <= arguments.front_x_max
-        and abs(point.y_m) <= arguments.front_y_abs
-        and arguments.front_z_min <= point.z_m <= arguments.front_z_max
+        if _point_in_front_corridor(point, arguments)
     ]
 
 
-def _print_point_list(label, points, max_count):
+def _print_point_list(label, points, max_count, yaw_offset_deg=0.0):
     if max_count <= 0:
         return
     visible_points = sorted(points, key=lambda point: point.distance_m)[:max_count]
@@ -258,13 +291,14 @@ def _print_point_list(label, points, max_count):
         return
     print("  {}: showing {} closest".format(label, len(visible_points)))
     for index, point in enumerate(visible_points):
+        x_forward, y_left = _vehicle_xy_with_yaw_offset(point, yaw_offset_deg)
         print(
             "    [{}] vehicle x_forward={:+.3f}m, y_left={:+.3f}m, z_up={:+.3f}m, "
             "raw x_right={:+.3f}m, raw y_forward={:+.3f}m, "
             "distance={:.3f}m, intensity={}, azimuth={:.2f}deg, laser={}".format(
                 index,
-                point.x_m,
-                point.y_m,
+                x_forward,
+                y_left,
                 point.z_m,
                 point.raw_x_right_m,
                 point.raw_y_forward_m,
@@ -272,6 +306,41 @@ def _print_point_list(label, points, max_count):
                 point.intensity,
                 point.azimuth_deg,
                 point.laser_id,
+            )
+        )
+
+
+def _front_corridor_points_for_yaw(points, arguments, yaw_offset_deg):
+    return [
+        point
+        for point in _valid_nonzero_points(points)
+        if _point_in_front_corridor(point, arguments, yaw_offset_deg)
+    ]
+
+
+def _print_yaw_scan(points, arguments):
+    if not arguments.yaw_scan:
+        return
+    offsets = (-180, -135, -90, -45, 0, 45, 90, 135, 180)
+    print("  yaw scan: front-corridor counts by lidar_yaw_offset_deg")
+    for yaw_offset_deg in offsets:
+        candidates = _front_corridor_points_for_yaw(points, arguments, yaw_offset_deg)
+        if candidates:
+            nearest = min(candidates, key=lambda point: point.distance_m)
+            x_forward, y_left = _vehicle_xy_with_yaw_offset(nearest, yaw_offset_deg)
+            nearest_text = (
+                "nearest x={:+.2f}m y={:+.2f}m dist={:.2f}m az={:.1f}deg".format(
+                    x_forward,
+                    y_left,
+                    nearest.distance_m,
+                    nearest.azimuth_deg,
+                )
+            )
+        else:
+            nearest_text = "nearest n/a"
+        print(
+            "    yaw {:+4.0f}deg: count={:<3d} {}".format(
+                yaw_offset_deg, len(candidates), nearest_text
             )
         )
 
@@ -284,19 +353,31 @@ def _print_obstacle_debug(points, arguments):
             len(nonzero_points)
         )
     )
-    _print_point_list("closest nonzero", nonzero_points, arguments.closest_points)
+    _print_point_list(
+        "closest nonzero",
+        nonzero_points,
+        arguments.closest_points,
+        arguments.lidar_yaw_offset_deg,
+    )
     print(
         "  front corridor: count={} within vehicle x_forward={:.1f}..{:.1f}m, "
-        "|y_left|<={:.1f}m, z_up={:.1f}..{:.1f}m".format(
+        "|y_left|<={:.1f}m, z_up={:.1f}..{:.1f}m, lidar_yaw_offset={:+.1f}deg".format(
             len(front_points),
             arguments.front_x_min,
             arguments.front_x_max,
             arguments.front_y_abs,
             arguments.front_z_min,
             arguments.front_z_max,
+            arguments.lidar_yaw_offset_deg,
         )
     )
-    _print_point_list("front candidates", front_points, arguments.closest_points)
+    _print_point_list(
+        "front candidates",
+        front_points,
+        arguments.closest_points,
+        arguments.lidar_yaw_offset_deg,
+    )
+    _print_yaw_scan(points, arguments)
 
 
 def _range_text(value_range, unit):
