@@ -13,8 +13,9 @@
   <arg name="obstacle_marker_topic" default="/morai/lidar/obstacle_markers" />
   <arg name="packets_per_cloud" default="15" />
   <arg name="rolling_clouds" default="1" />
-  <arg name="display_rolling_clouds" default="10" />
-  <arg name="display_history_s" default="0.30" />
+  <arg name="display_rolling_clouds" default="120" />
+  <arg name="display_max_packets" default="120" />
+  <arg name="display_history_s" default="1.50" />
   <arg name="max_cloud_age_s" default="0.05" />
 
   <!-- Motion compensation/deskew.  Uses Competition Vehicle Status by default. -->
@@ -27,7 +28,10 @@
   <arg name="manual_speed_mps" default="0.0" />
   <arg name="manual_yaw_rate_radps" default="0.0" />
   <arg name="motion_yaw_rate_sign" default="1.0" />
-  <arg name="motion_max_point_age_s" default="0.20" />
+  <arg name="motion_use_abs_speed" default="true" />
+  <arg name="motion_max_speed_mps" default="35.0" />
+  <arg name="motion_max_yaw_rate_radps" default="2.5" />
+  <arg name="motion_max_point_age_s" default="1.50" />
 
   <!-- Near-360 scan by default, with only the ego rear sector hidden. -->
   <arg name="fov_left_deg" default="180.0" />
@@ -77,6 +81,7 @@
     <param name="packets_per_cloud" value="$(arg packets_per_cloud)" />
     <param name="rolling_clouds" value="$(arg rolling_clouds)" />
     <param name="display_rolling_clouds" value="$(arg display_rolling_clouds)" />
+    <param name="display_max_packets" value="$(arg display_max_packets)" />
     <param name="display_history_s" value="$(arg display_history_s)" />
     <param name="max_cloud_age_s" value="$(arg max_cloud_age_s)" />
     <param name="motion_compensation_enabled" value="$(arg motion_compensation_enabled)" />
@@ -87,6 +92,9 @@
     <param name="motion_status_timeout_s" value="$(arg motion_status_timeout_s)" />
     <param name="manual_speed_mps" value="$(arg manual_speed_mps)" />
     <param name="manual_yaw_rate_radps" value="$(arg manual_yaw_rate_radps)" />
+    <param name="motion_use_abs_speed" value="$(arg motion_use_abs_speed)" />
+    <param name="motion_max_speed_mps" value="$(arg motion_max_speed_mps)" />
+    <param name="motion_max_yaw_rate_radps" value="$(arg motion_max_yaw_rate_radps)" />
     <param name="motion_yaw_rate_sign" value="$(arg motion_yaw_rate_sign)" />
     <param name="motion_max_point_age_s" value="$(arg motion_max_point_age_s)" />
     <param name="fov_left_deg" value="$(arg fov_left_deg)" />

@@ -534,8 +534,13 @@ roslaunch path_planning morai_lidar_rviz.launch
 
 - `motion_compensation_enabled:=true`: motion compensation on/off
 - `use_comp_status_motion_compensation:=true`: Competition Vehicle Status 기반 속도/요레이트 사용
+- `display_history_s:=1.50`: RViz 표시용 packet history 길이. live/장애물 판단용 cloud에는 적용하지 않음
+- `display_max_packets:=120`: RViz 표시용으로 보관할 최대 UDP packet 수
 - `motion_status_timeout_s:=0.5`: 이 시간보다 오래된 status는 stale로 보고 manual 값 사용
-- `motion_max_point_age_s:=0.20`: 과도한 보정을 막기 위한 packet age 상한
+- `motion_use_abs_speed:=true`: signed velocity 부호 혼동을 피하기 위해 보정에는 속도 절댓값 사용
+- `motion_max_speed_mps:=35.0`: 비정상 status 값으로 점군이 튀는 것을 막는 속도 상한
+- `motion_max_yaw_rate_radps:=2.5`: 비정상 status 값으로 점군이 튀는 것을 막는 yaw-rate 상한
+- `motion_max_point_age_s:=1.50`: 과도한 보정을 막기 위한 packet age 상한
 - `motion_yaw_rate_sign:=1.0`: 커브에서 보정 방향이 반대로 보이면 `-1.0`으로 바꿔 테스트
 
 주행 노드가 이미 `9081`을 점유해서 LiDAR 노드가 Competition Status를 받을 수 없으면
