@@ -46,6 +46,7 @@ PID의 양수 출력은 `accel`, 음수 출력은 `brake`로 분리한다. Pure 
 | IMU | MORAI → 알고리즘 | 센서 설정값 | 4001 |
 | Competition Vehicle Status | MORAI → 알고리즘 | 9080 | 9081 |
 | CollisionData | MORAI → 알고리즘 | 9091 | 9092 |
+| 3D LiDAR Intensity | MORAI → 알고리즘 | 2000 | 2001 |
 | Ego Ctrl Cmd | 알고리즘 → MORAI | 9093 | 9094 |
 
 현재 네트워크 기준 MORAI Host IP는 `192.168.56.1`, 알고리즘 PC Destination IP는
@@ -142,7 +143,40 @@ sudo tcpdump -ni any -s 0 -c 10 -XX \
   'udp src port 9080 and dst port 9081'
 ```
 
-## 4. Ego Ctrl Cmd 통신 점검
+## 4. 3D LiDAR Intensity UDP 확인
+
+MORAI 3D LiDAR 센서의 Intensity 타입 UDP 수신을 확인하려면 다음 프로그램을
+실행한다. 공식 문서 기준 Point Cloud는 LiDAR 장착 위치 기준 `x, y, z,
+intensity`가 4바이트씩 반복되는 구조이며, Intensity 타입 통신 값은 `0~255`
+범위로 들어온다.
+
+```bash
+cd ~/ROI
+source devel/setup.bash
+
+python3 src/path_planning/src/morai_lidar_intensity_inspect.py \
+  --host-port 2000 \
+  --destination-port 2001 \
+  --count 10 \
+  --sample-points 5
+```
+
+수신이 정상이라면 각 UDP packet마다 sender, payload 크기, point 개수,
+`x/y/z/intensity` 범위, 앞쪽 sample point가 출력된다. 실제 패킷 앞에 부가
+header가 붙어 있는지 확인하려면 기본값인 `--header-bytes auto`를 그대로 쓰고,
+문서 그대로 raw XYZI stream이면 `--header-bytes 0`으로 고정해도 된다.
+
+CSV로 일부 point를 저장해서 확인하려면:
+
+```bash
+python3 src/path_planning/src/morai_lidar_intensity_inspect.py \
+  --host-port 2000 \
+  --destination-port 2001 \
+  --count 3 \
+  --dump-csv /tmp/morai_lidar_points.csv
+```
+
+## 5. Ego Ctrl Cmd 통신 점검
 
 Competition Status 확인 프로그램을 종료한 뒤 실행한다. `MORAI_PC_IP`에는
 시뮬레이터가 실행되는 PC의 실제 IPv4 주소를 입력한다.
@@ -167,7 +201,7 @@ PASS: MORAI reflected the longCmdType-1 brake command
 전송된다. 빈 공간에서 실제 가속 통신까지 확인해야 할 때만 `--drive-test`를
 추가한다.
 
-## 5. 메인 주행 코드 실행
+## 6. 메인 주행 코드 실행
 
 Competition Status 확인 프로그램과 제어 점검 프로그램을 모두 종료한 뒤 실행한다.
 
