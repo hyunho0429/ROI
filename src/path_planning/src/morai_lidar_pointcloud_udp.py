@@ -123,7 +123,7 @@ def main():
         "frame_id": _param("frame_id", "morai_lidar"),
         "topic": _param("topic", "/morai/lidar/sampled_points"),
         "packets_per_cloud": int(_param("packets_per_cloud", 80)),
-        "rolling_clouds": int(_param("rolling_clouds", 3)),
+        "rolling_clouds": int(_param("rolling_clouds", 1)),
         "socket_timeout_s": float(_param("socket_timeout_s", 1.0)),
         "lidar_yaw_offset_deg": float(_param("lidar_yaw_offset_deg", 0.0)),
         "fov_left_deg": float(_param("fov_left_deg", 180.0)),

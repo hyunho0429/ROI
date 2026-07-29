@@ -8,7 +8,7 @@
   <arg name="frame_id" default="morai_lidar" />
   <arg name="topic" default="/morai/lidar/sampled_points" />
   <arg name="packets_per_cloud" default="80" />
-  <arg name="rolling_clouds" default="3" />
+  <arg name="rolling_clouds" default="1" />
 
   <!-- Near-360 scan by default, with only the ego rear sector hidden. -->
   <arg name="fov_left_deg" default="180.0" />

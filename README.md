@@ -238,7 +238,7 @@ roslaunch path_planning morai_lidar_rviz.launch \
   fov_left_deg:=180 \
   fov_right_deg:=180 \
   rear_blind_deg:=60 \
-  rolling_clouds:=3
+  rolling_clouds:=1
 ```
 
 차량 뒤쪽도 포함한 완전 360도에 가깝게 보고 싶으면 `rear_blind_deg:=0`으로 둔다.
@@ -259,10 +259,15 @@ roslaunch path_planning morai_lidar_rviz.launch \
   rear_blind_deg:=0
 ```
 
-RViz에서 점군이 깜빡거리면 `rolling_clouds`를 4~6 정도로 키우거나,
-`packets_per_cloud`를 60~100 범위에서 조정한다. `rolling_clouds`는 최근 cloud를
-몇 window까지 누적해서 보여줄지 정하는 값이고, 너무 크게 잡으면 반응은 부드럽지만
-오래된 점이 잔상처럼 남을 수 있다.
+주행 중 공식 문서의 RViz LiDAR 화면처럼 현재 3D scan만 보고 싶으면
+`rolling_clouds:=1`을 유지한다. `rolling_clouds`를 크게 잡거나 RViz
+PointCloud2의 `Decay Time`을 길게 잡으면 차량 이동 중 이전 scan이 겹쳐서 긴
+무지개 궤적처럼 번져 보인다. 정지 상태에서만 점군 확인이 어렵다면
+`rolling_clouds:=2` 정도로 짧게 올려서 테스트한다.
+
+점군 update가 느리거나 끊기면 `packets_per_cloud`를 60~80 범위에서 조정한다.
+값이 너무 크면 한 cloud를 만들 때 오래 걸리고, 너무 작으면 360도 scan이 듬성듬성
+보일 수 있다.
 
 ## 5. Ego Ctrl Cmd 통신 점검
 
