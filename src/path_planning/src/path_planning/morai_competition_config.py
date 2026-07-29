@@ -9,8 +9,6 @@ COMPETITION_STATUS_HOST_PORT = 9080
 COMPETITION_STATUS_PORT = 9081
 COLLISION_HOST_PORT = 9091
 COLLISION_PORT = 9092
-LIDAR_HOST_PORT = 2000
-LIDAR_PORT = 2001
 # Ego Ctrl Cmd travels in the opposite direction: algorithm Destination Port
 # (UDP source) -> MORAI Host Port (UDP destination).
 CONTROL_IP = "192.168.0.151"
