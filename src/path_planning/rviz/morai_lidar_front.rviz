@@ -19,6 +19,14 @@ Visualization Manager:
       Plane Cell Count: 80
       Reference Frame: <Fixed Frame>
       Value: true
+    - Class: rviz/Axes
+      Enabled: true
+      Length: 6
+      Name: Ego Axes
+      Radius: 0.08
+      Reference Frame: morai_lidar
+      Show Trail: false
+      Value: true
     - Alpha: 1
       Autocompute Intensity Bounds: true
       Autocompute Value Bounds:
@@ -30,7 +38,7 @@ Visualization Manager:
       Class: rviz/PointCloud2
       Color: 255; 255; 255
       Color Transformer: Intensity
-      Decay Time: 0.15
+      Decay Time: 0
       Enabled: true
       Invert Rainbow: false
       Max Color: 255; 255; 255
@@ -78,9 +86,9 @@ Visualization Manager:
       Invert Z Axis: false
       Name: 3D LiDAR Orbit
       Near Clip Distance: 0.01
-      Pitch: 0.75
+      Pitch: 0.65
       Target Frame: morai_lidar
-      Yaw: 4.71
+      Yaw: 3.14
     Saved: ~
 Window Geometry:
   Height: 900

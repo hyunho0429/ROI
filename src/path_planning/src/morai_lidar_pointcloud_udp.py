@@ -12,6 +12,7 @@ Frame convention of the published cloud:
 
 import math
 import socket
+import time
 from collections import deque
 
 import rospy
@@ -124,6 +125,7 @@ def main():
         "topic": _param("topic", "/morai/lidar/sampled_points"),
         "packets_per_cloud": int(_param("packets_per_cloud", 80)),
         "rolling_clouds": int(_param("rolling_clouds", 1)),
+        "max_cloud_age_s": float(_param("max_cloud_age_s", 0.10)),
         "socket_timeout_s": float(_param("socket_timeout_s", 1.0)),
         "lidar_yaw_offset_deg": float(_param("lidar_yaw_offset_deg", 0.0)),
         "fov_left_deg": float(_param("fov_left_deg", 180.0)),
@@ -141,6 +143,8 @@ def main():
         raise ValueError("~packets_per_cloud must be at least 1")
     if params["rolling_clouds"] < 1:
         raise ValueError("~rolling_clouds must be at least 1")
+    if params["max_cloud_age_s"] < 0.0:
+        raise ValueError("~max_cloud_age_s cannot be negative")
     if params["fov_left_deg"] < 0.0 or params["fov_right_deg"] < 0.0:
         raise ValueError("FOV limits cannot be negative")
     if params["fov_left_deg"] > 180.0 or params["fov_right_deg"] > 180.0:
@@ -158,7 +162,8 @@ def main():
 
     rospy.loginfo(
         "MORAI LiDAR PointCloud2 UDP: source *:%d -> %s:%d, topic=%s, "
-        "frame=%s, FOV=-%.1f..+%.1f deg, rear_blind=%.1f deg, rolling_clouds=%d",
+        "frame=%s, FOV=-%.1f..+%.1f deg, rear_blind=%.1f deg, "
+        "rolling_clouds=%d, max_cloud_age=%.3fs",
         params["host_port"],
         params["bind_ip"],
         params["destination_port"],
@@ -168,6 +173,7 @@ def main():
         params["fov_left_deg"],
         params["rear_blind_deg"],
         params["rolling_clouds"],
+        params["max_cloud_age_s"],
     )
 
     rolling_clouds = deque(maxlen=params["rolling_clouds"])
@@ -177,7 +183,14 @@ def main():
             cloud_points = []
             packets = 0
             bad_packets = 0
+            cloud_started_at = time.monotonic()
             while packets < params["packets_per_cloud"] and not rospy.is_shutdown():
+                if (
+                    packets > 0
+                    and params["max_cloud_age_s"] > 0.0
+                    and time.monotonic() - cloud_started_at >= params["max_cloud_age_s"]
+                ):
+                    break
                 try:
                     packet, sender = udp_socket.recvfrom(65535)
                 except socket.timeout:
@@ -217,11 +230,12 @@ def main():
                 publisher.publish(_make_cloud(accumulated_points, params["frame_id"]))
             rospy.loginfo_throttle(
                 1.0,
-                "LiDAR cloud: packets=%d bad=%d sampled_points=%d accumulated_points=%d",
+                "LiDAR cloud: packets=%d bad=%d sampled_points=%d accumulated_points=%d age=%.3fs",
                 packets,
                 bad_packets,
                 len(cloud_points),
                 len(accumulated_points),
+                time.monotonic() - cloud_started_at,
             )
     finally:
         udp_socket.close()

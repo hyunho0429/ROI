@@ -238,7 +238,8 @@ roslaunch path_planning morai_lidar_rviz.launch \
   fov_left_deg:=180 \
   fov_right_deg:=180 \
   rear_blind_deg:=60 \
-  rolling_clouds:=1
+  rolling_clouds:=1 \
+  max_cloud_age_s:=0.10
 ```
 
 차량 뒤쪽도 포함한 완전 360도에 가깝게 보고 싶으면 `rear_blind_deg:=0`으로 둔다.
@@ -267,7 +268,13 @@ PointCloud2의 `Decay Time`을 길게 잡으면 차량 이동 중 이전 scan이
 
 점군 update가 느리거나 끊기면 `packets_per_cloud`를 60~80 범위에서 조정한다.
 값이 너무 크면 한 cloud를 만들 때 오래 걸리고, 너무 작으면 360도 scan이 듬성듬성
-보일 수 있다.
+보일 수 있다. `max_cloud_age_s`는 한 PointCloud2 메시지에 너무 오래된 UDP packet이
+섞이지 않도록 제한하는 값이다. 60 km/h 주행 결합 테스트에서는 `0.05~0.08s`,
+RViz에서 360도 형상을 더 온전히 보고 싶을 때는 `0.10~0.12s` 정도를 사용한다.
+
+RViz의 `Ego Axes`에서 빨간 X축은 차량 전방, 초록 Y축은 차량 좌측, 파란 Z축은
+위쪽이다. 차량이 전진할 때 화면상 좌우로 움직이는 듯 보이면 먼저 RViz 카메라
+시점 문제인지 이 축 기준으로 확인한다.
 
 ## 5. Ego Ctrl Cmd 통신 점검
 
