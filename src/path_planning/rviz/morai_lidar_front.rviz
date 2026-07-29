@@ -57,6 +57,15 @@ Visualization Manager:
       Use Fixed Frame: true
       Use rainbow: true
       Value: true
+    - Class: rviz/MarkerArray
+      Enabled: true
+      Marker Topic: /morai/lidar/obstacle_markers
+      Name: LiDAR Obstacle Clusters
+      Namespaces:
+        morai_lidar_obstacle_labels: true
+        morai_lidar_obstacles: true
+      Queue Size: 10
+      Value: true
   Enabled: true
   Global Options:
     Background Color: 35; 35; 35

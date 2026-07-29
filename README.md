@@ -275,6 +275,31 @@ rostopic echo /morai/lidar/nearest_distance_m
 가까운 박스까지 거리를 더 민감하게 보고 싶으면 `nearest_x_min_m`을 낮추고,
 바닥 point가 섞이면 `nearest_z_min_m`을 높인다.
 
+장애물 군집은 grid 기반 Euclidean clustering으로 계산한다. 결과는 JSON 문자열로
+`/morai/lidar/obstacles`에 publish되고, RViz에는 `/morai/lidar/obstacle_markers`
+MarkerArray로 박스와 라벨이 표시된다. 각 군집에는 차량 기준 중심 거리, 가장 가까운
+점 거리, 각도, 중심점, bounding box, point 수가 포함된다.
+
+```bash
+rostopic echo /morai/lidar/obstacles
+```
+
+주요 조정 파라미터:
+
+```bash
+roslaunch path_planning morai_lidar_rviz.launch \
+  cluster_tolerance_m:=0.8 \
+  cluster_min_points:=5 \
+  cluster_x_min_m:=1.0 \
+  cluster_x_max_m:=40.0 \
+  cluster_y_abs_m:=8.0 \
+  cluster_z_min_m:=-1.2 \
+  cluster_z_max_m:=2.5
+```
+
+장애물이 여러 개로 쪼개져 보이면 `cluster_tolerance_m`을 키우고, 바닥/노이즈가
+군집으로 잡히면 `cluster_min_points`를 키우거나 `cluster_z_min_m`을 높인다.
+
 `display_rolling_clouds`를 크게 잡거나 RViz PointCloud2의 `Decay Time`을 길게
 잡으면 차량 이동 중 이전 scan이 겹쳐서 긴 무지개 궤적처럼 번져 보인다. 주행 중에는
 `display_history_s:=0.25~0.35`, 정지 디버깅에서는 `0.5` 정도까지만 추천한다.

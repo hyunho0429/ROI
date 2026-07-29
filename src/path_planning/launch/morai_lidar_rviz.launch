@@ -9,6 +9,8 @@
   <arg name="topic" default="/morai/lidar/live_points" />
   <arg name="display_topic" default="/morai/lidar/display_points" />
   <arg name="nearest_distance_topic" default="/morai/lidar/nearest_distance_m" />
+  <arg name="obstacle_topic" default="/morai/lidar/obstacles" />
+  <arg name="obstacle_marker_topic" default="/morai/lidar/obstacle_markers" />
   <arg name="packets_per_cloud" default="80" />
   <arg name="rolling_clouds" default="1" />
   <arg name="display_rolling_clouds" default="5" />
@@ -35,6 +37,18 @@
   <arg name="nearest_z_min_m" default="-1.2" />
   <arg name="nearest_z_max_m" default="2.5" />
 
+  <!-- Euclidean/grid clustering parameters for obstacle candidates. -->
+  <arg name="cluster_enabled" default="true" />
+  <arg name="cluster_tolerance_m" default="0.8" />
+  <arg name="cluster_min_points" default="5" />
+  <arg name="cluster_max_clusters" default="8" />
+  <arg name="cluster_max_input_points" default="5000" />
+  <arg name="cluster_x_min_m" default="1.0" />
+  <arg name="cluster_x_max_m" default="40.0" />
+  <arg name="cluster_y_abs_m" default="8.0" />
+  <arg name="cluster_z_min_m" default="-1.2" />
+  <arg name="cluster_z_max_m" default="2.5" />
+
   <node pkg="path_planning"
         type="morai_lidar_pointcloud_udp.py"
         name="morai_lidar_pointcloud_udp"
@@ -46,6 +60,8 @@
     <param name="topic" value="$(arg topic)" />
     <param name="display_topic" value="$(arg display_topic)" />
     <param name="nearest_distance_topic" value="$(arg nearest_distance_topic)" />
+    <param name="obstacle_topic" value="$(arg obstacle_topic)" />
+    <param name="obstacle_marker_topic" value="$(arg obstacle_marker_topic)" />
     <param name="packets_per_cloud" value="$(arg packets_per_cloud)" />
     <param name="rolling_clouds" value="$(arg rolling_clouds)" />
     <param name="display_rolling_clouds" value="$(arg display_rolling_clouds)" />
@@ -66,6 +82,16 @@
     <param name="nearest_y_abs_m" value="$(arg nearest_y_abs_m)" />
     <param name="nearest_z_min_m" value="$(arg nearest_z_min_m)" />
     <param name="nearest_z_max_m" value="$(arg nearest_z_max_m)" />
+    <param name="cluster_enabled" value="$(arg cluster_enabled)" />
+    <param name="cluster_tolerance_m" value="$(arg cluster_tolerance_m)" />
+    <param name="cluster_min_points" value="$(arg cluster_min_points)" />
+    <param name="cluster_max_clusters" value="$(arg cluster_max_clusters)" />
+    <param name="cluster_max_input_points" value="$(arg cluster_max_input_points)" />
+    <param name="cluster_x_min_m" value="$(arg cluster_x_min_m)" />
+    <param name="cluster_x_max_m" value="$(arg cluster_x_max_m)" />
+    <param name="cluster_y_abs_m" value="$(arg cluster_y_abs_m)" />
+    <param name="cluster_z_min_m" value="$(arg cluster_z_min_m)" />
+    <param name="cluster_z_max_m" value="$(arg cluster_z_max_m)" />
   </node>
 
   <node if="$(arg rviz)"

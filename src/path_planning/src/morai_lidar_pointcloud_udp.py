@@ -11,14 +11,17 @@ Frame convention of the published cloud:
 """
 
 import math
+import json
 import socket
 import time
 from collections import deque
+from collections import defaultdict
 
 import rospy
 from sensor_msgs import point_cloud2
 from sensor_msgs.msg import PointCloud2, PointField
-from std_msgs.msg import Float32, Header
+from std_msgs.msg import Float32, Header, String
+from visualization_msgs.msg import Marker, MarkerArray
 
 try:
     from path_planning.morai_competition_config import BIND_IP
@@ -47,9 +50,26 @@ POINT_FIELDS = [
     PointField("bearing_deg", 24, PointField.FLOAT32, 1),
 ]
 
+POINT_X = 0
+POINT_Y = 1
+POINT_Z = 2
+POINT_DISTANCE = 3
+POINT_INTENSITY = 4
+POINT_RING = 5
+POINT_BEARING = 6
+
 
 def _param(name, default):
     return rospy.get_param("~" + name, default)
+
+
+def _bool_param(name, default):
+    value = _param(name, default)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes", "on")
+    return bool(value)
 
 
 def _rotate_xy(x_forward, y_left, yaw_offset_deg):
@@ -129,6 +149,205 @@ def _nearest_distance(points, params):
     return min(point[3] for point in candidates)
 
 
+def _cluster_candidate_points(points, params):
+    candidates = [
+        point
+        for point in points
+        if params["cluster_x_min_m"] <= point[POINT_X] <= params["cluster_x_max_m"]
+        and abs(point[POINT_Y]) <= params["cluster_y_abs_m"]
+        and params["cluster_z_min_m"] <= point[POINT_Z] <= params["cluster_z_max_m"]
+    ]
+    max_points = params["cluster_max_input_points"]
+    if max_points > 0 and len(candidates) > max_points:
+        step = int(math.ceil(float(len(candidates)) / float(max_points)))
+        candidates = candidates[::step]
+    if len(candidates) < params["cluster_min_points"]:
+        return []
+
+    tolerance = params["cluster_tolerance_m"]
+    tolerance_sq = tolerance * tolerance
+    grid = defaultdict(list)
+    for index, point in enumerate(candidates):
+        key = (
+            int(math.floor(point[POINT_X] / tolerance)),
+            int(math.floor(point[POINT_Y] / tolerance)),
+            int(math.floor(point[POINT_Z] / tolerance)),
+        )
+        grid[key].append(index)
+
+    visited = [False] * len(candidates)
+    clusters = []
+    for seed_index in range(len(candidates)):
+        if visited[seed_index]:
+            continue
+        visited[seed_index] = True
+        queue = [seed_index]
+        cluster_indices = []
+        while queue:
+            current_index = queue.pop()
+            cluster_indices.append(current_index)
+            current = candidates[current_index]
+            current_key = (
+                int(math.floor(current[POINT_X] / tolerance)),
+                int(math.floor(current[POINT_Y] / tolerance)),
+                int(math.floor(current[POINT_Z] / tolerance)),
+            )
+            for dx in (-1, 0, 1):
+                for dy in (-1, 0, 1):
+                    for dz in (-1, 0, 1):
+                        neighbor_key = (
+                            current_key[0] + dx,
+                            current_key[1] + dy,
+                            current_key[2] + dz,
+                        )
+                        for neighbor_index in grid.get(neighbor_key, ()):
+                            if visited[neighbor_index]:
+                                continue
+                            neighbor = candidates[neighbor_index]
+                            distance_sq = (
+                                (current[POINT_X] - neighbor[POINT_X]) ** 2
+                                + (current[POINT_Y] - neighbor[POINT_Y]) ** 2
+                                + (current[POINT_Z] - neighbor[POINT_Z]) ** 2
+                            )
+                            if distance_sq <= tolerance_sq:
+                                visited[neighbor_index] = True
+                                queue.append(neighbor_index)
+
+        if len(cluster_indices) < params["cluster_min_points"]:
+            continue
+        cluster_points = [candidates[index] for index in cluster_indices]
+        clusters.append(_summarize_cluster(cluster_points))
+
+    clusters.sort(key=lambda cluster: cluster["nearest_distance_m"])
+    return clusters[: params["cluster_max_clusters"]]
+
+
+def _summarize_cluster(points):
+    xs = [point[POINT_X] for point in points]
+    ys = [point[POINT_Y] for point in points]
+    zs = [point[POINT_Z] for point in points]
+    centroid_x = sum(xs) / len(xs)
+    centroid_y = sum(ys) / len(ys)
+    centroid_z = sum(zs) / len(zs)
+    centroid_distance = math.sqrt(centroid_x * centroid_x + centroid_y * centroid_y)
+    bearing_deg = math.degrees(math.atan2(centroid_y, centroid_x))
+    nearest_distance = min(point[POINT_DISTANCE] for point in points)
+    return {
+        "id": 0,
+        "point_count": len(points),
+        "centroid_x_m": centroid_x,
+        "centroid_y_m": centroid_y,
+        "centroid_z_m": centroid_z,
+        "centroid_distance_m": centroid_distance,
+        "bearing_deg": bearing_deg,
+        "nearest_distance_m": nearest_distance,
+        "min_x_m": min(xs),
+        "max_x_m": max(xs),
+        "min_y_m": min(ys),
+        "max_y_m": max(ys),
+        "min_z_m": min(zs),
+        "max_z_m": max(zs),
+    }
+
+
+def _format_clusters(clusters):
+    summaries = []
+    for index, cluster in enumerate(clusters):
+        cluster = dict(cluster)
+        cluster["id"] = index
+        summaries.append(cluster)
+    return summaries
+
+
+def _clusters_to_json(clusters):
+    fields = []
+    for cluster in clusters:
+        ordered = {
+            "id": cluster["id"],
+            "point_count": cluster["point_count"],
+            "distance_m": round(cluster["centroid_distance_m"], 3),
+            "nearest_distance_m": round(cluster["nearest_distance_m"], 3),
+            "bearing_deg": round(cluster["bearing_deg"], 2),
+            "centroid": [
+                round(cluster["centroid_x_m"], 3),
+                round(cluster["centroid_y_m"], 3),
+                round(cluster["centroid_z_m"], 3),
+            ],
+            "bbox_min": [
+                round(cluster["min_x_m"], 3),
+                round(cluster["min_y_m"], 3),
+                round(cluster["min_z_m"], 3),
+            ],
+            "bbox_max": [
+                round(cluster["max_x_m"], 3),
+                round(cluster["max_y_m"], 3),
+                round(cluster["max_z_m"], 3),
+            ],
+        }
+        fields.append(ordered)
+    return json.dumps(fields, ensure_ascii=False)
+
+
+def _make_obstacle_markers(clusters, frame_id):
+    marker_array = MarkerArray()
+
+    clear_marker = Marker()
+    clear_marker.header.frame_id = frame_id
+    clear_marker.header.stamp = rospy.Time.now()
+    clear_marker.action = Marker.DELETEALL
+    marker_array.markers.append(clear_marker)
+
+    stamp = rospy.Time.now()
+    for cluster in clusters:
+        marker = Marker()
+        marker.header.frame_id = frame_id
+        marker.header.stamp = stamp
+        marker.ns = "morai_lidar_obstacles"
+        marker.id = cluster["id"] * 2
+        marker.type = Marker.CUBE
+        marker.action = Marker.ADD
+        marker.pose.position.x = cluster["centroid_x_m"]
+        marker.pose.position.y = cluster["centroid_y_m"]
+        marker.pose.position.z = cluster["centroid_z_m"]
+        marker.pose.orientation.w = 1.0
+        marker.scale.x = max(0.2, cluster["max_x_m"] - cluster["min_x_m"])
+        marker.scale.y = max(0.2, cluster["max_y_m"] - cluster["min_y_m"])
+        marker.scale.z = max(0.2, cluster["max_z_m"] - cluster["min_z_m"])
+        marker.color.r = 1.0
+        marker.color.g = 0.25
+        marker.color.b = 0.05
+        marker.color.a = 0.45
+        marker.lifetime = rospy.Duration(0.4)
+        marker_array.markers.append(marker)
+
+        text = Marker()
+        text.header.frame_id = frame_id
+        text.header.stamp = stamp
+        text.ns = "morai_lidar_obstacle_labels"
+        text.id = cluster["id"] * 2 + 1
+        text.type = Marker.TEXT_VIEW_FACING
+        text.action = Marker.ADD
+        text.pose.position.x = cluster["centroid_x_m"]
+        text.pose.position.y = cluster["centroid_y_m"]
+        text.pose.position.z = cluster["max_z_m"] + 0.6
+        text.pose.orientation.w = 1.0
+        text.scale.z = 0.55
+        text.color.r = 1.0
+        text.color.g = 1.0
+        text.color.b = 1.0
+        text.color.a = 1.0
+        text.text = "#{id} {distance:.1f}m {angle:+.0f}deg n={count}".format(
+            id=cluster["id"],
+            distance=cluster["centroid_distance_m"],
+            angle=cluster["bearing_deg"],
+            count=cluster["point_count"],
+        )
+        text.lifetime = rospy.Duration(0.4)
+        marker_array.markers.append(text)
+
+    return marker_array
+
+
 def main():
     rospy.init_node("morai_lidar_pointcloud_udp")
 
@@ -142,6 +361,11 @@ def main():
         "nearest_distance_topic": _param(
             "nearest_distance_topic",
             "/morai/lidar/nearest_distance_m",
+        ),
+        "obstacle_topic": _param("obstacle_topic", "/morai/lidar/obstacles"),
+        "obstacle_marker_topic": _param(
+            "obstacle_marker_topic",
+            "/morai/lidar/obstacle_markers",
         ),
         "packets_per_cloud": int(_param("packets_per_cloud", 80)),
         "rolling_clouds": int(_param("rolling_clouds", 1)),
@@ -164,6 +388,16 @@ def main():
         "nearest_y_abs_m": float(_param("nearest_y_abs_m", 5.0)),
         "nearest_z_min_m": float(_param("nearest_z_min_m", -1.2)),
         "nearest_z_max_m": float(_param("nearest_z_max_m", 2.5)),
+        "cluster_enabled": _bool_param("cluster_enabled", True),
+        "cluster_tolerance_m": float(_param("cluster_tolerance_m", 0.8)),
+        "cluster_min_points": int(_param("cluster_min_points", 5)),
+        "cluster_max_clusters": int(_param("cluster_max_clusters", 8)),
+        "cluster_max_input_points": int(_param("cluster_max_input_points", 5000)),
+        "cluster_x_min_m": float(_param("cluster_x_min_m", 1.0)),
+        "cluster_x_max_m": float(_param("cluster_x_max_m", 40.0)),
+        "cluster_y_abs_m": float(_param("cluster_y_abs_m", 8.0)),
+        "cluster_z_min_m": float(_param("cluster_z_min_m", -1.2)),
+        "cluster_z_max_m": float(_param("cluster_z_max_m", 2.5)),
     }
 
     if params["packets_per_cloud"] < 1:
@@ -188,12 +422,32 @@ def main():
         raise ValueError("nearest_y_abs_m cannot be negative")
     if params["nearest_z_max_m"] <= params["nearest_z_min_m"]:
         raise ValueError("nearest z range must satisfy min < max")
+    if params["cluster_tolerance_m"] <= 0.0:
+        raise ValueError("cluster_tolerance_m must be positive")
+    if params["cluster_min_points"] < 1:
+        raise ValueError("cluster_min_points must be at least 1")
+    if params["cluster_max_clusters"] < 1:
+        raise ValueError("cluster_max_clusters must be at least 1")
+    if params["cluster_max_input_points"] < 0:
+        raise ValueError("cluster_max_input_points cannot be negative")
+    if params["cluster_x_max_m"] <= params["cluster_x_min_m"]:
+        raise ValueError("cluster x range must satisfy min < max")
+    if params["cluster_y_abs_m"] < 0.0:
+        raise ValueError("cluster_y_abs_m cannot be negative")
+    if params["cluster_z_max_m"] <= params["cluster_z_min_m"]:
+        raise ValueError("cluster z range must satisfy min < max")
 
     publisher = rospy.Publisher(params["topic"], PointCloud2, queue_size=1)
     display_publisher = rospy.Publisher(params["display_topic"], PointCloud2, queue_size=1)
     nearest_distance_publisher = rospy.Publisher(
         params["nearest_distance_topic"],
         Float32,
+        queue_size=1,
+    )
+    obstacle_publisher = rospy.Publisher(params["obstacle_topic"], String, queue_size=1)
+    obstacle_marker_publisher = rospy.Publisher(
+        params["obstacle_marker_topic"],
+        MarkerArray,
         queue_size=1,
     )
 
@@ -289,23 +543,33 @@ def main():
                 for _, cloud in display_rolling_clouds
                 for point in cloud
             ]
+            clusters = []
             if accumulated_points:
                 publisher.publish(_make_cloud(accumulated_points, params["frame_id"]))
                 nearest_distance = _nearest_distance(accumulated_points, params)
                 if nearest_distance is not None:
                     nearest_distance_publisher.publish(Float32(data=nearest_distance))
+                if params["cluster_enabled"]:
+                    clusters = _format_clusters(
+                        _cluster_candidate_points(accumulated_points, params)
+                    )
+                    obstacle_publisher.publish(String(data=_clusters_to_json(clusters)))
+                    obstacle_marker_publisher.publish(
+                        _make_obstacle_markers(clusters, params["frame_id"])
+                    )
             if display_points:
                 display_publisher.publish(_make_cloud(display_points, params["frame_id"]))
             nearest_text = _nearest_distance(accumulated_points, params)
             rospy.loginfo_throttle(
                 1.0,
                 "LiDAR cloud: packets=%d bad=%d live_points=%d display_points=%d "
-                "nearest=%s age=%.3fs",
+                "nearest=%s clusters=%d age=%.3fs",
                 packets,
                 bad_packets,
                 len(accumulated_points),
                 len(display_points),
                 "n/a" if nearest_text is None else "{:.2f}m".format(nearest_text),
+                len(clusters),
                 time.monotonic() - cloud_started_at,
             )
     finally:
