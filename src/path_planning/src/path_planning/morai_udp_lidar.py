@@ -60,9 +60,18 @@ class LidarPacketError(ValueError):
 
 @dataclass(frozen=True)
 class LidarPoint:
+    # Vehicle/local coordinates used by the inspector and obstacle filters.
+    # x: forward, y: left, z: up.
     x_m: float
     y_m: float
     z_m: float
+
+    # Raw MORAI/Velodyne coordinates from the official LiDAR sensor frame.
+    # x: right, y: forward, z: up.
+    raw_x_right_m: float
+    raw_y_forward_m: float
+    raw_z_up_m: float
+
     intensity: int
     distance_m: float
     azimuth_deg: float
@@ -152,11 +161,29 @@ def _point_from_polar(distance_m, azimuth_deg, vertical_angle_deg):
     vertical_rad = math.radians(vertical_angle_deg)
     xy_distance = distance_m * math.cos(vertical_rad)
 
-    # MORAI/vehicle convention useful for debugging: x forward, y left, z up.
-    x_m = xy_distance * math.cos(azimuth_rad)
-    y_m = xy_distance * math.sin(azimuth_rad)
-    z_m = distance_m * math.sin(vertical_rad)
-    return x_m, y_m, z_m
+    # Official MORAI Velodyne LiDAR frame:
+    #   +x: right, +y: forward, +z: up
+    #
+    # Velodyne azimuth 0 deg points along +y(forward), and positive azimuth
+    # rotates toward +x(right).  This keeps raw coordinates consistent with
+    # the UDP LiDAR sensor frame documented by MORAI.
+    raw_x_right_m = xy_distance * math.sin(azimuth_rad)
+    raw_y_forward_m = xy_distance * math.cos(azimuth_rad)
+    raw_z_up_m = distance_m * math.sin(vertical_rad)
+
+    # Vehicle/obstacle-detection frame used by the rest of this debug tool:
+    #   +x: forward, +y: left, +z: up
+    vehicle_x_forward_m = raw_y_forward_m
+    vehicle_y_left_m = -raw_x_right_m
+    vehicle_z_up_m = raw_z_up_m
+    return (
+        vehicle_x_forward_m,
+        vehicle_y_left_m,
+        vehicle_z_up_m,
+        raw_x_right_m,
+        raw_y_forward_m,
+        raw_z_up_m,
+    )
 
 
 def parse_lidar_intensity_packet(
@@ -226,7 +253,14 @@ def parse_lidar_intensity_packet(
             firing_group = channel_index // len(VLP16_VERTICAL_ANGLES_DEG)
             azimuth_deg = (current_azimuth + azimuth_step * 0.5 * firing_group) % 360.0
             vertical_angle_deg = VLP16_VERTICAL_ANGLES_DEG[laser_id]
-            x_m, y_m, z_m = _point_from_polar(
+            (
+                x_m,
+                y_m,
+                z_m,
+                raw_x_right_m,
+                raw_y_forward_m,
+                raw_z_up_m,
+            ) = _point_from_polar(
                 distance_m, azimuth_deg, vertical_angle_deg
             )
 
@@ -235,6 +269,9 @@ def parse_lidar_intensity_packet(
                     x_m=x_m,
                     y_m=y_m,
                     z_m=z_m,
+                    raw_x_right_m=raw_x_right_m,
+                    raw_y_forward_m=raw_y_forward_m,
+                    raw_z_up_m=raw_z_up_m,
                     intensity=intensity,
                     distance_m=distance_m,
                     azimuth_deg=azimuth_deg,

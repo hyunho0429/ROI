@@ -153,9 +153,15 @@ def _open_csv(path):
         fieldnames=[
             "packet_index",
             "point_index",
+            "x_forward_m",
+            "y_left_m",
+            "z_up_m",
             "x_m",
             "y_m",
             "z_m",
+            "raw_x_right_m",
+            "raw_y_forward_m",
+            "raw_z_up_m",
             "intensity",
             "distance_m",
             "azimuth_deg",
@@ -180,9 +186,15 @@ def _dump_points(writer, packet_index, points, remaining_budget):
             {
                 "packet_index": packet_index,
                 "point_index": point_index,
+                "x_forward_m": "{:.6f}".format(point.x_m),
+                "y_left_m": "{:.6f}".format(point.y_m),
+                "z_up_m": "{:.6f}".format(point.z_m),
                 "x_m": "{:.6f}".format(point.x_m),
                 "y_m": "{:.6f}".format(point.y_m),
                 "z_m": "{:.6f}".format(point.z_m),
+                "raw_x_right_m": "{:.6f}".format(point.raw_x_right_m),
+                "raw_y_forward_m": "{:.6f}".format(point.raw_y_forward_m),
+                "raw_z_up_m": "{:.6f}".format(point.raw_z_up_m),
                 "intensity": "{:.6f}".format(point.intensity),
                 "distance_m": "{:.6f}".format(point.distance_m),
                 "azimuth_deg": "{:.3f}".format(point.azimuth_deg),
@@ -210,7 +222,7 @@ def _print_summary(summary):
         )
     )
     print(
-        "          x={}, y={}, z={}, intensity={}".format(
+        "          vehicle x_forward={}, y_left={}, z_up={}, intensity={}".format(
             _range_text(summary["x_range_m"], "m"),
             _range_text(summary["y_range_m"], "m"),
             _range_text(summary["z_range_m"], "m"),
@@ -247,12 +259,15 @@ def _print_point_list(label, points, max_count):
     print("  {}: showing {} closest".format(label, len(visible_points)))
     for index, point in enumerate(visible_points):
         print(
-            "    [{}] x={:+.3f}m, y={:+.3f}m, z={:+.3f}m, "
+            "    [{}] vehicle x_forward={:+.3f}m, y_left={:+.3f}m, z_up={:+.3f}m, "
+            "raw x_right={:+.3f}m, raw y_forward={:+.3f}m, "
             "distance={:.3f}m, intensity={}, azimuth={:.2f}deg, laser={}".format(
                 index,
                 point.x_m,
                 point.y_m,
                 point.z_m,
+                point.raw_x_right_m,
+                point.raw_y_forward_m,
                 point.distance_m,
                 point.intensity,
                 point.azimuth_deg,
@@ -271,8 +286,8 @@ def _print_obstacle_debug(points, arguments):
     )
     _print_point_list("closest nonzero", nonzero_points, arguments.closest_points)
     print(
-        "  front corridor: count={} within x={:.1f}..{:.1f}m, |y|<={:.1f}m, "
-        "z={:.1f}..{:.1f}m".format(
+        "  front corridor: count={} within vehicle x_forward={:.1f}..{:.1f}m, "
+        "|y_left|<={:.1f}m, z_up={:.1f}..{:.1f}m".format(
             len(front_points),
             arguments.front_x_min,
             arguments.front_x_max,
@@ -393,13 +408,15 @@ def run(arguments):
                 lidar_packet.points[: arguments.sample_points]
             ):
                 print(
-                    "  sample[{}]: x={:+.3f}m, y={:+.3f}m, z={:+.3f}m, "
-                    "intensity={}, distance={:.3f}m, azimuth={:.2f}deg, "
-                    "laser={}".format(
+                    "  sample[{}]: vehicle x_forward={:+.3f}m, y_left={:+.3f}m, "
+                    "z_up={:+.3f}m, raw x_right={:+.3f}m, raw y_forward={:+.3f}m, "
+                    "intensity={}, distance={:.3f}m, azimuth={:.2f}deg, laser={}".format(
                         point_index,
                         point.x_m,
                         point.y_m,
                         point.z_m,
+                        point.raw_x_right_m,
+                        point.raw_y_forward_m,
                         point.intensity,
                         point.distance_m,
                         point.azimuth_deg,

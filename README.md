@@ -154,6 +154,21 @@ MORAI 3D LiDAR UDP는 Velodyne 프로토콜을 따른다. Python `socket.recvfro
 로 구성된다. 각 channel data는 `distance uint16 2 bytes + reflectivity/intensity
 uint8 1 byte`이다.
 
+이 브랜치의 LiDAR parser는 VLP-16 수직각 테이블을 사용한다. 공식 문서의 원시
+Velodyne LiDAR 센서 좌표계는 `x=right`, `y=forward`, `z=up`이고, 전방 장애물
+판정과 로그의 기본 좌표는 차량 로컬 좌표계 `x_forward=forward`, `y_left=left`,
+`z_up=up`으로 변환해서 사용한다. 변환식은 다음과 같다.
+
+```text
+vehicle_x_forward = raw_y_forward
+vehicle_y_left    = -raw_x_right
+vehicle_z_up      = raw_z_up
+```
+
+시뮬레이터 차량 위치 `(x, y, z)`는 맵 원점 기준 ENU 전역 좌표다. 이 값은 LiDAR
+로컬 point를 맵 전역 좌표로 변환할 때 차량 위치/yaw와 함께 사용해야 하며,
+이 inspector의 전방 장애물 판정은 차량 로컬 좌표만 사용한다.
+
 ```bash
 cd ~/ROI
 source devel/setup.bash
@@ -166,7 +181,7 @@ python3 src/path_planning/src/morai_lidar_intensity_inspect.py \
 ```
 
 수신이 정상이라면 각 UDP packet마다 sender, payload 크기, Velodyne block layout,
-timestamp/factory, point 수, 거리/intensity 범위, sample point가 출력된다.
+timestamp/factory, point 수, 거리/intensity 범위, 전방 장애물 후보, sample point가 출력된다.
 일반 UDP 수신은 `--header-bytes auto` 또는 `--header-bytes 0`을 쓰면 되고,
 pcap 등에서 42 byte network header까지 포함된 데이터를 직접 넣을 때만
 `--header-bytes 42`를 사용한다.
