@@ -10,7 +10,8 @@
   <arg name="display_topic" default="/morai/lidar/display_points" />
   <arg name="packets_per_cloud" default="80" />
   <arg name="rolling_clouds" default="1" />
-  <arg name="display_rolling_clouds" default="2" />
+  <arg name="display_rolling_clouds" default="5" />
+  <arg name="display_history_s" default="0.35" />
   <arg name="max_cloud_age_s" default="0.10" />
 
   <!-- Near-360 scan by default, with only the ego rear sector hidden. -->
@@ -39,6 +40,7 @@
     <param name="packets_per_cloud" value="$(arg packets_per_cloud)" />
     <param name="rolling_clouds" value="$(arg rolling_clouds)" />
     <param name="display_rolling_clouds" value="$(arg display_rolling_clouds)" />
+    <param name="display_history_s" value="$(arg display_history_s)" />
     <param name="max_cloud_age_s" value="$(arg max_cloud_age_s)" />
     <param name="fov_left_deg" value="$(arg fov_left_deg)" />
     <param name="fov_right_deg" value="$(arg fov_right_deg)" />

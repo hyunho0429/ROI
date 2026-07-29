@@ -231,17 +231,12 @@ UDP LiDAR 수신 node와 RViz를 함께 실행하고, 기본값으로 MORAI 공�
 scan 화면처럼 거의 360도 영역을 publish하되 차량 바로 뒤쪽 blind sector만 제외한다.
 
 ```bash
-roslaunch path_planning morai_lidar_rviz.launch \
-  bind_ip:=0.0.0.0 \
-  host_port:=2000 \
-  destination_port:=2001 \
-  fov_left_deg:=180 \
-  fov_right_deg:=180 \
-  rear_blind_deg:=60 \
-  rolling_clouds:=1 \
-  display_rolling_clouds:=2 \
-  max_cloud_age_s:=0.10
+roslaunch path_planning morai_lidar_rviz.launch
 ```
+
+위 launch의 기본값은 `bind_ip=0.0.0.0`, `host_port=2000`,
+`destination_port=2001`, `rear_blind_deg=60`, `rolling_clouds=1`,
+`max_cloud_age_s=0.10`으로 설정되어 있다.
 
 차량 뒤쪽도 포함한 완전 360도에 가깝게 보고 싶으면 `rear_blind_deg:=0`으로 둔다.
 
@@ -263,12 +258,12 @@ roslaunch path_planning morai_lidar_rviz.launch \
 
 주행 알고리즘에는 `/morai/lidar/live_points`를 사용한다. 이 토픽은 기본
 `rolling_clouds:=1`이라 최신 cloud만 publish한다. RViz는
-`/morai/lidar/display_points`를 사용하며, 기본 `display_rolling_clouds:=2`로
-짧게 누적해서 깜빡임을 줄인다.
+`/morai/lidar/display_points`를 사용하며, 기본 `display_rolling_clouds:=5`,
+`display_history_s:=0.35`로 최근 짧은 시간만 누적해서 깜빡임을 줄인다.
 
 `display_rolling_clouds`를 크게 잡거나 RViz PointCloud2의 `Decay Time`을 길게
 잡으면 차량 이동 중 이전 scan이 겹쳐서 긴 무지개 궤적처럼 번져 보인다. 주행 중에는
-`display_rolling_clouds:=2`, 정지 디버깅에서는 `3` 정도까지만 추천한다.
+`display_history_s:=0.25~0.35`, 정지 디버깅에서는 `0.5` 정도까지만 추천한다.
 
 점군 update가 느리거나 끊기면 `packets_per_cloud`를 60~80 범위에서 조정한다.
 값이 너무 크면 한 cloud를 만들 때 오래 걸리고, 너무 작으면 360도 scan이 듬성듬성

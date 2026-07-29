@@ -126,7 +126,8 @@ def main():
         "display_topic": _param("display_topic", "/morai/lidar/display_points"),
         "packets_per_cloud": int(_param("packets_per_cloud", 80)),
         "rolling_clouds": int(_param("rolling_clouds", 1)),
-        "display_rolling_clouds": int(_param("display_rolling_clouds", 2)),
+        "display_rolling_clouds": int(_param("display_rolling_clouds", 5)),
+        "display_history_s": float(_param("display_history_s", 0.35)),
         "max_cloud_age_s": float(_param("max_cloud_age_s", 0.10)),
         "socket_timeout_s": float(_param("socket_timeout_s", 1.0)),
         "lidar_yaw_offset_deg": float(_param("lidar_yaw_offset_deg", 0.0)),
@@ -147,6 +148,8 @@ def main():
         raise ValueError("~rolling_clouds must be at least 1")
     if params["display_rolling_clouds"] < 1:
         raise ValueError("~display_rolling_clouds must be at least 1")
+    if params["display_history_s"] < 0.0:
+        raise ValueError("~display_history_s cannot be negative")
     if params["max_cloud_age_s"] < 0.0:
         raise ValueError("~max_cloud_age_s cannot be negative")
     if params["fov_left_deg"] < 0.0 or params["fov_right_deg"] < 0.0:
@@ -168,7 +171,8 @@ def main():
     rospy.loginfo(
         "MORAI LiDAR PointCloud2 UDP: source *:%d -> %s:%d, topic=%s, "
         "display_topic=%s, frame=%s, FOV=-%.1f..+%.1f deg, rear_blind=%.1f deg, "
-        "rolling_clouds=%d, display_rolling_clouds=%d, max_cloud_age=%.3fs",
+        "rolling_clouds=%d, display_rolling_clouds=%d, display_history=%.3fs, "
+        "max_cloud_age=%.3fs",
         params["host_port"],
         params["bind_ip"],
         params["destination_port"],
@@ -180,6 +184,7 @@ def main():
         params["rear_blind_deg"],
         params["rolling_clouds"],
         params["display_rolling_clouds"],
+        params["display_history_s"],
         params["max_cloud_age_s"],
     )
 
@@ -229,15 +234,22 @@ def main():
 
             if cloud_points:
                 rolling_clouds.append(cloud_points)
-                display_rolling_clouds.append(cloud_points)
+                display_rolling_clouds.append((time.monotonic(), cloud_points))
             accumulated_points = [
                 point
                 for cloud in rolling_clouds
                 for point in cloud
             ]
+            now = time.monotonic()
+            while (
+                display_rolling_clouds
+                and params["display_history_s"] > 0.0
+                and now - display_rolling_clouds[0][0] > params["display_history_s"]
+            ):
+                display_rolling_clouds.popleft()
             display_points = [
                 point
-                for cloud in display_rolling_clouds
+                for _, cloud in display_rolling_clouds
                 for point in cloud
             ]
             if accumulated_points:
