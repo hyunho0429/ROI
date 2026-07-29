@@ -505,3 +505,44 @@ roslaunch path_planning kcity_2025_dijkstra.launch \
   튜닝 상세
 - `src/path_planning/README_TUNNEL_LOCALIZATION.md`: GPS 음영 구간 위치 추정
 - `src/path_planning/README_GPS_CSV_RECORDER.md`: GPS 기준 경로 기록
+
+## LiDAR motion compensation
+
+`feat/lidar`의 LiDAR RViz 노드는 기본적으로 motion compensation을 켠다.
+MORAI VLP-16 UDP LiDAR는 여러 UDP packet이 모여 하나의 PointCloud가 되므로,
+차량이 빠르게 움직이면 먼저 들어온 packet의 점군이 현재 차량 좌표계와 어긋난다.
+이를 줄이기 위해 노드는 packet 수신 시각을 저장하고, Competition Vehicle Status의
+signed velocity와 z축 angular velocity를 사용해 각 packet의 점을 publish 시점의
+차량 local frame으로 보정한다.
+
+기본 실행:
+
+```bash
+cd ~/catkin_ws/src/ROI
+source devel/setup.bash
+roslaunch path_planning morai_lidar_rviz.launch
+```
+
+기본 UDP 설정은 다음과 같다.
+
+| Network | Host/Source Port | Destination Port |
+|---|---:|---:|
+| 3D LiDAR Intensity | 2000 | 2001 |
+| Competition Vehicle Status | 9080 | 9081 |
+
+주요 파라미터:
+
+- `motion_compensation_enabled:=true`: motion compensation on/off
+- `use_comp_status_motion_compensation:=true`: Competition Vehicle Status 기반 속도/요레이트 사용
+- `motion_status_timeout_s:=0.5`: 이 시간보다 오래된 status는 stale로 보고 manual 값 사용
+- `motion_max_point_age_s:=0.20`: 과도한 보정을 막기 위한 packet age 상한
+- `motion_yaw_rate_sign:=1.0`: 커브에서 보정 방향이 반대로 보이면 `-1.0`으로 바꿔 테스트
+
+주행 노드가 이미 `9081`을 점유해서 LiDAR 노드가 Competition Status를 받을 수 없으면
+다음처럼 수동 속도만 넣어서 RViz 확인용 보정을 할 수 있다.
+
+```bash
+roslaunch path_planning morai_lidar_rviz.launch \
+  use_comp_status_motion_compensation:=false \
+  manual_speed_mps:=16.67
+```
