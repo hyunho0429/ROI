@@ -10,13 +10,18 @@ import argparse
 import csv
 import os
 import socket
-import time
 
-from path_planning.morai_competition_config import (
-    BIND_IP,
-    LIDAR_HOST_PORT,
-    LIDAR_PORT,
-)
+try:
+    from path_planning.morai_competition_config import BIND_IP
+except ImportError:
+    BIND_IP = "0.0.0.0"
+
+try:
+    from path_planning.morai_competition_config import LIDAR_HOST_PORT, LIDAR_PORT
+except ImportError:
+    LIDAR_HOST_PORT = 2000
+    LIDAR_PORT = 2001
+
 from path_planning.morai_udp_lidar import (
     POINT_STRIDE_BYTES,
     LidarPacketError,
