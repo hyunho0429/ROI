@@ -84,6 +84,42 @@ def argument_parser():
         default=20000,
         help="maximum number of points written to --dump-csv across all packets",
     )
+    parser.add_argument(
+        "--front-x-min",
+        type=float,
+        default=0.5,
+        help="minimum forward x distance for front-obstacle candidate points",
+    )
+    parser.add_argument(
+        "--front-x-max",
+        type=float,
+        default=30.0,
+        help="maximum forward x distance for front-obstacle candidate points",
+    )
+    parser.add_argument(
+        "--front-y-abs",
+        type=float,
+        default=2.5,
+        help="half width of the forward corridor, using abs(y) <= this value",
+    )
+    parser.add_argument(
+        "--front-z-min",
+        type=float,
+        default=-1.8,
+        help="minimum z height for front-obstacle candidate points",
+    )
+    parser.add_argument(
+        "--front-z-max",
+        type=float,
+        default=2.0,
+        help="maximum z height for front-obstacle candidate points",
+    )
+    parser.add_argument(
+        "--closest-points",
+        type=int,
+        default=5,
+        help="number of closest non-zero/front-candidate points to print",
+    )
     return parser
 
 
@@ -183,6 +219,71 @@ def _print_summary(summary):
     )
 
 
+def _valid_nonzero_points(points, min_distance_m=0.2):
+    return [
+        point
+        for point in points
+        if point.distance_m >= min_distance_m
+    ]
+
+
+def _front_corridor_points(points, arguments):
+    return [
+        point
+        for point in _valid_nonzero_points(points)
+        if arguments.front_x_min <= point.x_m <= arguments.front_x_max
+        and abs(point.y_m) <= arguments.front_y_abs
+        and arguments.front_z_min <= point.z_m <= arguments.front_z_max
+    ]
+
+
+def _print_point_list(label, points, max_count):
+    if max_count <= 0:
+        return
+    visible_points = sorted(points, key=lambda point: point.distance_m)[:max_count]
+    if not visible_points:
+        print("  {}: none".format(label))
+        return
+    print("  {}: showing {} closest".format(label, len(visible_points)))
+    for index, point in enumerate(visible_points):
+        print(
+            "    [{}] x={:+.3f}m, y={:+.3f}m, z={:+.3f}m, "
+            "distance={:.3f}m, intensity={}, azimuth={:.2f}deg, laser={}".format(
+                index,
+                point.x_m,
+                point.y_m,
+                point.z_m,
+                point.distance_m,
+                point.intensity,
+                point.azimuth_deg,
+                point.laser_id,
+            )
+        )
+
+
+def _print_obstacle_debug(points, arguments):
+    nonzero_points = _valid_nonzero_points(points)
+    front_points = _front_corridor_points(points, arguments)
+    print(
+        "  nonzero returns: count={} (distance >= 0.2m)".format(
+            len(nonzero_points)
+        )
+    )
+    _print_point_list("closest nonzero", nonzero_points, arguments.closest_points)
+    print(
+        "  front corridor: count={} within x={:.1f}..{:.1f}m, |y|<={:.1f}m, "
+        "z={:.1f}..{:.1f}m".format(
+            len(front_points),
+            arguments.front_x_min,
+            arguments.front_x_max,
+            arguments.front_y_abs,
+            arguments.front_z_min,
+            arguments.front_z_max,
+        )
+    )
+    _print_point_list("front candidates", front_points, arguments.closest_points)
+
+
 def _range_text(value_range, unit):
     if value_range is None:
         return "n/a"
@@ -204,6 +305,14 @@ def run(arguments):
         raise ValueError("hex-bytes cannot be negative")
     if arguments.dump_max_points < 0:
         raise ValueError("dump-max-points cannot be negative")
+    if arguments.closest_points < 0:
+        raise ValueError("closest-points cannot be negative")
+    if arguments.front_x_min < 0.0 or arguments.front_x_max <= arguments.front_x_min:
+        raise ValueError("front x range must satisfy 0 <= min < max")
+    if arguments.front_y_abs < 0.0:
+        raise ValueError("front-y-abs cannot be negative")
+    if arguments.front_z_max <= arguments.front_z_min:
+        raise ValueError("front z range must satisfy min < max")
 
     byte_order = "<" if arguments.byte_order == "little" else ">"
     csv_stream, csv_writer = _open_csv(arguments.dump_csv)
@@ -279,6 +388,7 @@ def run(arguments):
                 )
             )
             _print_summary(summary)
+            _print_obstacle_debug(lidar_packet.points, arguments)
             for point_index, point in enumerate(
                 lidar_packet.points[: arguments.sample_points]
             ):
