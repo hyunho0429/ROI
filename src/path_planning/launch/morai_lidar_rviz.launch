@@ -1,0 +1,51 @@
+<launch>
+  <arg name="rviz" default="true" />
+
+  <arg name="bind_ip" default="0.0.0.0" />
+  <arg name="host_port" default="2000" />
+  <arg name="destination_port" default="2001" />
+
+  <arg name="frame_id" default="morai_lidar" />
+  <arg name="topic" default="/morai/lidar/front_points" />
+  <arg name="packets_per_cloud" default="80" />
+
+  <!-- Front half-space by default: right -90 deg to left +90 deg. -->
+  <arg name="fov_left_deg" default="90.0" />
+  <arg name="fov_right_deg" default="90.0" />
+  <arg name="lidar_yaw_offset_deg" default="0.0" />
+
+  <arg name="x_min_m" default="0.3" />
+  <arg name="x_max_m" default="40.0" />
+  <arg name="y_abs_m" default="8.0" />
+  <arg name="z_min_m" default="-2.5" />
+  <arg name="z_max_m" default="3.0" />
+  <arg name="min_distance_m" default="0.2" />
+
+  <node pkg="path_planning"
+        type="morai_lidar_pointcloud_udp.py"
+        name="morai_lidar_pointcloud_udp"
+        output="screen">
+    <param name="bind_ip" value="$(arg bind_ip)" />
+    <param name="host_port" value="$(arg host_port)" />
+    <param name="destination_port" value="$(arg destination_port)" />
+    <param name="frame_id" value="$(arg frame_id)" />
+    <param name="topic" value="$(arg topic)" />
+    <param name="packets_per_cloud" value="$(arg packets_per_cloud)" />
+    <param name="fov_left_deg" value="$(arg fov_left_deg)" />
+    <param name="fov_right_deg" value="$(arg fov_right_deg)" />
+    <param name="lidar_yaw_offset_deg" value="$(arg lidar_yaw_offset_deg)" />
+    <param name="x_min_m" value="$(arg x_min_m)" />
+    <param name="x_max_m" value="$(arg x_max_m)" />
+    <param name="y_abs_m" value="$(arg y_abs_m)" />
+    <param name="z_min_m" value="$(arg z_min_m)" />
+    <param name="z_max_m" value="$(arg z_max_m)" />
+    <param name="min_distance_m" value="$(arg min_distance_m)" />
+  </node>
+
+  <node if="$(arg rviz)"
+        pkg="rviz"
+        type="rviz"
+        name="morai_lidar_rviz"
+        args="-d $(find path_planning)/rviz/morai_lidar_front.rviz"
+        output="screen" />
+</launch>

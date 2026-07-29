@@ -206,6 +206,8 @@ PYTHONPATH=src/path_planning/src python3 src/path_planning/src/lidar_monitor.py 
   --host-port 2000 \
   --destination-port 2001 \
   --packets-per-window 80 \
+  --fov-left-deg 90 \
+  --fov-right-deg 90 \
   --yaw-scan
 ```
 
@@ -219,7 +221,30 @@ PYTHONPATH=src/path_planning/src python3 src/path_planning/src/lidar_monitor.py 
   --host-port 2000 \
   --destination-port 2001 \
   --packets-per-window 80 \
+  --fov-left-deg 90 \
+  --fov-right-deg 90 \
   --lidar-yaw-offset-deg 90
+```
+
+RViz에서 전방 FOV PointCloud를 바로 확인하려면 다음 launch를 사용한다. 이 launch는
+UDP LiDAR 수신 node와 RViz를 함께 실행하고, 기본값으로 차량 전방 반원
+`right -90° ~ left +90°` 영역만 `/morai/lidar/front_points`로 publish한다.
+
+```bash
+roslaunch path_planning morai_lidar_rviz.launch \
+  bind_ip:=0.0.0.0 \
+  host_port:=2000 \
+  destination_port:=2001 \
+  fov_left_deg:=90 \
+  fov_right_deg:=90
+```
+
+더 좁은 전방 영역만 보고 싶으면 각도를 줄인다.
+
+```bash
+roslaunch path_planning morai_lidar_rviz.launch \
+  fov_left_deg:=45 \
+  fov_right_deg:=45
 ```
 
 ## 5. Ego Ctrl Cmd 통신 점검

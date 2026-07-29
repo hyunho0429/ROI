@@ -73,6 +73,24 @@ def argument_parser():
     parser.add_argument("--front-z-min", type=float, default=-2.2)
     parser.add_argument("--front-z-max", type=float, default=2.0)
     parser.add_argument(
+        "--fov-left-deg",
+        type=float,
+        default=90.0,
+        help=(
+            "left side angular limit of the sampled LiDAR area in ego-local "
+            "coordinates; 0 deg is straight ahead"
+        ),
+    )
+    parser.add_argument(
+        "--fov-right-deg",
+        type=float,
+        default=90.0,
+        help=(
+            "right side angular limit of the sampled LiDAR area in ego-local "
+            "coordinates; 0 deg is straight ahead"
+        ),
+    )
+    parser.add_argument(
         "--min-distance",
         type=float,
         default=0.2,
@@ -124,10 +142,12 @@ def _rotate_xy(x_forward, y_left, yaw_offset_deg):
 
 def _point_as_ego(point, yaw_offset_deg):
     x_forward, y_left = _rotate_xy(point.x_m, point.y_m, yaw_offset_deg)
+    bearing_deg = math.degrees(math.atan2(y_left, x_forward))
     return {
         "x": x_forward,
         "y": y_left,
         "z": point.z_m,
+        "bearing": bearing_deg,
         "distance": point.distance_m,
         "intensity": point.intensity,
         "azimuth": point.azimuth_deg,
@@ -145,6 +165,8 @@ def _valid_points(points, arguments, yaw_offset_deg=None):
         if point.distance_m < arguments.min_distance:
             continue
         ego = _point_as_ego(point, yaw_offset_deg)
+        if not (-arguments.fov_right_deg <= ego["bearing"] <= arguments.fov_left_deg):
+            continue
         if (
             arguments.front_x_min <= ego["x"] <= arguments.front_x_max
             and abs(ego["y"]) <= arguments.front_y_abs
@@ -206,11 +228,12 @@ def _print_points(label, points, limit):
     for index, point in enumerate(visible):
         print(
             "    [{}] x_forward={:+.2f}m, y_left={:+.2f}m, z_up={:+.2f}m, "
-            "dist={:.2f}m, intensity={}, azimuth={:.1f}deg, laser={}".format(
+            "bearing={:+.1f}deg, dist={:.2f}m, intensity={}, azimuth={:.1f}deg, laser={}".format(
                 index,
                 point["x"],
                 point["y"],
                 point["z"],
+                point["bearing"],
                 point["distance"],
                 point["intensity"],
                 point["azimuth"],
@@ -263,6 +286,10 @@ def _validate(arguments):
         raise ValueError("front-y-abs cannot be negative")
     if arguments.front_z_max <= arguments.front_z_min:
         raise ValueError("front z range must satisfy min < max")
+    if arguments.fov_left_deg < 0.0 or arguments.fov_right_deg < 0.0:
+        raise ValueError("FOV limits cannot be negative")
+    if arguments.fov_left_deg > 180.0 or arguments.fov_right_deg > 180.0:
+        raise ValueError("FOV limits cannot exceed 180 degrees")
     if arguments.min_distance < 0.0:
         raise ValueError("min-distance cannot be negative")
     if arguments.height_above_ground < 0.0:
@@ -293,12 +320,14 @@ def run(arguments):
     )
     print(
         "front corridor: x={:.1f}..{:.1f}m, |y|<={:.1f}m, z={:.1f}..{:.1f}m; "
-        "object if >= {} points above ground+{:.2f}m".format(
+        "FOV right=-{:.1f}deg left=+{:.1f}deg; object if >= {} points above ground+{:.2f}m".format(
             arguments.front_x_min,
             arguments.front_x_max,
             arguments.front_y_abs,
             arguments.front_z_min,
             arguments.front_z_max,
+            arguments.fov_right_deg,
+            arguments.fov_left_deg,
             arguments.min_object_points,
             arguments.height_above_ground,
         )

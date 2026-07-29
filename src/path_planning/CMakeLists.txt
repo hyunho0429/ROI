@@ -27,6 +27,7 @@ catkin_install_python(PROGRAMS
   src/morai_competition_status_inspect.py
   src/morai_lidar_intensity_inspect.py
   src/lidar_monitor.py
+  src/morai_lidar_pointcloud_udp.py
   src/morai_pure_pursuit_ins_udp.py
   src/morai_pure_pursuit_dead_reckoning_udp.py
   src/morai_stanley_udp.py
