@@ -145,10 +145,14 @@ sudo tcpdump -ni any -s 0 -c 10 -XX \
 
 ## 4. 3D LiDAR Intensity UDP 확인
 
-MORAI 3D LiDAR 센서의 Intensity 타입 UDP 수신을 확인하려면 다음 프로그램을
-실행한다. 공식 문서 기준 Point Cloud는 LiDAR 장착 위치 기준 `x, y, z,
-intensity`가 4바이트씩 반복되는 구조이며, Intensity 타입 통신 값은 `0~255`
-범위로 들어온다.
+MORAI 3D LiDAR UDP는 Velodyne 프로토콜을 따른다. Python `socket.recvfrom()`
+기준으로는 Ethernet/IP/UDP 42 byte header가 제외된 `1206 bytes` payload가
+수신된다. 구조는 `12개 data block x 100 bytes = 1200 bytes`와
+`timestamp 4 bytes + factory/status 2 bytes = 6 bytes`이다.
+
+각 data block은 `flag 2 bytes`, `azimuth 2 bytes`, 그리고 `32개 channel data`
+로 구성된다. 각 channel data는 `distance uint16 2 bytes + reflectivity/intensity
+uint8 1 byte`이다.
 
 ```bash
 cd ~/ROI
@@ -161,10 +165,11 @@ python3 src/path_planning/src/morai_lidar_intensity_inspect.py \
   --sample-points 5
 ```
 
-수신이 정상이라면 각 UDP packet마다 sender, payload 크기, point 개수,
-`x/y/z/intensity` 범위, 앞쪽 sample point가 출력된다. 실제 패킷 앞에 부가
-header가 붙어 있는지 확인하려면 기본값인 `--header-bytes auto`를 그대로 쓰고,
-문서 그대로 raw XYZI stream이면 `--header-bytes 0`으로 고정해도 된다.
+수신이 정상이라면 각 UDP packet마다 sender, payload 크기, Velodyne block layout,
+timestamp/factory, point 수, 거리/intensity 범위, sample point가 출력된다.
+일반 UDP 수신은 `--header-bytes auto` 또는 `--header-bytes 0`을 쓰면 되고,
+pcap 등에서 42 byte network header까지 포함된 데이터를 직접 넣을 때만
+`--header-bytes 42`를 사용한다.
 
 CSV로 일부 point를 저장해서 확인하려면:
 

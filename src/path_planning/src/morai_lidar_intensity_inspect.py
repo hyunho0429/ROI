@@ -24,6 +24,10 @@ except ImportError:
 
 from path_planning.morai_udp_lidar import (
     POINT_STRIDE_BYTES,
+    VELODYNE_BLOCK_BYTES,
+    VELODYNE_BLOCK_COUNT,
+    VELODYNE_CHANNELS_PER_BLOCK,
+    VELODYNE_PAYLOAD_BYTES,
     LidarPacketError,
     infer_header_bytes,
     parse_lidar_intensity_packet,
@@ -34,8 +38,8 @@ from path_planning.morai_udp_lidar import (
 def argument_parser():
     parser = argparse.ArgumentParser(
         description=(
-            "Print sender, payload size, decoded XYZI point count and intensity "
-            "statistics for MORAI 3D LiDAR Intensity UDP packets."
+            "Print sender, payload size, decoded Velodyne-style point count and "
+            "intensity statistics for MORAI 3D LiDAR Intensity UDP packets."
         )
     )
     parser.add_argument("--bind-ip", default=BIND_IP)
@@ -47,15 +51,15 @@ def argument_parser():
         "--header-bytes",
         default="auto",
         help=(
-            "leading bytes before XYZI point data; use 0 for documented raw "
-            "float32 point stream or auto to infer from packet size"
+            "leading bytes before Velodyne payload; normal Python UDP receive "
+            "is 0/auto, full packet captures may need 42"
         ),
     )
     parser.add_argument(
         "--byte-order",
         choices=("little", "big"),
         default="little",
-        help="float byte order used by the point data",
+        help="byte order used by Velodyne uint16 fields",
     )
     parser.add_argument(
         "--sample-points",
@@ -118,6 +122,11 @@ def _open_csv(path):
             "z_m",
             "intensity",
             "distance_m",
+            "azimuth_deg",
+            "vertical_angle_deg",
+            "laser_id",
+            "block_index",
+            "channel_index",
         ],
     )
     writer.writeheader()
@@ -140,6 +149,11 @@ def _dump_points(writer, packet_index, points, remaining_budget):
                 "z_m": "{:.6f}".format(point.z_m),
                 "intensity": "{:.6f}".format(point.intensity),
                 "distance_m": "{:.6f}".format(point.distance_m),
+                "azimuth_deg": "{:.3f}".format(point.azimuth_deg),
+                "vertical_angle_deg": "{:.3f}".format(point.vertical_angle_deg),
+                "laser_id": point.laser_id,
+                "block_index": point.block_index,
+                "channel_index": point.channel_index,
             }
         )
         written += 1
@@ -202,7 +216,7 @@ def run(arguments):
     udp_socket.settimeout(arguments.timeout)
     print(
         "Waiting for 3D LiDAR Intensity UDP: MORAI host/source *:{} -> "
-        "destination {}:{} (XYZI float32, {} endian)".format(
+        "destination {}:{} (Velodyne raw, {} endian)".format(
             arguments.host_port,
             arguments.bind_ip,
             arguments.destination_port,
@@ -217,22 +231,23 @@ def run(arguments):
                 print("TIMEOUT: no packet received within {:.1f}s".format(arguments.timeout))
                 return 2
             header_bytes = _parse_header_bytes(arguments.header_bytes, len(packet))
-            point_payload_size = max(0, len(packet) - header_bytes)
-            expected_points = (
-                point_payload_size // POINT_STRIDE_BYTES
-                if point_payload_size % POINT_STRIDE_BYTES == 0
-                else None
+            header_text = "auto" if isinstance(header_bytes, str) else str(header_bytes)
+            point_payload_size = (
+                VELODYNE_PAYLOAD_BYTES
+                if isinstance(header_bytes, str)
+                else max(0, len(packet) - header_bytes)
             )
+            expected_points = VELODYNE_BLOCK_COUNT * VELODYNE_CHANNELS_PER_BLOCK
             print(
                 "packet {}: sender={}:{}, payload={} bytes, header_bytes={}, "
-                "point_payload={} bytes, expected_points={}".format(
+                "velodyne_payload={} bytes, expected_measurements={}".format(
                     packet_index,
                     sender[0],
                     sender[1],
                     len(packet),
-                    header_bytes,
+                    header_text,
                     point_payload_size,
-                    "n/a" if expected_points is None else expected_points,
+                    expected_points,
                 )
             )
             if sender[1] != arguments.host_port:
@@ -253,19 +268,32 @@ def run(arguments):
                 continue
 
             summary = summarize_lidar_points(lidar_packet.points)
+            print(
+                "  layout: {} blocks x {} bytes, {} channels/block, "
+                "timestamp={} us, factory={}".format(
+                    VELODYNE_BLOCK_COUNT,
+                    VELODYNE_BLOCK_BYTES,
+                    VELODYNE_CHANNELS_PER_BLOCK,
+                    lidar_packet.timestamp_us,
+                    lidar_packet.factory_bytes.hex(" "),
+                )
+            )
             _print_summary(summary)
             for point_index, point in enumerate(
                 lidar_packet.points[: arguments.sample_points]
             ):
                 print(
                     "  sample[{}]: x={:+.3f}m, y={:+.3f}m, z={:+.3f}m, "
-                    "intensity={:.3f}, distance={:.3f}m".format(
+                    "intensity={}, distance={:.3f}m, azimuth={:.2f}deg, "
+                    "laser={}".format(
                         point_index,
                         point.x_m,
                         point.y_m,
                         point.z_m,
                         point.intensity,
                         point.distance_m,
+                        point.azimuth_deg,
+                        point.laser_id,
                     )
                 )
             dumped_points += _dump_points(
