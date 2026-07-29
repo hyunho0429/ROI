@@ -268,6 +268,13 @@ PointCloud2에는 `x`, `y`, `z`, `distance_m`, `intensity`, `ring`,
 rostopic echo /morai/lidar/nearest_distance_m
 ```
 
+`nearest_distance_m`는 전체 point 중 최솟값이 아니라 전방 장애물 후보 영역
+`nearest_x_min_m=1.0`, `nearest_x_max_m=40.0`, `nearest_y_abs_m=5.0`,
+`nearest_z_min_m=-1.2`, `nearest_z_max_m=2.5` 안의 최단거리다. 전체 최솟값을
+그대로 쓰면 지면/차량 근처 return 때문에 약 `0.5 m` 근처 값이 계속 나올 수 있다.
+가까운 박스까지 거리를 더 민감하게 보고 싶으면 `nearest_x_min_m`을 낮추고,
+바닥 point가 섞이면 `nearest_z_min_m`을 높인다.
+
 `display_rolling_clouds`를 크게 잡거나 RViz PointCloud2의 `Decay Time`을 길게
 잡으면 차량 이동 중 이전 scan이 겹쳐서 긴 무지개 궤적처럼 번져 보인다. 주행 중에는
 `display_history_s:=0.25~0.35`, 정지 디버깅에서는 `0.5` 정도까지만 추천한다.

@@ -28,6 +28,13 @@
   <arg name="z_max_m" default="3.0" />
   <arg name="min_distance_m" default="0.2" />
 
+  <!-- Nearest distance is computed from this obstacle-candidate area, not from all ground points. -->
+  <arg name="nearest_x_min_m" default="1.0" />
+  <arg name="nearest_x_max_m" default="40.0" />
+  <arg name="nearest_y_abs_m" default="5.0" />
+  <arg name="nearest_z_min_m" default="-1.2" />
+  <arg name="nearest_z_max_m" default="2.5" />
+
   <node pkg="path_planning"
         type="morai_lidar_pointcloud_udp.py"
         name="morai_lidar_pointcloud_udp"
@@ -54,6 +61,11 @@
     <param name="z_min_m" value="$(arg z_min_m)" />
     <param name="z_max_m" value="$(arg z_max_m)" />
     <param name="min_distance_m" value="$(arg min_distance_m)" />
+    <param name="nearest_x_min_m" value="$(arg nearest_x_min_m)" />
+    <param name="nearest_x_max_m" value="$(arg nearest_x_max_m)" />
+    <param name="nearest_y_abs_m" value="$(arg nearest_y_abs_m)" />
+    <param name="nearest_z_min_m" value="$(arg nearest_z_min_m)" />
+    <param name="nearest_z_max_m" value="$(arg nearest_z_max_m)" />
   </node>
 
   <node if="$(arg rviz)"

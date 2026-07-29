@@ -116,10 +116,17 @@ def _make_cloud(points, frame_id):
     return point_cloud2.create_cloud(header, POINT_FIELDS, points)
 
 
-def _nearest_distance(points):
-    if not points:
+def _nearest_distance(points, params):
+    candidates = [
+        point
+        for point in points
+        if params["nearest_x_min_m"] <= point[0] <= params["nearest_x_max_m"]
+        and abs(point[1]) <= params["nearest_y_abs_m"]
+        and params["nearest_z_min_m"] <= point[2] <= params["nearest_z_max_m"]
+    ]
+    if not candidates:
         return None
-    return min(point[3] for point in points)
+    return min(point[3] for point in candidates)
 
 
 def main():
@@ -152,6 +159,11 @@ def main():
         "z_min_m": float(_param("z_min_m", -2.5)),
         "z_max_m": float(_param("z_max_m", 3.0)),
         "min_distance_m": float(_param("min_distance_m", 0.2)),
+        "nearest_x_min_m": float(_param("nearest_x_min_m", 1.0)),
+        "nearest_x_max_m": float(_param("nearest_x_max_m", 40.0)),
+        "nearest_y_abs_m": float(_param("nearest_y_abs_m", 5.0)),
+        "nearest_z_min_m": float(_param("nearest_z_min_m", -1.2)),
+        "nearest_z_max_m": float(_param("nearest_z_max_m", 2.5)),
     }
 
     if params["packets_per_cloud"] < 1:
@@ -170,6 +182,12 @@ def main():
         raise ValueError("FOV limits cannot exceed 180 degrees")
     if params["rear_blind_deg"] < 0.0 or params["rear_blind_deg"] > 180.0:
         raise ValueError("rear blind sector must be between 0 and 180 degrees")
+    if params["nearest_x_max_m"] <= params["nearest_x_min_m"]:
+        raise ValueError("nearest x range must satisfy min < max")
+    if params["nearest_y_abs_m"] < 0.0:
+        raise ValueError("nearest_y_abs_m cannot be negative")
+    if params["nearest_z_max_m"] <= params["nearest_z_min_m"]:
+        raise ValueError("nearest z range must satisfy min < max")
 
     publisher = rospy.Publisher(params["topic"], PointCloud2, queue_size=1)
     display_publisher = rospy.Publisher(params["display_topic"], PointCloud2, queue_size=1)
@@ -273,12 +291,12 @@ def main():
             ]
             if accumulated_points:
                 publisher.publish(_make_cloud(accumulated_points, params["frame_id"]))
-                nearest_distance = _nearest_distance(accumulated_points)
+                nearest_distance = _nearest_distance(accumulated_points, params)
                 if nearest_distance is not None:
                     nearest_distance_publisher.publish(Float32(data=nearest_distance))
             if display_points:
                 display_publisher.publish(_make_cloud(display_points, params["frame_id"]))
-            nearest_text = _nearest_distance(accumulated_points)
+            nearest_text = _nearest_distance(accumulated_points, params)
             rospy.loginfo_throttle(
                 1.0,
                 "LiDAR cloud: packets=%d bad=%d live_points=%d display_points=%d "
