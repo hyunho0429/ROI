@@ -236,7 +236,8 @@ roslaunch path_planning morai_lidar_rviz.launch \
   host_port:=2000 \
   destination_port:=2001 \
   fov_left_deg:=90 \
-  fov_right_deg:=90
+  fov_right_deg:=90 \
+  rolling_clouds:=3
 ```
 
 더 좁은 전방 영역만 보고 싶으면 각도를 줄인다.
@@ -246,6 +247,21 @@ roslaunch path_planning morai_lidar_rviz.launch \
   fov_left_deg:=45 \
   fov_right_deg:=45
 ```
+
+MORAI 공식 문서의 LiDAR scan 화면처럼 360도에 가까운 3D 점군을 보고 싶으면
+좌우 FOV를 모두 180도로 둔다.
+
+```bash
+roslaunch path_planning morai_lidar_rviz.launch \
+  fov_left_deg:=180 \
+  fov_right_deg:=180 \
+  rolling_clouds:=3
+```
+
+RViz에서 점군이 깜빡거리면 `rolling_clouds`를 4~6 정도로 키우거나,
+`packets_per_cloud`를 60~100 범위에서 조정한다. `rolling_clouds`는 최근 cloud를
+몇 window까지 누적해서 보여줄지 정하는 값이고, 너무 크게 잡으면 반응은 부드럽지만
+오래된 점이 잔상처럼 남을 수 있다.
 
 ## 5. Ego Ctrl Cmd 통신 점검
 

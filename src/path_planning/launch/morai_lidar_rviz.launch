@@ -8,6 +8,7 @@
   <arg name="frame_id" default="morai_lidar" />
   <arg name="topic" default="/morai/lidar/front_points" />
   <arg name="packets_per_cloud" default="80" />
+  <arg name="rolling_clouds" default="3" />
 
   <!-- Front half-space by default: right -90 deg to left +90 deg. -->
   <arg name="fov_left_deg" default="90.0" />
@@ -31,6 +32,7 @@
     <param name="frame_id" value="$(arg frame_id)" />
     <param name="topic" value="$(arg topic)" />
     <param name="packets_per_cloud" value="$(arg packets_per_cloud)" />
+    <param name="rolling_clouds" value="$(arg rolling_clouds)" />
     <param name="fov_left_deg" value="$(arg fov_left_deg)" />
     <param name="fov_right_deg" value="$(arg fov_right_deg)" />
     <param name="lidar_yaw_offset_deg" value="$(arg lidar_yaw_offset_deg)" />

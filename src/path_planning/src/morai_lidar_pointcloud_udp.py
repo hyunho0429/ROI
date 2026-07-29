@@ -12,6 +12,7 @@ Frame convention of the published cloud:
 
 import math
 import socket
+from collections import deque
 
 import rospy
 from sensor_msgs import point_cloud2
@@ -112,6 +113,7 @@ def main():
         "frame_id": _param("frame_id", "morai_lidar"),
         "topic": _param("topic", "/morai/lidar/front_points"),
         "packets_per_cloud": int(_param("packets_per_cloud", 80)),
+        "rolling_clouds": int(_param("rolling_clouds", 3)),
         "socket_timeout_s": float(_param("socket_timeout_s", 1.0)),
         "lidar_yaw_offset_deg": float(_param("lidar_yaw_offset_deg", 0.0)),
         "fov_left_deg": float(_param("fov_left_deg", 90.0)),
@@ -126,6 +128,8 @@ def main():
 
     if params["packets_per_cloud"] < 1:
         raise ValueError("~packets_per_cloud must be at least 1")
+    if params["rolling_clouds"] < 1:
+        raise ValueError("~rolling_clouds must be at least 1")
     if params["fov_left_deg"] < 0.0 or params["fov_right_deg"] < 0.0:
         raise ValueError("FOV limits cannot be negative")
     if params["fov_left_deg"] > 180.0 or params["fov_right_deg"] > 180.0:
@@ -141,7 +145,7 @@ def main():
 
     rospy.loginfo(
         "MORAI LiDAR PointCloud2 UDP: source *:%d -> %s:%d, topic=%s, "
-        "frame=%s, FOV=-%.1f..+%.1f deg",
+        "frame=%s, FOV=-%.1f..+%.1f deg, rolling_clouds=%d",
         params["host_port"],
         params["bind_ip"],
         params["destination_port"],
@@ -149,7 +153,10 @@ def main():
         params["frame_id"],
         params["fov_right_deg"],
         params["fov_left_deg"],
+        params["rolling_clouds"],
     )
+
+    rolling_clouds = deque(maxlen=params["rolling_clouds"])
 
     try:
         while not rospy.is_shutdown():
@@ -186,13 +193,21 @@ def main():
                 cloud_points.extend(_sample_front_points(lidar_packet.points, params))
 
             if cloud_points:
-                publisher.publish(_make_cloud(cloud_points, params["frame_id"]))
+                rolling_clouds.append(cloud_points)
+            accumulated_points = [
+                point
+                for cloud in rolling_clouds
+                for point in cloud
+            ]
+            if accumulated_points:
+                publisher.publish(_make_cloud(accumulated_points, params["frame_id"]))
             rospy.loginfo_throttle(
                 1.0,
-                "LiDAR cloud: packets=%d bad=%d sampled_points=%d",
+                "LiDAR cloud: packets=%d bad=%d sampled_points=%d accumulated_points=%d",
                 packets,
                 bad_packets,
                 len(cloud_points),
+                len(accumulated_points),
             )
     finally:
         udp_socket.close()
