@@ -239,6 +239,7 @@ roslaunch path_planning morai_lidar_rviz.launch \
   fov_right_deg:=180 \
   rear_blind_deg:=60 \
   rolling_clouds:=1 \
+  display_rolling_clouds:=2 \
   max_cloud_age_s:=0.10
 ```
 
@@ -260,11 +261,14 @@ roslaunch path_planning morai_lidar_rviz.launch \
   rear_blind_deg:=0
 ```
 
-주행 중 공식 문서의 RViz LiDAR 화면처럼 현재 3D scan만 보고 싶으면
-`rolling_clouds:=1`을 유지한다. `rolling_clouds`를 크게 잡거나 RViz
-PointCloud2의 `Decay Time`을 길게 잡으면 차량 이동 중 이전 scan이 겹쳐서 긴
-무지개 궤적처럼 번져 보인다. 정지 상태에서만 점군 확인이 어렵다면
-`rolling_clouds:=2` 정도로 짧게 올려서 테스트한다.
+주행 알고리즘에는 `/morai/lidar/live_points`를 사용한다. 이 토픽은 기본
+`rolling_clouds:=1`이라 최신 cloud만 publish한다. RViz는
+`/morai/lidar/display_points`를 사용하며, 기본 `display_rolling_clouds:=2`로
+짧게 누적해서 깜빡임을 줄인다.
+
+`display_rolling_clouds`를 크게 잡거나 RViz PointCloud2의 `Decay Time`을 길게
+잡으면 차량 이동 중 이전 scan이 겹쳐서 긴 무지개 궤적처럼 번져 보인다. 주행 중에는
+`display_rolling_clouds:=2`, 정지 디버깅에서는 `3` 정도까지만 추천한다.
 
 점군 update가 느리거나 끊기면 `packets_per_cloud`를 60~80 범위에서 조정한다.
 값이 너무 크면 한 cloud를 만들 때 오래 걸리고, 너무 작으면 360도 scan이 듬성듬성

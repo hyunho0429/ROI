@@ -122,9 +122,11 @@ def main():
         "host_port": int(_param("host_port", LIDAR_HOST_PORT)),
         "destination_port": int(_param("destination_port", LIDAR_PORT)),
         "frame_id": _param("frame_id", "morai_lidar"),
-        "topic": _param("topic", "/morai/lidar/sampled_points"),
+        "topic": _param("topic", "/morai/lidar/live_points"),
+        "display_topic": _param("display_topic", "/morai/lidar/display_points"),
         "packets_per_cloud": int(_param("packets_per_cloud", 80)),
         "rolling_clouds": int(_param("rolling_clouds", 1)),
+        "display_rolling_clouds": int(_param("display_rolling_clouds", 2)),
         "max_cloud_age_s": float(_param("max_cloud_age_s", 0.10)),
         "socket_timeout_s": float(_param("socket_timeout_s", 1.0)),
         "lidar_yaw_offset_deg": float(_param("lidar_yaw_offset_deg", 0.0)),
@@ -143,6 +145,8 @@ def main():
         raise ValueError("~packets_per_cloud must be at least 1")
     if params["rolling_clouds"] < 1:
         raise ValueError("~rolling_clouds must be at least 1")
+    if params["display_rolling_clouds"] < 1:
+        raise ValueError("~display_rolling_clouds must be at least 1")
     if params["max_cloud_age_s"] < 0.0:
         raise ValueError("~max_cloud_age_s cannot be negative")
     if params["fov_left_deg"] < 0.0 or params["fov_right_deg"] < 0.0:
@@ -153,6 +157,7 @@ def main():
         raise ValueError("rear blind sector must be between 0 and 180 degrees")
 
     publisher = rospy.Publisher(params["topic"], PointCloud2, queue_size=1)
+    display_publisher = rospy.Publisher(params["display_topic"], PointCloud2, queue_size=1)
 
     udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -162,21 +167,24 @@ def main():
 
     rospy.loginfo(
         "MORAI LiDAR PointCloud2 UDP: source *:%d -> %s:%d, topic=%s, "
-        "frame=%s, FOV=-%.1f..+%.1f deg, rear_blind=%.1f deg, "
-        "rolling_clouds=%d, max_cloud_age=%.3fs",
+        "display_topic=%s, frame=%s, FOV=-%.1f..+%.1f deg, rear_blind=%.1f deg, "
+        "rolling_clouds=%d, display_rolling_clouds=%d, max_cloud_age=%.3fs",
         params["host_port"],
         params["bind_ip"],
         params["destination_port"],
         params["topic"],
+        params["display_topic"],
         params["frame_id"],
         params["fov_right_deg"],
         params["fov_left_deg"],
         params["rear_blind_deg"],
         params["rolling_clouds"],
+        params["display_rolling_clouds"],
         params["max_cloud_age_s"],
     )
 
     rolling_clouds = deque(maxlen=params["rolling_clouds"])
+    display_rolling_clouds = deque(maxlen=params["display_rolling_clouds"])
 
     try:
         while not rospy.is_shutdown():
@@ -221,20 +229,28 @@ def main():
 
             if cloud_points:
                 rolling_clouds.append(cloud_points)
+                display_rolling_clouds.append(cloud_points)
             accumulated_points = [
                 point
                 for cloud in rolling_clouds
                 for point in cloud
             ]
+            display_points = [
+                point
+                for cloud in display_rolling_clouds
+                for point in cloud
+            ]
             if accumulated_points:
                 publisher.publish(_make_cloud(accumulated_points, params["frame_id"]))
+            if display_points:
+                display_publisher.publish(_make_cloud(display_points, params["frame_id"]))
             rospy.loginfo_throttle(
                 1.0,
-                "LiDAR cloud: packets=%d bad=%d sampled_points=%d accumulated_points=%d age=%.3fs",
+                "LiDAR cloud: packets=%d bad=%d live_points=%d display_points=%d age=%.3fs",
                 packets,
                 bad_packets,
-                len(cloud_points),
                 len(accumulated_points),
+                len(display_points),
                 time.monotonic() - cloud_started_at,
             )
     finally:

@@ -50,7 +50,7 @@ Visualization Manager:
       Size (Pixels): 4
       Size (m): 0.12
       Style: Points
-      Topic: /morai/lidar/sampled_points
+      Topic: /morai/lidar/display_points
       Unreliable: false
       Use Fixed Frame: true
       Use rainbow: true

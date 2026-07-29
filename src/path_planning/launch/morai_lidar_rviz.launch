@@ -6,9 +6,11 @@
   <arg name="destination_port" default="2001" />
 
   <arg name="frame_id" default="morai_lidar" />
-  <arg name="topic" default="/morai/lidar/sampled_points" />
+  <arg name="topic" default="/morai/lidar/live_points" />
+  <arg name="display_topic" default="/morai/lidar/display_points" />
   <arg name="packets_per_cloud" default="80" />
   <arg name="rolling_clouds" default="1" />
+  <arg name="display_rolling_clouds" default="2" />
   <arg name="max_cloud_age_s" default="0.10" />
 
   <!-- Near-360 scan by default, with only the ego rear sector hidden. -->
@@ -33,8 +35,10 @@
     <param name="destination_port" value="$(arg destination_port)" />
     <param name="frame_id" value="$(arg frame_id)" />
     <param name="topic" value="$(arg topic)" />
+    <param name="display_topic" value="$(arg display_topic)" />
     <param name="packets_per_cloud" value="$(arg packets_per_cloud)" />
     <param name="rolling_clouds" value="$(arg rolling_clouds)" />
+    <param name="display_rolling_clouds" value="$(arg display_rolling_clouds)" />
     <param name="max_cloud_age_s" value="$(arg max_cloud_age_s)" />
     <param name="fov_left_deg" value="$(arg fov_left_deg)" />
     <param name="fov_right_deg" value="$(arg fov_right_deg)" />
