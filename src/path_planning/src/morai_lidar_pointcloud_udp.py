@@ -13,7 +13,6 @@ Frame convention of the published cloud:
 import math
 import json
 import socket
-import threading
 import time
 from collections import deque
 from collections import defaultdict
@@ -25,15 +24,9 @@ from std_msgs.msg import Float32, Header, String
 from visualization_msgs.msg import Marker, MarkerArray
 
 try:
-    from path_planning.morai_competition_config import (
-        BIND_IP,
-        COMPETITION_STATUS_HOST_PORT,
-        COMPETITION_STATUS_PORT,
-    )
+    from path_planning.morai_competition_config import BIND_IP
 except ImportError:
     BIND_IP = "0.0.0.0"
-    COMPETITION_STATUS_HOST_PORT = 9080
-    COMPETITION_STATUS_PORT = 9081
 
 try:
     from path_planning.morai_competition_config import LIDAR_HOST_PORT, LIDAR_PORT
@@ -45,10 +38,6 @@ from path_planning.morai_udp_lidar import (
     LidarPacketError,
     parse_lidar_intensity_packet,
 )
-from path_planning.morai_udp_competition_status import (
-    CompetitionStatusPacketError,
-    parse_competition_vehicle_status,
-)
 
 
 POINT_FIELDS = [
@@ -59,7 +48,6 @@ POINT_FIELDS = [
     PointField("intensity", 16, PointField.FLOAT32, 1),
     PointField("ring", 20, PointField.FLOAT32, 1),
     PointField("bearing_deg", 24, PointField.FLOAT32, 1),
-    PointField("age_s", 28, PointField.FLOAT32, 1),
 ]
 
 POINT_X = 0
@@ -69,59 +57,6 @@ POINT_DISTANCE = 3
 POINT_INTENSITY = 4
 POINT_RING = 5
 POINT_BEARING = 6
-POINT_AGE = 7
-
-
-class MotionState:
-    """Latest ego motion used to deskew one LiDAR cloud.
-
-    MORAI's VLP-16 UDP packets arrive over multiple datagrams per cloud.  When
-    the car moves quickly, old packets are already measured in a slightly older
-    ego frame.  This state stores the latest Competition Vehicle Status speed
-    and yaw rate so every packet can be transformed to the cloud publish time.
-    """
-
-    def __init__(self, manual_speed_mps=0.0, manual_yaw_rate_radps=0.0):
-        self._lock = threading.Lock()
-        self._speed_mps = float(manual_speed_mps)
-        self._yaw_rate_radps = float(manual_yaw_rate_radps)
-        self._updated_at = None
-        self._ctrl_mode = None
-        self._gear = None
-        self._source = "manual"
-
-    def update_from_status(self, status, updated_at):
-        with self._lock:
-            self._speed_mps = float(status.signed_velocity_kmh) / 3.6
-            self._yaw_rate_radps = math.radians(float(status.angular_velocity_degps[2]))
-            self._updated_at = float(updated_at)
-            self._ctrl_mode = int(status.ctrl_mode)
-            self._gear = int(status.gear)
-            self._source = "competition"
-
-    def snapshot(self, now, timeout_s, manual_speed_mps, manual_yaw_rate_radps):
-        with self._lock:
-            if self._updated_at is None or now - self._updated_at > timeout_s:
-                return {
-                    "speed_mps": float(manual_speed_mps),
-                    "yaw_rate_radps": float(manual_yaw_rate_radps),
-                    "status_age_s": None
-                    if self._updated_at is None
-                    else max(0.0, now - self._updated_at),
-                    "fresh": False,
-                    "ctrl_mode": self._ctrl_mode,
-                    "gear": self._gear,
-                    "source": "manual",
-                }
-            return {
-                "speed_mps": self._speed_mps,
-                "yaw_rate_radps": self._yaw_rate_radps,
-                "status_age_s": max(0.0, now - self._updated_at),
-                "fresh": True,
-                "ctrl_mode": self._ctrl_mode,
-                "gear": self._gear,
-                "source": self._source,
-            }
 
 
 def _param(name, default):
@@ -147,38 +82,6 @@ def _rotate_xy(x_forward, y_left, yaw_offset_deg):
     )
 
 
-def _motion_compensate_xy(x_forward, y_left, point_age_s, motion, params):
-    if not params["motion_compensation_enabled"]:
-        return x_forward, y_left, 0.0
-
-    dt = min(
-        max(0.0, float(point_age_s)),
-        max(0.0, params["motion_max_point_age_s"]),
-    )
-    if dt <= 0.0:
-        return x_forward, y_left, 0.0
-
-    speed_mps = float(motion["speed_mps"])
-    yaw_rate_radps = (
-        float(motion["yaw_rate_radps"]) * params["motion_yaw_rate_sign"]
-    )
-    if not math.isfinite(speed_mps) or not math.isfinite(yaw_rate_radps):
-        return x_forward, y_left, 0.0
-
-    # Old point -> current ego frame.
-    #
-    # If the ego moved forward by v*dt after this packet was measured, a static
-    # object should be closer in the current frame.  If the ego yawed by theta,
-    # rotate the old measurement by -theta into the current vehicle axes.
-    shifted_x = x_forward - speed_mps * dt
-    theta = yaw_rate_radps * dt
-    cos_theta = math.cos(theta)
-    sin_theta = math.sin(theta)
-    compensated_x = cos_theta * shifted_x + sin_theta * y_left
-    compensated_y = -sin_theta * shifted_x + cos_theta * y_left
-    return compensated_x, compensated_y, dt
-
-
 def _is_in_sampled_area(x_forward, y_left, bearing_deg, params):
     if params["rear_blind_deg"] > 0.0:
         rear_delta = abs(abs(bearing_deg) - 180.0)
@@ -193,13 +96,8 @@ def _is_in_sampled_area(x_forward, y_left, bearing_deg, params):
     return True
 
 
-def _sample_points(points, params, point_age_s=0.0, motion=None):
+def _sample_points(points, params):
     sampled = []
-    if motion is None:
-        motion = {
-            "speed_mps": 0.0,
-            "yaw_rate_radps": 0.0,
-        }
     for point in points:
         if point.distance_m < params["min_distance_m"]:
             continue
@@ -210,13 +108,6 @@ def _sample_points(points, params, point_age_s=0.0, motion=None):
             params["lidar_yaw_offset_deg"],
         )
         z_up = point.z_m
-        x_forward, y_left, compensated_age_s = _motion_compensate_xy(
-            x_forward,
-            y_left,
-            point_age_s,
-            motion,
-            params,
-        )
         bearing_deg = math.degrees(math.atan2(y_left, x_forward))
 
         if not _is_in_sampled_area(x_forward, y_left, bearing_deg, params):
@@ -224,79 +115,18 @@ def _sample_points(points, params, point_age_s=0.0, motion=None):
         if not (params["z_min_m"] <= z_up <= params["z_max_m"]):
             continue
 
-        compensated_distance_m = math.sqrt(
-            x_forward * x_forward + y_left * y_left + z_up * z_up
-        )
-
         sampled.append(
             (
                 float(x_forward),
                 float(y_left),
                 float(z_up),
-                float(compensated_distance_m),
+                float(point.distance_m),
                 float(point.intensity),
                 float(point.laser_id),
                 float(bearing_deg),
-                float(compensated_age_s),
             )
         )
     return sampled
-
-
-def _competition_status_listener(params, motion_state):
-    status_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    status_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    status_socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1024 * 1024)
-    try:
-        status_socket.bind(
-            (
-                params["comp_status_bind_ip"],
-                params["comp_status_destination_port"],
-            )
-        )
-        status_socket.settimeout(0.2)
-        rospy.loginfo(
-            "LiDAR motion compensation status UDP: source *:%d -> %s:%d",
-            params["comp_status_host_port"],
-            params["comp_status_bind_ip"],
-            params["comp_status_destination_port"],
-        )
-        while not rospy.is_shutdown():
-            try:
-                packet, sender = status_socket.recvfrom(2048)
-            except socket.timeout:
-                continue
-            except OSError as error:
-                rospy.logwarn("Competition status socket closed: %s", error)
-                return
-
-            if sender[1] != params["comp_status_host_port"]:
-                rospy.logwarn_throttle(
-                    5.0,
-                    "Competition Status UDP sender source port %d, expected %d",
-                    sender[1],
-                    params["comp_status_host_port"],
-                )
-            try:
-                status = parse_competition_vehicle_status(packet)
-            except CompetitionStatusPacketError as error:
-                rospy.logwarn_throttle(
-                    2.0,
-                    "Bad Competition Status packet for LiDAR motion compensation: %s",
-                    error,
-                )
-                continue
-            motion_state.update_from_status(status, time.monotonic())
-    except OSError as error:
-        rospy.logwarn(
-            "Cannot bind Competition Status UDP for LiDAR motion compensation "
-            "on %s:%d: %s. Falling back to manual_speed_mps/manual_yaw_rate_radps.",
-            params["comp_status_bind_ip"],
-            params["comp_status_destination_port"],
-            error,
-        )
-    finally:
-        status_socket.close()
 
 
 def _make_cloud(points, frame_id):
@@ -551,26 +381,6 @@ def main():
         "display_history_s": float(_param("display_history_s", 0.30)),
         "max_cloud_age_s": float(_param("max_cloud_age_s", 0.05)),
         "socket_timeout_s": float(_param("socket_timeout_s", 1.0)),
-        "motion_compensation_enabled": _bool_param(
-            "motion_compensation_enabled",
-            True,
-        ),
-        "use_comp_status_motion_compensation": _bool_param(
-            "use_comp_status_motion_compensation",
-            True,
-        ),
-        "comp_status_bind_ip": _param("comp_status_bind_ip", BIND_IP),
-        "comp_status_host_port": int(
-            _param("comp_status_host_port", COMPETITION_STATUS_HOST_PORT)
-        ),
-        "comp_status_destination_port": int(
-            _param("comp_status_destination_port", COMPETITION_STATUS_PORT)
-        ),
-        "motion_status_timeout_s": float(_param("motion_status_timeout_s", 0.5)),
-        "manual_speed_mps": float(_param("manual_speed_mps", 0.0)),
-        "manual_yaw_rate_radps": float(_param("manual_yaw_rate_radps", 0.0)),
-        "motion_yaw_rate_sign": float(_param("motion_yaw_rate_sign", 1.0)),
-        "motion_max_point_age_s": float(_param("motion_max_point_age_s", 0.2)),
         "lidar_yaw_offset_deg": float(_param("lidar_yaw_offset_deg", 0.0)),
         "fov_left_deg": float(_param("fov_left_deg", 180.0)),
         "fov_right_deg": float(_param("fov_right_deg", 180.0)),
@@ -608,10 +418,6 @@ def main():
         raise ValueError("~display_history_s cannot be negative")
     if params["max_cloud_age_s"] < 0.0:
         raise ValueError("~max_cloud_age_s cannot be negative")
-    if params["motion_status_timeout_s"] < 0.0:
-        raise ValueError("~motion_status_timeout_s cannot be negative")
-    if params["motion_max_point_age_s"] < 0.0:
-        raise ValueError("~motion_max_point_age_s cannot be negative")
     if params["fov_left_deg"] < 0.0 or params["fov_right_deg"] < 0.0:
         raise ValueError("FOV limits cannot be negative")
     if params["fov_left_deg"] > 180.0 or params["fov_right_deg"] > 180.0:
@@ -664,7 +470,7 @@ def main():
         "display_topic=%s, nearest_distance_topic=%s, frame=%s, "
         "FOV=-%.1f..+%.1f deg, rear_blind=%.1f deg, "
         "rolling_clouds=%d, display_rolling_clouds=%d, display_history=%.3fs, "
-        "max_cloud_age=%.3fs, motion_compensation=%s",
+        "max_cloud_age=%.3fs",
         params["host_port"],
         params["bind_ip"],
         params["destination_port"],
@@ -679,29 +485,14 @@ def main():
         params["display_rolling_clouds"],
         params["display_history_s"],
         params["max_cloud_age_s"],
-        "on" if params["motion_compensation_enabled"] else "off",
     )
 
     rolling_clouds = deque(maxlen=params["rolling_clouds"])
     display_rolling_clouds = deque(maxlen=params["display_rolling_clouds"])
-    motion_state = MotionState(
-        params["manual_speed_mps"],
-        params["manual_yaw_rate_radps"],
-    )
-    if (
-        params["motion_compensation_enabled"]
-        and params["use_comp_status_motion_compensation"]
-    ):
-        status_thread = threading.Thread(
-            target=_competition_status_listener,
-            args=(params, motion_state),
-            daemon=True,
-        )
-        status_thread.start()
 
     try:
         while not rospy.is_shutdown():
-            packet_batches = []
+            cloud_points = []
             packets = 0
             bad_packets = 0
             cloud_started_at = time.monotonic()
@@ -731,7 +522,6 @@ def main():
                     )
 
                 packets += 1
-                packet_received_at = time.monotonic()
                 try:
                     lidar_packet = parse_lidar_intensity_packet(packet)
                 except (LidarPacketError, ValueError) as error:
@@ -739,38 +529,8 @@ def main():
                     rospy.logwarn_throttle(2.0, "Bad LiDAR packet: %s", error)
                     continue
 
-                packet_batches.append((packet_received_at, lidar_packet.points))
+                cloud_points.extend(_sample_points(lidar_packet.points, params))
 
-            publish_started_at = time.monotonic()
-            motion = motion_state.snapshot(
-                publish_started_at,
-                params["motion_status_timeout_s"],
-                params["manual_speed_mps"],
-                params["manual_yaw_rate_radps"],
-            )
-            if (
-                params["motion_compensation_enabled"]
-                and params["use_comp_status_motion_compensation"]
-                and not motion["fresh"]
-            ):
-                rospy.logwarn_throttle(
-                    2.0,
-                    "Competition Status not ready/stale for LiDAR motion "
-                    "compensation; using manual motion speed=%.2fm/s yaw_rate=%.3frad/s",
-                    motion["speed_mps"],
-                    motion["yaw_rate_radps"],
-                )
-            cloud_points = []
-            for packet_received_at, points in packet_batches:
-                point_age_s = publish_started_at - packet_received_at
-                cloud_points.extend(
-                    _sample_points(
-                        points,
-                        params,
-                        point_age_s=point_age_s,
-                        motion=motion,
-                    )
-                )
             if cloud_points:
                 rolling_clouds.append(cloud_points)
                 display_rolling_clouds.append((time.monotonic(), cloud_points))
@@ -815,8 +575,7 @@ def main():
             rospy.loginfo_throttle(
                 1.0,
                 "LiDAR cloud: packets=%d bad=%d live_points=%d display_points=%d "
-                "nearest=%s clusters=%d age=%.3fs motion=%s fresh=%s "
-                "speed=%.2fm/s yaw_rate=%.3frad/s status_age=%s",
+                "nearest=%s clusters=%d age=%.3fs",
                 packets,
                 bad_packets,
                 len(accumulated_points),
@@ -824,13 +583,6 @@ def main():
                 "n/a" if nearest_text is None else "{:.2f}m".format(nearest_text),
                 len(clusters),
                 time.monotonic() - cloud_started_at,
-                "on" if params["motion_compensation_enabled"] else "off",
-                motion["fresh"],
-                motion["speed_mps"],
-                motion["yaw_rate_radps"],
-                "n/a"
-                if motion["status_age_s"] is None
-                else "{:.3f}s".format(motion["status_age_s"]),
             )
     finally:
         udp_socket.close()
