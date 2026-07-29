@@ -6,13 +6,14 @@ find_package(catkin REQUIRED COMPONENTS
   nav_msgs
   rospy
   sensor_msgs
+  std_msgs
   visualization_msgs
 )
 
 catkin_python_setup()
 
 catkin_package(
-  CATKIN_DEPENDS geometry_msgs nav_msgs rospy sensor_msgs visualization_msgs
+  CATKIN_DEPENDS geometry_msgs nav_msgs rospy sensor_msgs std_msgs visualization_msgs
 )
 
 include_directories(

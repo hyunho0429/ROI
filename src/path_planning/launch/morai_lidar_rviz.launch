@@ -8,6 +8,7 @@
   <arg name="frame_id" default="morai_lidar" />
   <arg name="topic" default="/morai/lidar/live_points" />
   <arg name="display_topic" default="/morai/lidar/display_points" />
+  <arg name="nearest_distance_topic" default="/morai/lidar/nearest_distance_m" />
   <arg name="packets_per_cloud" default="80" />
   <arg name="rolling_clouds" default="1" />
   <arg name="display_rolling_clouds" default="5" />
@@ -37,6 +38,7 @@
     <param name="frame_id" value="$(arg frame_id)" />
     <param name="topic" value="$(arg topic)" />
     <param name="display_topic" value="$(arg display_topic)" />
+    <param name="nearest_distance_topic" value="$(arg nearest_distance_topic)" />
     <param name="packets_per_cloud" value="$(arg packets_per_cloud)" />
     <param name="rolling_clouds" value="$(arg rolling_clouds)" />
     <param name="display_rolling_clouds" value="$(arg display_rolling_clouds)" />

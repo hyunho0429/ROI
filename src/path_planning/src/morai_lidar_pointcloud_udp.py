@@ -18,7 +18,7 @@ from collections import deque
 import rospy
 from sensor_msgs import point_cloud2
 from sensor_msgs.msg import PointCloud2, PointField
-from std_msgs.msg import Header
+from std_msgs.msg import Float32, Header
 
 try:
     from path_planning.morai_competition_config import BIND_IP
@@ -41,9 +41,10 @@ POINT_FIELDS = [
     PointField("x", 0, PointField.FLOAT32, 1),
     PointField("y", 4, PointField.FLOAT32, 1),
     PointField("z", 8, PointField.FLOAT32, 1),
-    PointField("intensity", 12, PointField.FLOAT32, 1),
-    PointField("ring", 16, PointField.FLOAT32, 1),
-    PointField("bearing_deg", 20, PointField.FLOAT32, 1),
+    PointField("distance_m", 12, PointField.FLOAT32, 1),
+    PointField("intensity", 16, PointField.FLOAT32, 1),
+    PointField("ring", 20, PointField.FLOAT32, 1),
+    PointField("bearing_deg", 24, PointField.FLOAT32, 1),
 ]
 
 
@@ -99,6 +100,7 @@ def _sample_points(points, params):
                 float(x_forward),
                 float(y_left),
                 float(z_up),
+                float(point.distance_m),
                 float(point.intensity),
                 float(point.laser_id),
                 float(bearing_deg),
@@ -114,6 +116,12 @@ def _make_cloud(points, frame_id):
     return point_cloud2.create_cloud(header, POINT_FIELDS, points)
 
 
+def _nearest_distance(points):
+    if not points:
+        return None
+    return min(point[3] for point in points)
+
+
 def main():
     rospy.init_node("morai_lidar_pointcloud_udp")
 
@@ -124,6 +132,10 @@ def main():
         "frame_id": _param("frame_id", "morai_lidar"),
         "topic": _param("topic", "/morai/lidar/live_points"),
         "display_topic": _param("display_topic", "/morai/lidar/display_points"),
+        "nearest_distance_topic": _param(
+            "nearest_distance_topic",
+            "/morai/lidar/nearest_distance_m",
+        ),
         "packets_per_cloud": int(_param("packets_per_cloud", 80)),
         "rolling_clouds": int(_param("rolling_clouds", 1)),
         "display_rolling_clouds": int(_param("display_rolling_clouds", 5)),
@@ -161,6 +173,11 @@ def main():
 
     publisher = rospy.Publisher(params["topic"], PointCloud2, queue_size=1)
     display_publisher = rospy.Publisher(params["display_topic"], PointCloud2, queue_size=1)
+    nearest_distance_publisher = rospy.Publisher(
+        params["nearest_distance_topic"],
+        Float32,
+        queue_size=1,
+    )
 
     udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -170,7 +187,8 @@ def main():
 
     rospy.loginfo(
         "MORAI LiDAR PointCloud2 UDP: source *:%d -> %s:%d, topic=%s, "
-        "display_topic=%s, frame=%s, FOV=-%.1f..+%.1f deg, rear_blind=%.1f deg, "
+        "display_topic=%s, nearest_distance_topic=%s, frame=%s, "
+        "FOV=-%.1f..+%.1f deg, rear_blind=%.1f deg, "
         "rolling_clouds=%d, display_rolling_clouds=%d, display_history=%.3fs, "
         "max_cloud_age=%.3fs",
         params["host_port"],
@@ -178,6 +196,7 @@ def main():
         params["destination_port"],
         params["topic"],
         params["display_topic"],
+        params["nearest_distance_topic"],
         params["frame_id"],
         params["fov_right_deg"],
         params["fov_left_deg"],
@@ -254,15 +273,21 @@ def main():
             ]
             if accumulated_points:
                 publisher.publish(_make_cloud(accumulated_points, params["frame_id"]))
+                nearest_distance = _nearest_distance(accumulated_points)
+                if nearest_distance is not None:
+                    nearest_distance_publisher.publish(Float32(data=nearest_distance))
             if display_points:
                 display_publisher.publish(_make_cloud(display_points, params["frame_id"]))
+            nearest_text = _nearest_distance(accumulated_points)
             rospy.loginfo_throttle(
                 1.0,
-                "LiDAR cloud: packets=%d bad=%d live_points=%d display_points=%d age=%.3fs",
+                "LiDAR cloud: packets=%d bad=%d live_points=%d display_points=%d "
+                "nearest=%s age=%.3fs",
                 packets,
                 bad_packets,
                 len(accumulated_points),
                 len(display_points),
+                "n/a" if nearest_text is None else "{:.2f}m".format(nearest_text),
                 time.monotonic() - cloud_started_at,
             )
     finally:

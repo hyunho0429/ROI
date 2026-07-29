@@ -260,6 +260,13 @@ roslaunch path_planning morai_lidar_rviz.launch \
 `rolling_clouds:=1`이라 최신 cloud만 publish한다. RViz는
 `/morai/lidar/display_points`를 사용하며, 기본 `display_rolling_clouds:=5`,
 `display_history_s:=0.35`로 최근 짧은 시간만 누적해서 깜빡임을 줄인다.
+PointCloud2에는 `x`, `y`, `z`, `distance_m`, `intensity`, `ring`,
+`bearing_deg` 필드가 들어간다. RViz 색상은 기본적으로 `distance_m` 기준이다.
+현재 샘플링 영역에서 가장 가까운 거리값은 다음 토픽으로도 확인할 수 있다.
+
+```bash
+rostopic echo /morai/lidar/nearest_distance_m
+```
 
 `display_rolling_clouds`를 크게 잡거나 RViz PointCloud2의 `Decay Time`을 길게
 잡으면 차량 이동 중 이전 scan이 겹쳐서 긴 무지개 궤적처럼 번져 보인다. 주행 중에는

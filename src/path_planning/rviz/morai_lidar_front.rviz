@@ -28,21 +28,23 @@ Visualization Manager:
       Show Trail: false
       Value: true
     - Alpha: 1
-      Autocompute Intensity Bounds: true
+      Autocompute Intensity Bounds: false
       Autocompute Value Bounds:
         Max Value: 10
         Min Value: -10
         Value: true
       Axis: Z
-      Channel Name: intensity
+      Channel Name: distance_m
       Class: rviz/PointCloud2
       Color: 255; 255; 255
       Color Transformer: Intensity
       Decay Time: 0
       Enabled: true
       Invert Rainbow: false
-      Max Color: 255; 255; 255
-      Min Color: 0; 0; 0
+      Max Color: 255; 0; 0
+      Max Intensity: 40
+      Min Color: 0; 90; 255
+      Min Intensity: 0
       Name: MORAI LiDAR Sampled FOV
       Position Transformer: XYZ
       Queue Size: 10
