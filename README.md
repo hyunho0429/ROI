@@ -226,36 +226,37 @@ PYTHONPATH=src/path_planning/src python3 src/path_planning/src/lidar_monitor.py 
   --lidar-yaw-offset-deg 90
 ```
 
-RViz에서 전방 FOV PointCloud를 바로 확인하려면 다음 launch를 사용한다. 이 launch는
-UDP LiDAR 수신 node와 RViz를 함께 실행하고, 기본값으로 차량 전방 반원
-`right -90° ~ left +90°` 영역만 `/morai/lidar/front_points`로 publish한다.
+RViz에서 LiDAR PointCloud를 바로 확인하려면 다음 launch를 사용한다. 이 launch는
+UDP LiDAR 수신 node와 RViz를 함께 실행하고, 기본값으로 MORAI 공식 문서의 RViz
+scan 화면처럼 거의 360도 영역을 publish하되 차량 바로 뒤쪽 blind sector만 제외한다.
 
 ```bash
 roslaunch path_planning morai_lidar_rviz.launch \
   bind_ip:=0.0.0.0 \
   host_port:=2000 \
   destination_port:=2001 \
-  fov_left_deg:=90 \
-  fov_right_deg:=90 \
+  fov_left_deg:=180 \
+  fov_right_deg:=180 \
+  rear_blind_deg:=60 \
   rolling_clouds:=3
 ```
 
-더 좁은 전방 영역만 보고 싶으면 각도를 줄인다.
-
-```bash
-roslaunch path_planning morai_lidar_rviz.launch \
-  fov_left_deg:=45 \
-  fov_right_deg:=45
-```
-
-MORAI 공식 문서의 LiDAR scan 화면처럼 360도에 가까운 3D 점군을 보고 싶으면
-좌우 FOV를 모두 180도로 둔다.
+차량 뒤쪽도 포함한 완전 360도에 가깝게 보고 싶으면 `rear_blind_deg:=0`으로 둔다.
 
 ```bash
 roslaunch path_planning morai_lidar_rviz.launch \
   fov_left_deg:=180 \
   fov_right_deg:=180 \
-  rolling_clouds:=3
+  rear_blind_deg:=0
+```
+
+전방 특정 영역만 보고 싶으면 좌우 각도를 줄인다.
+
+```bash
+roslaunch path_planning morai_lidar_rviz.launch \
+  fov_left_deg:=45 \
+  fov_right_deg:=45 \
+  rear_blind_deg:=0
 ```
 
 RViz에서 점군이 깜빡거리면 `rolling_clouds`를 4~6 정도로 키우거나,

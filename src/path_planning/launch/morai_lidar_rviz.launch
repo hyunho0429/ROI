@@ -6,18 +6,19 @@
   <arg name="destination_port" default="2001" />
 
   <arg name="frame_id" default="morai_lidar" />
-  <arg name="topic" default="/morai/lidar/front_points" />
+  <arg name="topic" default="/morai/lidar/sampled_points" />
   <arg name="packets_per_cloud" default="80" />
   <arg name="rolling_clouds" default="3" />
 
-  <!-- Front half-space by default: right -90 deg to left +90 deg. -->
-  <arg name="fov_left_deg" default="90.0" />
-  <arg name="fov_right_deg" default="90.0" />
+  <!-- Near-360 scan by default, with only the ego rear sector hidden. -->
+  <arg name="fov_left_deg" default="180.0" />
+  <arg name="fov_right_deg" default="180.0" />
+  <arg name="rear_blind_deg" default="60.0" />
   <arg name="lidar_yaw_offset_deg" default="0.0" />
 
-  <arg name="x_min_m" default="0.3" />
+  <arg name="x_min_m" default="-40.0" />
   <arg name="x_max_m" default="40.0" />
-  <arg name="y_abs_m" default="8.0" />
+  <arg name="y_abs_m" default="40.0" />
   <arg name="z_min_m" default="-2.5" />
   <arg name="z_max_m" default="3.0" />
   <arg name="min_distance_m" default="0.2" />
@@ -35,6 +36,7 @@
     <param name="rolling_clouds" value="$(arg rolling_clouds)" />
     <param name="fov_left_deg" value="$(arg fov_left_deg)" />
     <param name="fov_right_deg" value="$(arg fov_right_deg)" />
+    <param name="rear_blind_deg" value="$(arg rear_blind_deg)" />
     <param name="lidar_yaw_offset_deg" value="$(arg lidar_yaw_offset_deg)" />
     <param name="x_min_m" value="$(arg x_min_m)" />
     <param name="x_max_m" value="$(arg x_max_m)" />

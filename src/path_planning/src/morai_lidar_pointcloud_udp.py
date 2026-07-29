@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Publish MORAI VLP-16 UDP LiDAR front-FOV points as ROS PointCloud2.
+"""Publish MORAI VLP-16 UDP LiDAR sampled-FOV points as ROS PointCloud2.
 
 This node does not use MORAI ROS sensor topics.  It receives the competition
 UDP LiDAR packet directly, decodes the Velodyne/VLP-16 payload, transforms it
-to an ego-local frame, samples only a configured front field-of-view, and
+to an ego-local frame, samples a configured field-of-view, and
 publishes the result for RViz.
 
 Frame convention of the published cloud:
@@ -60,7 +60,21 @@ def _rotate_xy(x_forward, y_left, yaw_offset_deg):
     )
 
 
-def _sample_front_points(points, params):
+def _is_in_sampled_area(x_forward, y_left, bearing_deg, params):
+    if params["rear_blind_deg"] > 0.0:
+        rear_delta = abs(abs(bearing_deg) - 180.0)
+        if rear_delta <= 0.5 * params["rear_blind_deg"]:
+            return False
+    if not (-params["fov_right_deg"] <= bearing_deg <= params["fov_left_deg"]):
+        return False
+    if not (params["x_min_m"] <= x_forward <= params["x_max_m"]):
+        return False
+    if abs(y_left) > params["y_abs_m"]:
+        return False
+    return True
+
+
+def _sample_points(points, params):
     sampled = []
     for point in points:
         if point.distance_m < params["min_distance_m"]:
@@ -74,11 +88,7 @@ def _sample_front_points(points, params):
         z_up = point.z_m
         bearing_deg = math.degrees(math.atan2(y_left, x_forward))
 
-        if not (-params["fov_right_deg"] <= bearing_deg <= params["fov_left_deg"]):
-            continue
-        if not (params["x_min_m"] <= x_forward <= params["x_max_m"]):
-            continue
-        if abs(y_left) > params["y_abs_m"]:
+        if not _is_in_sampled_area(x_forward, y_left, bearing_deg, params):
             continue
         if not (params["z_min_m"] <= z_up <= params["z_max_m"]):
             continue
@@ -111,16 +121,17 @@ def main():
         "host_port": int(_param("host_port", LIDAR_HOST_PORT)),
         "destination_port": int(_param("destination_port", LIDAR_PORT)),
         "frame_id": _param("frame_id", "morai_lidar"),
-        "topic": _param("topic", "/morai/lidar/front_points"),
+        "topic": _param("topic", "/morai/lidar/sampled_points"),
         "packets_per_cloud": int(_param("packets_per_cloud", 80)),
         "rolling_clouds": int(_param("rolling_clouds", 3)),
         "socket_timeout_s": float(_param("socket_timeout_s", 1.0)),
         "lidar_yaw_offset_deg": float(_param("lidar_yaw_offset_deg", 0.0)),
-        "fov_left_deg": float(_param("fov_left_deg", 90.0)),
-        "fov_right_deg": float(_param("fov_right_deg", 90.0)),
-        "x_min_m": float(_param("x_min_m", 0.3)),
+        "fov_left_deg": float(_param("fov_left_deg", 180.0)),
+        "fov_right_deg": float(_param("fov_right_deg", 180.0)),
+        "rear_blind_deg": float(_param("rear_blind_deg", 60.0)),
+        "x_min_m": float(_param("x_min_m", -40.0)),
         "x_max_m": float(_param("x_max_m", 40.0)),
-        "y_abs_m": float(_param("y_abs_m", 8.0)),
+        "y_abs_m": float(_param("y_abs_m", 40.0)),
         "z_min_m": float(_param("z_min_m", -2.5)),
         "z_max_m": float(_param("z_max_m", 3.0)),
         "min_distance_m": float(_param("min_distance_m", 0.2)),
@@ -134,6 +145,8 @@ def main():
         raise ValueError("FOV limits cannot be negative")
     if params["fov_left_deg"] > 180.0 or params["fov_right_deg"] > 180.0:
         raise ValueError("FOV limits cannot exceed 180 degrees")
+    if params["rear_blind_deg"] < 0.0 or params["rear_blind_deg"] > 180.0:
+        raise ValueError("rear blind sector must be between 0 and 180 degrees")
 
     publisher = rospy.Publisher(params["topic"], PointCloud2, queue_size=1)
 
@@ -145,7 +158,7 @@ def main():
 
     rospy.loginfo(
         "MORAI LiDAR PointCloud2 UDP: source *:%d -> %s:%d, topic=%s, "
-        "frame=%s, FOV=-%.1f..+%.1f deg, rolling_clouds=%d",
+        "frame=%s, FOV=-%.1f..+%.1f deg, rear_blind=%.1f deg, rolling_clouds=%d",
         params["host_port"],
         params["bind_ip"],
         params["destination_port"],
@@ -153,6 +166,7 @@ def main():
         params["frame_id"],
         params["fov_right_deg"],
         params["fov_left_deg"],
+        params["rear_blind_deg"],
         params["rolling_clouds"],
     )
 
@@ -190,7 +204,7 @@ def main():
                     rospy.logwarn_throttle(2.0, "Bad LiDAR packet: %s", error)
                     continue
 
-                cloud_points.extend(_sample_front_points(lidar_packet.points, params))
+                cloud_points.extend(_sample_points(lidar_packet.points, params))
 
             if cloud_points:
                 rolling_clouds.append(cloud_points)

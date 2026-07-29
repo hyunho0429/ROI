@@ -67,15 +67,15 @@ def argument_parser():
             "appear on the side, run with --yaw-scan and set this value accordingly"
         ),
     )
-    parser.add_argument("--front-x-min", type=float, default=0.5)
+    parser.add_argument("--front-x-min", type=float, default=-40.0)
     parser.add_argument("--front-x-max", type=float, default=35.0)
-    parser.add_argument("--front-y-abs", type=float, default=5.0)
+    parser.add_argument("--front-y-abs", type=float, default=40.0)
     parser.add_argument("--front-z-min", type=float, default=-2.2)
     parser.add_argument("--front-z-max", type=float, default=2.0)
     parser.add_argument(
         "--fov-left-deg",
         type=float,
-        default=90.0,
+        default=180.0,
         help=(
             "left side angular limit of the sampled LiDAR area in ego-local "
             "coordinates; 0 deg is straight ahead"
@@ -84,10 +84,19 @@ def argument_parser():
     parser.add_argument(
         "--fov-right-deg",
         type=float,
-        default=90.0,
+        default=180.0,
         help=(
             "right side angular limit of the sampled LiDAR area in ego-local "
             "coordinates; 0 deg is straight ahead"
+        ),
+    )
+    parser.add_argument(
+        "--rear-blind-deg",
+        type=float,
+        default=60.0,
+        help=(
+            "angular sector centered at 180/-180 deg to ignore around the ego rear; "
+            "use 0 for full 360 deg"
         ),
     )
     parser.add_argument(
@@ -165,6 +174,10 @@ def _valid_points(points, arguments, yaw_offset_deg=None):
         if point.distance_m < arguments.min_distance:
             continue
         ego = _point_as_ego(point, yaw_offset_deg)
+        if arguments.rear_blind_deg > 0.0:
+            rear_delta = abs(abs(ego["bearing"]) - 180.0)
+            if rear_delta <= 0.5 * arguments.rear_blind_deg:
+                continue
         if not (-arguments.fov_right_deg <= ego["bearing"] <= arguments.fov_left_deg):
             continue
         if (
@@ -290,6 +303,8 @@ def _validate(arguments):
         raise ValueError("FOV limits cannot be negative")
     if arguments.fov_left_deg > 180.0 or arguments.fov_right_deg > 180.0:
         raise ValueError("FOV limits cannot exceed 180 degrees")
+    if arguments.rear_blind_deg < 0.0 or arguments.rear_blind_deg > 180.0:
+        raise ValueError("rear-blind-deg must be between 0 and 180")
     if arguments.min_distance < 0.0:
         raise ValueError("min-distance cannot be negative")
     if arguments.height_above_ground < 0.0:
@@ -320,7 +335,8 @@ def run(arguments):
     )
     print(
         "front corridor: x={:.1f}..{:.1f}m, |y|<={:.1f}m, z={:.1f}..{:.1f}m; "
-        "FOV right=-{:.1f}deg left=+{:.1f}deg; object if >= {} points above ground+{:.2f}m".format(
+        "FOV right=-{:.1f}deg left=+{:.1f}deg, rear_blind={:.1f}deg; "
+        "object if >= {} points above ground+{:.2f}m".format(
             arguments.front_x_min,
             arguments.front_x_max,
             arguments.front_y_abs,
@@ -328,6 +344,7 @@ def run(arguments):
             arguments.front_z_max,
             arguments.fov_right_deg,
             arguments.fov_left_deg,
+            arguments.rear_blind_deg,
             arguments.min_object_points,
             arguments.height_above_ground,
         )
