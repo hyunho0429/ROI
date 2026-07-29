@@ -164,16 +164,6 @@ def _motion_compensate_xy(x_forward, y_left, point_age_s, motion, params):
     )
     if not math.isfinite(speed_mps) or not math.isfinite(yaw_rate_radps):
         return x_forward, y_left, 0.0
-    if params["motion_use_abs_speed"]:
-        speed_mps = abs(speed_mps)
-    speed_mps = max(
-        -params["motion_max_speed_mps"],
-        min(params["motion_max_speed_mps"], speed_mps),
-    )
-    yaw_rate_radps = max(
-        -params["motion_max_yaw_rate_radps"],
-        min(params["motion_max_yaw_rate_radps"], yaw_rate_radps),
-    )
 
     # Old point -> current ego frame.
     #
@@ -327,13 +317,6 @@ def _nearest_distance(points, params):
     if not candidates:
         return None
     return min(point[3] for point in candidates)
-
-
-def _left_right_counts(points):
-    left = sum(1 for point in points if point[POINT_Y] > 0.2)
-    right = sum(1 for point in points if point[POINT_Y] < -0.2)
-    center = max(0, len(points) - left - right)
-    return left, center, right
 
 
 def _cluster_candidate_points(points, params):
@@ -564,9 +547,8 @@ def main():
         ),
         "packets_per_cloud": int(_param("packets_per_cloud", 15)),
         "rolling_clouds": int(_param("rolling_clouds", 1)),
-        "display_rolling_clouds": int(_param("display_rolling_clouds", 120)),
-        "display_max_packets": int(_param("display_max_packets", 120)),
-        "display_history_s": float(_param("display_history_s", 1.50)),
+        "display_rolling_clouds": int(_param("display_rolling_clouds", 10)),
+        "display_history_s": float(_param("display_history_s", 0.30)),
         "max_cloud_age_s": float(_param("max_cloud_age_s", 0.05)),
         "socket_timeout_s": float(_param("socket_timeout_s", 1.0)),
         "motion_compensation_enabled": _bool_param(
@@ -587,13 +569,8 @@ def main():
         "motion_status_timeout_s": float(_param("motion_status_timeout_s", 0.5)),
         "manual_speed_mps": float(_param("manual_speed_mps", 0.0)),
         "manual_yaw_rate_radps": float(_param("manual_yaw_rate_radps", 0.0)),
-        "motion_use_abs_speed": _bool_param("motion_use_abs_speed", True),
-        "motion_max_speed_mps": float(_param("motion_max_speed_mps", 35.0)),
-        "motion_max_yaw_rate_radps": float(
-            _param("motion_max_yaw_rate_radps", 2.5)
-        ),
         "motion_yaw_rate_sign": float(_param("motion_yaw_rate_sign", 1.0)),
-        "motion_max_point_age_s": float(_param("motion_max_point_age_s", 1.5)),
+        "motion_max_point_age_s": float(_param("motion_max_point_age_s", 0.2)),
         "lidar_yaw_offset_deg": float(_param("lidar_yaw_offset_deg", 0.0)),
         "fov_left_deg": float(_param("fov_left_deg", 180.0)),
         "fov_right_deg": float(_param("fov_right_deg", 180.0)),
@@ -627,8 +604,6 @@ def main():
         raise ValueError("~rolling_clouds must be at least 1")
     if params["display_rolling_clouds"] < 1:
         raise ValueError("~display_rolling_clouds must be at least 1")
-    if params["display_max_packets"] < 1:
-        raise ValueError("~display_max_packets must be at least 1")
     if params["display_history_s"] < 0.0:
         raise ValueError("~display_history_s cannot be negative")
     if params["max_cloud_age_s"] < 0.0:
@@ -637,10 +612,6 @@ def main():
         raise ValueError("~motion_status_timeout_s cannot be negative")
     if params["motion_max_point_age_s"] < 0.0:
         raise ValueError("~motion_max_point_age_s cannot be negative")
-    if params["motion_max_speed_mps"] < 0.0:
-        raise ValueError("~motion_max_speed_mps cannot be negative")
-    if params["motion_max_yaw_rate_radps"] < 0.0:
-        raise ValueError("~motion_max_yaw_rate_radps cannot be negative")
     if params["fov_left_deg"] < 0.0 or params["fov_right_deg"] < 0.0:
         raise ValueError("FOV limits cannot be negative")
     if params["fov_left_deg"] > 180.0 or params["fov_right_deg"] > 180.0:
@@ -692,7 +663,7 @@ def main():
         "MORAI LiDAR PointCloud2 UDP: source *:%d -> %s:%d, topic=%s, "
         "display_topic=%s, nearest_distance_topic=%s, frame=%s, "
         "FOV=-%.1f..+%.1f deg, rear_blind=%.1f deg, "
-        "rolling_clouds=%d, display_max_packets=%d, display_history=%.3fs, "
+        "rolling_clouds=%d, display_rolling_clouds=%d, display_history=%.3fs, "
         "max_cloud_age=%.3fs, motion_compensation=%s",
         params["host_port"],
         params["bind_ip"],
@@ -705,14 +676,14 @@ def main():
         params["fov_left_deg"],
         params["rear_blind_deg"],
         params["rolling_clouds"],
-        params["display_max_packets"],
+        params["display_rolling_clouds"],
         params["display_history_s"],
         params["max_cloud_age_s"],
         "on" if params["motion_compensation_enabled"] else "off",
     )
 
     rolling_clouds = deque(maxlen=params["rolling_clouds"])
-    display_packet_batches = deque(maxlen=params["display_max_packets"])
+    display_rolling_clouds = deque(maxlen=params["display_rolling_clouds"])
     motion_state = MotionState(
         params["manual_speed_mps"],
         params["manual_yaw_rate_radps"],
@@ -800,9 +771,9 @@ def main():
                         motion=motion,
                     )
                 )
-                display_packet_batches.append((packet_received_at, points))
             if cloud_points:
                 rolling_clouds.append(cloud_points)
+                display_rolling_clouds.append((time.monotonic(), cloud_points))
             accumulated_points = [
                 point
                 for cloud in rolling_clouds
@@ -810,21 +781,16 @@ def main():
             ]
             now = time.monotonic()
             while (
-                display_packet_batches
+                display_rolling_clouds
                 and params["display_history_s"] > 0.0
-                and now - display_packet_batches[0][0] > params["display_history_s"]
+                and now - display_rolling_clouds[0][0] > params["display_history_s"]
             ):
-                display_packet_batches.popleft()
-            display_points = []
-            for packet_received_at, points in display_packet_batches:
-                display_points.extend(
-                    _sample_points(
-                        points,
-                        params,
-                        point_age_s=now - packet_received_at,
-                        motion=motion,
-                    )
-                )
+                display_rolling_clouds.popleft()
+            display_points = [
+                point
+                for _, cloud in display_rolling_clouds
+                for point in cloud
+            ]
             clusters = []
             if accumulated_points:
                 publisher.publish(_make_cloud(accumulated_points, params["frame_id"]))
@@ -846,24 +812,15 @@ def main():
             if display_points:
                 display_publisher.publish(_make_cloud(display_points, params["frame_id"]))
             nearest_text = _nearest_distance(accumulated_points, params)
-            live_left, live_center, live_right = _left_right_counts(accumulated_points)
-            display_left, display_center, display_right = _left_right_counts(display_points)
             rospy.loginfo_throttle(
                 1.0,
                 "LiDAR cloud: packets=%d bad=%d live_points=%d display_points=%d "
-                "live_l/c/r=%d/%d/%d display_l/c/r=%d/%d/%d "
                 "nearest=%s clusters=%d age=%.3fs motion=%s fresh=%s "
                 "speed=%.2fm/s yaw_rate=%.3frad/s status_age=%s",
                 packets,
                 bad_packets,
                 len(accumulated_points),
                 len(display_points),
-                live_left,
-                live_center,
-                live_right,
-                display_left,
-                display_center,
-                display_right,
                 "n/a" if nearest_text is None else "{:.2f}m".format(nearest_text),
                 len(clusters),
                 time.monotonic() - cloud_started_at,
