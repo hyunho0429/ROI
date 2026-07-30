@@ -491,102 +491,163 @@ def main():
     display_rolling_clouds = deque(maxlen=params["display_rolling_clouds"])
 
     try:
+        cloud_points = []
+        bad_packets = 0
+        packets = 0
+        prev_azimuth = None
+        cloud_started_at = time.monotonic()
+    
         while not rospy.is_shutdown():
-            cloud_points = []
-            packets = 0
-            bad_packets = 0
-            cloud_started_at = time.monotonic()
-            while packets < params["packets_per_cloud"] and not rospy.is_shutdown():
-                if (
-                    packets > 0
-                    and params["max_cloud_age_s"] > 0.0
-                    and time.monotonic() - cloud_started_at >= params["max_cloud_age_s"]
-                ):
-                    break
-                try:
-                    packet, sender = udp_socket.recvfrom(65535)
-                except socket.timeout:
-                    rospy.logwarn_throttle(
-                        2.0,
-                        "No LiDAR UDP packet received within %.1fs",
-                        params["socket_timeout_s"],
-                    )
-                    break
-
-                if sender[1] != params["host_port"]:
-                    rospy.logwarn_throttle(
-                        5.0,
-                        "LiDAR UDP sender source port %d, expected %d",
-                        sender[1],
-                        params["host_port"],
-                    )
-
-                packets += 1
-                try:
-                    lidar_packet = parse_lidar_intensity_packet(packet)
-                except (LidarPacketError, ValueError) as error:
-                    bad_packets += 1
-                    rospy.logwarn_throttle(2.0, "Bad LiDAR packet: %s", error)
-                    continue
-
-                cloud_points.extend(_sample_points(lidar_packet.points, params))
-
-            if cloud_points:
+    
+            try:
+                packet, sender = udp_socket.recvfrom(65535)
+            except socket.timeout:
+                rospy.logwarn_throttle(
+                    2.0,
+                    "No LiDAR UDP packet received within %.1fs",
+                    params["socket_timeout_s"],
+                )
+                continue
+    
+            if sender[1] != params["host_port"]:
+                rospy.logwarn_throttle(
+                    5.0,
+                    "LiDAR UDP sender source port %d, expected %d",
+                    sender[1],
+                    params["host_port"],
+                )
+    
+            try:
+                lidar_packet = parse_lidar_intensity_packet(packet)
+            except (LidarPacketError, ValueError) as error:
+                bad_packets += 1
+                rospy.logwarn_throttle(2.0, "Bad LiDAR packet: %s", error)
+                continue
+    
+            packets += 1
+    
+            current_azimuth = lidar_packet.points[0].azimuth_deg
+    
+            wrapped = (
+                prev_azimuth is not None
+                and prev_azimuth > 350.0
+                and current_azimuth < 10.0
+            )
+    
+            if wrapped and cloud_points:
+    
                 rolling_clouds.append(cloud_points)
-                display_rolling_clouds.append((time.monotonic(), cloud_points))
-            accumulated_points = [
-                point
-                for cloud in rolling_clouds
-                for point in cloud
-            ]
-            now = time.monotonic()
-            while (
-                display_rolling_clouds
-                and params["display_history_s"] > 0.0
-                and now - display_rolling_clouds[0][0] > params["display_history_s"]
-            ):
-                display_rolling_clouds.popleft()
-            display_points = [
-                point
-                for _, cloud in display_rolling_clouds
-                for point in cloud
-            ]
-            clusters = []
-            if accumulated_points:
-                publisher.publish(_make_cloud(accumulated_points, params["frame_id"]))
-                nearest_distance = _nearest_distance(accumulated_points, params)
-                if nearest_distance is not None:
-                    nearest_distance_publisher.publish(Float32(data=nearest_distance))
-                if params["cluster_enabled"]:
-                    clusters = _format_clusters(
-                        _cluster_candidate_points(accumulated_points, params)
-                    )
-                    obstacle_publisher.publish(String(data=_clusters_to_json(clusters)))
-                    obstacle_marker_publisher.publish(
-                        _make_obstacle_markers(
-                            clusters,
+                display_rolling_clouds.append(
+                    (time.monotonic(), cloud_points)
+                )
+    
+                accumulated_points = [
+                    point
+                    for cloud in rolling_clouds
+                    for point in cloud
+                ]
+    
+                now = time.monotonic()
+    
+                while (
+                    display_rolling_clouds
+                    and params["display_history_s"] > 0.0
+                    and now - display_rolling_clouds[0][0]
+                    > params["display_history_s"]
+                ):
+                    display_rolling_clouds.popleft()
+    
+                display_points = [
+                    point
+                    for _, cloud in display_rolling_clouds
+                    for point in cloud
+                ]
+    
+                clusters = []
+    
+                if accumulated_points:
+    
+                    publisher.publish(
+                        _make_cloud(
+                            accumulated_points,
                             params["frame_id"],
-                            params["cluster_max_clusters"],
                         )
                     )
-            if display_points:
-                display_publisher.publish(_make_cloud(display_points, params["frame_id"]))
-            nearest_text = _nearest_distance(accumulated_points, params)
-            rospy.loginfo_throttle(
-                1.0,
-                "LiDAR cloud: packets=%d bad=%d live_points=%d display_points=%d "
-                "nearest=%s clusters=%d age=%.3fs",
-                packets,
-                bad_packets,
-                len(accumulated_points),
-                len(display_points),
-                "n/a" if nearest_text is None else "{:.2f}m".format(nearest_text),
-                len(clusters),
-                time.monotonic() - cloud_started_at,
+    
+                    nearest_distance = _nearest_distance(
+                        accumulated_points,
+                        params,
+                    )
+    
+                    if nearest_distance is not None:
+                        nearest_distance_publisher.publish(
+                            Float32(data=nearest_distance)
+                        )
+    
+                    if params["cluster_enabled"]:
+                        clusters = _format_clusters(
+                            _cluster_candidate_points(
+                                accumulated_points,
+                                params,
+                            )
+                        )
+    
+                        obstacle_publisher.publish(
+                            String(
+                                data=_clusters_to_json(clusters)
+                            )
+                        )
+    
+                        obstacle_marker_publisher.publish(
+                            _make_obstacle_markers(
+                                clusters,
+                                params["frame_id"],
+                                params["cluster_max_clusters"],
+                            )
+                        )
+    
+                if display_points:
+                    display_publisher.publish(
+                        _make_cloud(
+                            display_points,
+                            params["frame_id"],
+                        )
+                    )
+    
+                nearest_text = _nearest_distance(
+                    accumulated_points,
+                    params,
+                )
+    
+                rospy.loginfo_throttle(
+                    1.0,
+                    "LiDAR cloud: packets=%d bad=%d live_points=%d display_points=%d "
+                    "nearest=%s clusters=%d",
+                    packets,
+                    bad_packets,
+                    len(accumulated_points),
+                    len(display_points),
+                    "n/a"
+                    if nearest_text is None
+                    else "{:.2f}m".format(nearest_text),
+                    len(clusters),
+                )
+    
+                cloud_points = []
+                packets = 0
+                cloud_started_at = time.monotonic()
+    
+            cloud_points.extend(
+                _sample_points(
+                    lidar_packet.points,
+                    params,
+                )
             )
+    
+            prev_azimuth = current_azimuth
+    
     finally:
         udp_socket.close()
-
 
 if __name__ == "__main__":
     main()
