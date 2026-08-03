@@ -24,6 +24,8 @@ from path_planning.morai_competition_config import (
     CONTROL_PORT,
     GPS_PORT,
     IMU_PORT,
+    LIDAR_POSE_IP,
+    LIDAR_POSE_PORT,
     TARGET_SPEED_KMH,
     VEHICLE_WHEELBASE_M,
 )
@@ -44,6 +46,10 @@ from path_planning.morai_udp_ctrl_cmd import (
 )
 from path_planning.morai_udp_gps import GpsPacketError, parse_nmea_datagram
 from path_planning.morai_udp_imu import ImuPacketError, parse_imu_packet
+from path_planning.morai_udp_localization_pose import (
+    LocalizationPose,
+    encode_localization_pose,
+)
 from path_planning.stanley_controller import (
     PathPoint,
     StanleyController,
@@ -236,6 +242,17 @@ def argument_parser(localization_mode):
     parser.add_argument("--bind-ip", default=BIND_IP)
     parser.add_argument("--gps-port", type=int, default=GPS_PORT)
     parser.add_argument("--imu-port", type=int, default=IMU_PORT)
+    parser.add_argument(
+        "--lidar-pose-output-ip",
+        default=LIDAR_POSE_IP,
+        help="UDP destination IP for the fused pose stream used by LiDAR deskew",
+    )
+    parser.add_argument(
+        "--lidar-pose-output-port",
+        type=int,
+        default=LIDAR_POSE_PORT,
+        help="UDP destination port for the fused pose stream used by LiDAR deskew",
+    )
     parser.add_argument(
         "--competition-status-host-port",
         type=int,
@@ -440,6 +457,7 @@ def _validate(arguments):
         arguments.collision_host_port,
         arguments.control_port,
         arguments.control_source_port,
+        arguments.lidar_pose_output_port,
     )
     for value in network_ports:
         if not 1 <= value <= 65535:
@@ -448,6 +466,11 @@ def _validate(arguments):
     if len(local_bind_ports) != len(set(local_bind_ports)):
         raise ValueError(
             "GPS, IMU, status, collision and control source ports must be distinct"
+        )
+    if arguments.lidar_pose_output_port in local_bind_ports:
+        raise ValueError(
+            "LiDAR pose output port must be distinct from every local receive "
+            "and control source port"
         )
     positive_names = (
         "control_rate_hz",
@@ -651,11 +674,17 @@ def run(localization_mode, arguments):
             )
         ) from error
     control_destination = (arguments.control_ip, arguments.control_port)
+    lidar_pose_destination = (
+        arguments.lidar_pose_output_ip,
+        arguments.lidar_pose_output_port,
+    )
+    lidar_pose_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     encode_control = lambda command: encode_ego_ctrl_cmd(
         command, arguments.control_protocol
     )
 
     latest_gps_time = latest_imu_time = latest_status_time = None
+    latest_yaw_rate_radps = 0.0
     status_speed_mps = 0.0
     status_vel_x_kmh = 0.0
     status_wheelbase_m = arguments.wheelbase
@@ -682,6 +711,7 @@ def run(localization_mode, arguments):
     period = 1.0 / arguments.control_rate_hz
     next_control = time.monotonic()
     last_log = 0.0
+    last_pose_output_error_log = 0.0
 
     print(
         "MORAI Stanley {} controller started".format(
@@ -772,6 +802,13 @@ def run(localization_mode, arguments):
             arguments.cross_track_deadband,
             arguments.localization_lateral_offset_m,
             arguments.target_speed_kmh,
+        )
+    )
+    print(
+        "  LiDAR deskew pose: EKF -> UDP {}:{} at up to {:.1f} Hz".format(
+            lidar_pose_destination[0],
+            lidar_pose_destination[1],
+            arguments.control_rate_hz,
         )
     )
     print(
@@ -874,6 +911,7 @@ def run(localization_mode, arguments):
                             measurement.angular_velocity_radps,
                             measurement.linear_acceleration_mps2,
                         )
+                        latest_yaw_rate_radps = measurement.angular_velocity_radps[2]
                         latest_imu_time = received
                     elif key.data == "status":
                         status = parse_competition_vehicle_status(packet)
@@ -944,6 +982,31 @@ def run(localization_mode, arguments):
                 and gps_outage <= arguments.max_gps_outage
             )
             state = localizer.state_at(now) if sensor_fresh else None
+            if state is not None:
+                try:
+                    lidar_pose_socket.sendto(
+                        encode_localization_pose(
+                            LocalizationPose(
+                                timestamp_monotonic_s=state.timestamp,
+                                x_m=state.x_m,
+                                y_m=state.y_m,
+                                z_m=state.z_m,
+                                yaw_rad=state.yaw_rad,
+                                speed_mps=state.speed_mps,
+                                yaw_rate_radps=latest_yaw_rate_radps,
+                            )
+                        ),
+                        lidar_pose_destination,
+                    )
+                except (OSError, ValueError) as error:
+                    if now - last_pose_output_error_log >= 2.0:
+                        print(
+                            "Warning: failed to send LiDAR deskew pose: {}".format(
+                                error
+                            ),
+                            file=sys.stderr,
+                        )
+                        last_pose_output_error_log = now
             collision_active = now < collision_brake_until
             drive_control_ready = external_control_ready(
                 status_ctrl_mode, status_gear
@@ -1121,6 +1184,7 @@ def run(localization_mode, arguments):
         selector.close()
         for udp_socket in receive_sockets:
             udp_socket.close()
+        lidar_pose_socket.close()
         control_socket.close()
 
 

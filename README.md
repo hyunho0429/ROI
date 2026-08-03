@@ -236,7 +236,35 @@ roslaunch path_planning morai_lidar_rviz.launch
 
 위 launch의 기본값은 `bind_ip=0.0.0.0`, `host_port=2000`,
 `destination_port=2001`, `rear_blind_deg=60`, `rolling_clouds=1`,
-`max_cloud_age_s=0.10`으로 설정되어 있다.
+`display_rolling_clouds=1`, `display_history_s=0.0`으로 설정되어 있다.
+LiDAR node와 RViz는 함께 실행된다.
+
+현재 LiDAR 단독 개발용 기본값은 `deskew_pose_source:=sensor_udp`이다. 따라서
+LiDAR node가 MORAI GPS `3001`과 IMU `4001`을 직접 수신하고 자세를 계산하므로
+Stanley 주행 코드를 함께 실행할 필요가 없다.
+
+```bash
+# LiDAR 2001 + GPS 3001 + IMU 4001 직접 수신, ground removal, deskew, RViz
+roslaunch path_planning morai_lidar_rviz.launch
+```
+
+나중에 Stanley와 LiDAR를 동시에 실행할 때는 두 프로세스가 `3001/4001`을 함께
+bind하지 않도록 Stanley만 센서를 수신하고 LiDAR는 융합 자세 UDP `4012`를 받는
+모드로 변경한다.
+
+```bash
+# terminal 1
+roslaunch path_planning morai_stanley_udp.launch \
+  control_ip:=192.168.0.151
+
+# terminal 2
+roslaunch path_planning morai_lidar_rviz.launch \
+  deskew_pose_source:=fused_pose_udp
+```
+
+LiDAR만 정지 상태에서 확인할 때는 `deskew_enabled:=false`를 지정할 수 있다. 필요한
+GPS/IMU 또는 융합 자세 UDP가 아직 준비되지 않았으면 LiDAR node는 중단되지 않고
+원본 점군으로 자동 fallback한다.
 
 차량 뒤쪽도 포함한 완전 360도에 가깝게 보고 싶으면 `rear_blind_deg:=0`으로 둔다.
 
@@ -258,8 +286,9 @@ roslaunch path_planning morai_lidar_rviz.launch \
 
 주행 알고리즘에는 `/morai/lidar/live_points`를 사용한다. 이 토픽은 기본
 `rolling_clouds:=1`이라 최신 cloud만 publish한다. RViz는
-`/morai/lidar/display_points`를 사용하며, 기본 `display_rolling_clouds:=5`,
-`display_history_s:=0.35`로 최근 짧은 시간만 누적해서 깜빡임을 줄인다.
+`/morai/lidar/display_points`를 사용하며, 주행 중 과거 scan의 잔상이 장애물처럼
+보이지 않도록 기본 `display_rolling_clouds:=1`, `display_history_s:=0.0`, RViz
+`Decay Time:=0`을 사용한다.
 PointCloud2에는 `x`, `y`, `z`, `distance_m`, `intensity`, `ring`,
 `bearing_deg` 필드가 들어간다. RViz 색상은 기본적으로 `distance_m` 기준이다.
 현재 샘플링 영역에서 가장 가까운 거리값은 다음 토픽으로도 확인할 수 있다.
@@ -269,8 +298,8 @@ rostopic echo /morai/lidar/nearest_distance_m
 ```
 
 `nearest_distance_m`는 전체 point 중 최솟값이 아니라 전방 장애물 후보 영역
-`nearest_x_min_m=1.0`, `nearest_x_max_m=40.0`, `nearest_y_abs_m=5.0`,
-`nearest_z_min_m=-1.2`, `nearest_z_max_m=2.5` 안의 최단거리다. 전체 최솟값을
+`nearest_x_min_m=1.0`, `nearest_x_max_m=40.0`, `nearest_y_abs_m=3.0`,
+`nearest_z_min_m=-1.4`, `nearest_z_max_m=2.5` 안의 최단거리다. 전체 최솟값을
 그대로 쓰면 지면/차량 근처 return 때문에 약 `0.5 m` 근처 값이 계속 나올 수 있다.
 가까운 박스까지 거리를 더 민감하게 보고 싶으면 `nearest_x_min_m`을 낮추고,
 바닥 point가 섞이면 `nearest_z_min_m`을 높인다.
@@ -289,28 +318,25 @@ rostopic echo /morai/lidar/obstacles
 ```bash
 roslaunch path_planning morai_lidar_rviz.launch \
   cluster_tolerance_m:=0.8 \
-  cluster_min_points:=5 \
+  cluster_min_points:=3 \
+  cluster_min_height_m:=0.15 \
   cluster_x_min_m:=1.0 \
   cluster_x_max_m:=40.0 \
-  cluster_y_abs_m:=8.0 \
-  cluster_z_min_m:=-1.2 \
+  cluster_y_abs_m:=5.0 \
+  cluster_z_min_m:=-1.4 \
   cluster_z_max_m:=2.5
 ```
 
 장애물이 여러 개로 쪼개져 보이면 `cluster_tolerance_m`을 키우고, 바닥/노이즈가
 군집으로 잡히면 `cluster_min_points`를 키우거나 `cluster_z_min_m`을 높인다.
 
-현재 LiDAR가 30 Hz라면 기본값은 `packets_per_cloud:=15`,
-`max_cloud_age_s:=0.05`, `display_history_s:=0.30`이다. 알고리즘용 live cloud는
-짧게 갱신하고, RViz용 display cloud만 약 0.3초 유지해서 깜빡임을 줄인다.
-`display_history_s`나 RViz PointCloud2의 `Decay Time`을 너무 길게 잡으면 차량
-이동 중 이전 scan이 겹쳐서 긴 무지개 궤적처럼 번져 보인다.
+LiDAR 회전 속도는 30 Hz를 그대로 권장한다. 20 Hz로 낮추면 한 회전에 걸리는 시간이
+길어져 동일한 차량 속도와 yaw rate에서 보상해야 할 왜곡량이 오히려 커진다. node는
+azimuth가 360도에서 0도로 넘어가는 시점에 한 회전을 완성하고, 각 UDP 패킷 수신
+시각의 EKF 위치/yaw를 보간한 뒤 마지막 패킷의 차량 좌표계로 변환한다.
 
-점군 update가 느리거나 끊기면 `packets_per_cloud`를 60~80 범위에서 조정한다.
-값이 너무 크면 한 cloud를 만들 때 오래 걸리고, 너무 작으면 360도 scan이 듬성듬성
-보일 수 있다. `max_cloud_age_s`는 한 PointCloud2 메시지에 너무 오래된 UDP packet이
-섞이지 않도록 제한하는 값이다. 60 km/h 주행 결합 테스트에서는 `0.05~0.08s`,
-RViz에서 360도 형상을 더 온전히 보고 싶을 때는 `0.10~0.12s` 정도를 사용한다.
+`display_history_s`나 RViz PointCloud2의 `Decay Time`을 키우면 deskew 여부와
+무관하게 서로 다른 시각의 ego-frame scan이 겹쳐 긴 무지개 궤적처럼 보일 수 있다.
 
 RViz의 `Ego Axes`에서 빨간 X축은 차량 전방, 초록 Y축은 차량 좌측, 파란 Z축은
 위쪽이다. 차량이 전진할 때 화면상 좌우로 움직이는 듯 보이면 먼저 RViz 카메라

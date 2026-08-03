@@ -7,6 +7,8 @@
     <arg name="bind_ip" default="0.0.0.0"/>
     <arg name="gps_port" default="3001"/>
     <arg name="imu_port" default="4001"/>
+    <arg name="lidar_pose_output_ip" default="127.0.0.1"/>
+    <arg name="lidar_pose_output_port" default="4012"/>
     <arg name="competition_status_host_port" default="9080"/>
     <arg name="competition_status_destination_port" default="9081"/>
     <arg name="collision_host_port" default="9091"/>
@@ -72,6 +74,8 @@
                 --bind-ip $(arg bind_ip)
                 --gps-port $(arg gps_port)
                 --imu-port $(arg imu_port)
+                --lidar-pose-output-ip $(arg lidar_pose_output_ip)
+                --lidar-pose-output-port $(arg lidar_pose_output_port)
                 --competition-status-host-port $(arg competition_status_host_port)
                 --competition-status-port $(arg competition_status_destination_port)
                 --collision-host-port $(arg collision_host_port)

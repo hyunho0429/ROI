@@ -11,6 +11,10 @@ COLLISION_HOST_PORT = 9091
 COLLISION_PORT = 9092
 LIDAR_HOST_PORT = 2000
 LIDAR_PORT = 2001
+# Loopback UDP pose stream from the driving EKF to LiDAR deskew.  This is not
+# a MORAI sensor port and must remain distinct from every simulator channel.
+LIDAR_POSE_IP = "127.0.0.1"
+LIDAR_POSE_PORT = 4012
 # Ego Ctrl Cmd travels in the opposite direction: algorithm Destination Port
 # (UDP source) -> MORAI Host Port (UDP destination).
 CONTROL_IP = "192.168.0.151"

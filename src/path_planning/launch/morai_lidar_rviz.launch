@@ -13,9 +13,19 @@
   <arg name="obstacle_marker_topic" default="/morai/lidar/obstacle_markers" />
   <arg name="packets_per_cloud" default="15" />
   <arg name="rolling_clouds" default="1" />
-  <arg name="display_rolling_clouds" default="10" />
-  <arg name="display_history_s" default="0.30" />
+  <arg name="display_rolling_clouds" default="1" />
+  <arg name="display_history_s" default="0.0" />
   <arg name="max_cloud_age_s" default="0.05" />
+  <arg name="deskew_enabled" default="true" />
+  <!-- Standalone development default: receive MORAI GPS/IMU directly.
+       Use fused_pose_udp when Stanley and LiDAR run concurrently. -->
+  <arg name="deskew_pose_source" default="sensor_udp" />
+  <arg name="gps_port" default="3001" />
+  <arg name="imu_port" default="4001" />
+  <arg name="pose_bind_ip" default="127.0.0.1" />
+  <arg name="pose_port" default="4012" />
+  <arg name="pose_buffer_s" default="1.0" />
+  <arg name="pose_extrapolation_limit_s" default="0.12" />
 
   <!-- Near-360 scan by default, with only the ego rear sector hidden. -->
   <arg name="fov_left_deg" default="180.0" />
@@ -33,22 +43,29 @@
   <arg name="ground_z_threshold_m" default="-1.5" />
 
   <!-- Nearest distance is computed from this obstacle-candidate area, not from all ground points. -->
+  <arg name="fast_nearest_enabled" default="true" />
+  <arg name="nearest_publish_interval_s" default="0.05" />
+  <arg name="nearest_hold_s" default="0.20" />
+  <arg name="nearest_min_points" default="2" />
   <arg name="nearest_x_min_m" default="1.0" />
   <arg name="nearest_x_max_m" default="40.0" />
-  <arg name="nearest_y_abs_m" default="5.0" />
-  <arg name="nearest_z_min_m" default="-1.2" />
+  <arg name="nearest_y_abs_m" default="3.0" />
+  <arg name="nearest_z_min_m" default="-1.4" />
   <arg name="nearest_z_max_m" default="2.5" />
 
   <!-- Euclidean/grid clustering parameters for obstacle candidates. -->
   <arg name="cluster_enabled" default="true" />
   <arg name="cluster_tolerance_m" default="0.8" />
-  <arg name="cluster_min_points" default="5" />
+  <arg name="cluster_min_points" default="3" />
+  <arg name="cluster_min_height_m" default="0.15" />
+  <arg name="cluster_hold_s" default="0.15" />
+  <arg name="marker_lifetime_s" default="0.20" />
   <arg name="cluster_max_clusters" default="8" />
   <arg name="cluster_max_input_points" default="5000" />
   <arg name="cluster_x_min_m" default="1.0" />
   <arg name="cluster_x_max_m" default="40.0" />
-  <arg name="cluster_y_abs_m" default="8.0" />
-  <arg name="cluster_z_min_m" default="-1.2" />
+  <arg name="cluster_y_abs_m" default="5.0" />
+  <arg name="cluster_z_min_m" default="-1.4" />
   <arg name="cluster_z_max_m" default="2.5" />
 
   <node pkg="path_planning"
@@ -69,6 +86,14 @@
     <param name="display_rolling_clouds" value="$(arg display_rolling_clouds)" />
     <param name="display_history_s" value="$(arg display_history_s)" />
     <param name="max_cloud_age_s" value="$(arg max_cloud_age_s)" />
+    <param name="deskew_enabled" value="$(arg deskew_enabled)" />
+    <param name="deskew_pose_source" value="$(arg deskew_pose_source)" />
+    <param name="gps_port" value="$(arg gps_port)" />
+    <param name="imu_port" value="$(arg imu_port)" />
+    <param name="pose_bind_ip" value="$(arg pose_bind_ip)" />
+    <param name="pose_port" value="$(arg pose_port)" />
+    <param name="pose_buffer_s" value="$(arg pose_buffer_s)" />
+    <param name="pose_extrapolation_limit_s" value="$(arg pose_extrapolation_limit_s)" />
     <param name="fov_left_deg" value="$(arg fov_left_deg)" />
     <param name="fov_right_deg" value="$(arg fov_right_deg)" />
     <param name="rear_blind_deg" value="$(arg rear_blind_deg)" />
@@ -81,6 +106,10 @@
     <param name="min_distance_m" value="$(arg min_distance_m)" />
     <param name="ground_remove_enabled" value="$(arg ground_remove_enabled)" />
     <param name="ground_z_threshold_m" value="$(arg ground_z_threshold_m)" />
+    <param name="fast_nearest_enabled" value="$(arg fast_nearest_enabled)" />
+    <param name="nearest_publish_interval_s" value="$(arg nearest_publish_interval_s)" />
+    <param name="nearest_hold_s" value="$(arg nearest_hold_s)" />
+    <param name="nearest_min_points" value="$(arg nearest_min_points)" />
     <param name="nearest_x_min_m" value="$(arg nearest_x_min_m)" />
     <param name="nearest_x_max_m" value="$(arg nearest_x_max_m)" />
     <param name="nearest_y_abs_m" value="$(arg nearest_y_abs_m)" />
@@ -89,6 +118,9 @@
     <param name="cluster_enabled" value="$(arg cluster_enabled)" />
     <param name="cluster_tolerance_m" value="$(arg cluster_tolerance_m)" />
     <param name="cluster_min_points" value="$(arg cluster_min_points)" />
+    <param name="cluster_min_height_m" value="$(arg cluster_min_height_m)" />
+    <param name="cluster_hold_s" value="$(arg cluster_hold_s)" />
+    <param name="marker_lifetime_s" value="$(arg marker_lifetime_s)" />
     <param name="cluster_max_clusters" value="$(arg cluster_max_clusters)" />
     <param name="cluster_max_input_points" value="$(arg cluster_max_input_points)" />
     <param name="cluster_x_min_m" value="$(arg cluster_x_min_m)" />
