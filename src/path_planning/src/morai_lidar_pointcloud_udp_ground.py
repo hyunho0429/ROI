@@ -27,6 +27,7 @@ from path_planning.lidar_direct_localization import DirectGpsImuPoseEstimator
 from path_planning.lidar_deskew import deskew_scan, pose_at
 from path_planning.lidar_obstacle_filter import (
     filter_scan_line_arcs,
+    filter_vertical_support,
     is_obstacle_cluster_geometry,
 )
 
@@ -269,6 +270,12 @@ def _nearest_candidate_distances(points, params):
 def _filter_scan_arc_candidates(points, params):
     if not params["vertical_support_enabled"]:
         return points
+    if params["ring_filter_mode"] == "strict":
+        return filter_vertical_support(
+            points,
+            params["vertical_support_radius_m"],
+            params["vertical_support_min_height_m"],
+        )
     return filter_scan_line_arcs(
         points,
         params["vertical_support_radius_m"],
@@ -355,7 +362,14 @@ def _cluster_candidate_points(points, params):
         if len(cluster_indices) < params["cluster_min_points"]:
             continue
         cluster_points = [candidates[index] for index in cluster_indices]
-        if not is_obstacle_cluster_geometry(
+        if params["ring_filter_mode"] == "strict":
+            cluster_z_values = [point[POINT_Z] for point in cluster_points]
+            if (
+                max(cluster_z_values) - min(cluster_z_values)
+                < params["cluster_min_height_m"]
+            ):
+                continue
+        elif not is_obstacle_cluster_geometry(
             cluster_points,
             params["cluster_min_height_m"],
             params["cluster_small_object_min_points"],
@@ -502,7 +516,7 @@ def _make_obstacle_markers(clusters, frame_id, max_clusters, lifetime_s):
     return marker_array
 
 
-def main():
+def main(ring_filter_mode_override=None):
     rospy.init_node("morai_lidar_pointcloud_udp_ground")
 
     params = {
@@ -558,6 +572,9 @@ def main():
         "vertical_support_enabled": _bool_param(
             "vertical_support_enabled", True
         ),
+        "ring_filter_mode": str(
+            _param("ring_filter_mode", "hybrid")
+        ).strip().lower(),
         "vertical_support_filter_cloud": _bool_param(
             "vertical_support_filter_cloud", True
         ),
@@ -653,6 +670,10 @@ def main():
         raise ValueError("FOV limits cannot exceed 180 degrees")
     if params["rear_blind_deg"] < 0.0 or params["rear_blind_deg"] > 180.0:
         raise ValueError("rear blind sector must be between 0 and 180 degrees")
+    if ring_filter_mode_override is not None:
+        params["ring_filter_mode"] = str(ring_filter_mode_override).strip().lower()
+    if params["ring_filter_mode"] not in ("hybrid", "strict"):
+        raise ValueError("ring_filter_mode must be 'hybrid' or 'strict'")
     if params["vertical_support_radius_m"] <= 0.0:
         raise ValueError("vertical_support_radius_m must be positive")
     if params["vertical_support_min_height_m"] < 0.0:
@@ -791,7 +812,7 @@ def main():
         "display_topic=%s, nearest_distance_topic=%s, frame=%s, "
         "FOV=-%.1f..+%.1f deg, rear_blind=%.1f deg, "
         "rolling_clouds=%d, display_rolling_clouds=%d, display_history=%.3fs, "
-        "max_cloud_age=%.3fs, deskew=%s pose_source=%s",
+        "max_cloud_age=%.3fs, deskew=%s pose_source=%s ring_filter=%s",
         params["host_port"],
         params["bind_ip"],
         params["destination_port"],
@@ -808,6 +829,7 @@ def main():
         params["max_cloud_age_s"],
         "on" if params["deskew_enabled"] else "off",
         pose_input_description,
+        params["ring_filter_mode"],
     )
 
     rolling_clouds = deque(maxlen=params["rolling_clouds"])
