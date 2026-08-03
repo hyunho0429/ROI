@@ -25,10 +25,7 @@ from visualization_msgs.msg import Marker, MarkerArray
 
 from path_planning.lidar_direct_localization import DirectGpsImuPoseEstimator
 from path_planning.lidar_deskew import deskew_scan, pose_at
-from path_planning.lidar_obstacle_filter import (
-    filter_scan_line_arcs,
-    is_obstacle_cluster_geometry,
-)
+from path_planning.lidar_obstacle_filter import filter_vertical_support
 
 try:
     from path_planning.morai_competition_config import BIND_IP
@@ -262,21 +259,17 @@ def _nearest_candidate_distances(points, params):
         <= point[POINT_Z]
         <= params["nearest_z_max_m"]
     ]
-    candidates = _filter_scan_arc_candidates(candidates, params)
+    candidates = _vertical_support_candidates(candidates, params)
     return [point[POINT_DISTANCE] for point in candidates]
 
 
-def _filter_scan_arc_candidates(points, params):
+def _vertical_support_candidates(points, params):
     if not params["vertical_support_enabled"]:
         return points
-    return filter_scan_line_arcs(
+    return filter_vertical_support(
         points,
         params["vertical_support_radius_m"],
         params["vertical_support_min_height_m"],
-        params["scan_arc_min_points"],
-        params["scan_arc_min_angle_deg"],
-        params["scan_arc_min_length_m"],
-        params["scan_arc_max_radial_thickness_m"],
     )
 
 
@@ -295,7 +288,7 @@ def _cluster_candidate_points(points, params):
         and abs(point[POINT_Y]) <= params["cluster_y_abs_m"]
         and params["cluster_z_min_m"] <= point[POINT_Z] <= params["cluster_z_max_m"]
     ]
-    candidates = _filter_scan_arc_candidates(candidates, params)
+    candidates = _vertical_support_candidates(candidates, params)
     max_points = params["cluster_max_input_points"]
     if max_points > 0 and len(candidates) > max_points:
         step = int(math.ceil(float(len(candidates)) / float(max_points)))
@@ -355,14 +348,11 @@ def _cluster_candidate_points(points, params):
         if len(cluster_indices) < params["cluster_min_points"]:
             continue
         cluster_points = [candidates[index] for index in cluster_indices]
-        if not is_obstacle_cluster_geometry(
-            cluster_points,
-            params["cluster_min_height_m"],
-            params["cluster_small_object_min_points"],
-            params["cluster_small_object_max_width_m"],
-        ):
+        cluster = _summarize_cluster(cluster_points)
+        cluster_height = cluster["max_z_m"] - cluster["min_z_m"]
+        if cluster_height < params["cluster_min_height_m"]:
             continue
-        clusters.append(_summarize_cluster(cluster_points))
+        clusters.append(cluster)
 
     clusters.sort(key=lambda cluster: cluster["nearest_distance_m"])
     return clusters[: params["cluster_max_clusters"]]
@@ -567,19 +557,9 @@ def main():
         "vertical_support_min_height_m": float(
             _param("vertical_support_min_height_m", 0.05)
         ),
-        "scan_arc_min_points": int(_param("scan_arc_min_points", 8)),
-        "scan_arc_min_angle_deg": float(
-            _param("scan_arc_min_angle_deg", 5.0)
-        ),
-        "scan_arc_min_length_m": float(
-            _param("scan_arc_min_length_m", 2.0)
-        ),
-        "scan_arc_max_radial_thickness_m": float(
-            _param("scan_arc_max_radial_thickness_m", 0.35)
-        ),
 
         "min_distance_m": float(_param("min_distance_m", 0.2)),
-        "fast_nearest_enabled": _bool_param("fast_nearest_enabled", False),
+        "fast_nearest_enabled": _bool_param("fast_nearest_enabled", True),
         "nearest_publish_interval_s": float(
             _param("nearest_publish_interval_s", 0.05)
         ),
@@ -592,14 +572,8 @@ def main():
         "nearest_z_max_m": float(_param("nearest_z_max_m", 2.5)),
         "cluster_enabled": _bool_param("cluster_enabled", True),
         "cluster_tolerance_m": float(_param("cluster_tolerance_m", 0.8)),
-        "cluster_min_points": int(_param("cluster_min_points", 2)),
+        "cluster_min_points": int(_param("cluster_min_points", 3)),
         "cluster_min_height_m": float(_param("cluster_min_height_m", 0.15)),
-        "cluster_small_object_min_points": int(
-            _param("cluster_small_object_min_points", 2)
-        ),
-        "cluster_small_object_max_width_m": float(
-            _param("cluster_small_object_max_width_m", 1.5)
-        ),
         "cluster_hold_s": float(_param("cluster_hold_s", 0.15)),
         "marker_lifetime_s": float(_param("marker_lifetime_s", 0.20)),
         "cluster_max_clusters": int(_param("cluster_max_clusters", 8)),
@@ -657,14 +631,6 @@ def main():
         raise ValueError("vertical_support_radius_m must be positive")
     if params["vertical_support_min_height_m"] < 0.0:
         raise ValueError("vertical_support_min_height_m cannot be negative")
-    if params["scan_arc_min_points"] < 2:
-        raise ValueError("scan_arc_min_points must be at least 2")
-    if params["scan_arc_min_angle_deg"] < 0.0:
-        raise ValueError("scan_arc_min_angle_deg cannot be negative")
-    if params["scan_arc_min_length_m"] < 0.0:
-        raise ValueError("scan_arc_min_length_m cannot be negative")
-    if params["scan_arc_max_radial_thickness_m"] < 0.0:
-        raise ValueError("scan_arc_max_radial_thickness_m cannot be negative")
     if params["nearest_publish_interval_s"] <= 0.0:
         raise ValueError("nearest_publish_interval_s must be positive")
     if params["nearest_hold_s"] < 0.0:
@@ -683,10 +649,6 @@ def main():
         raise ValueError("cluster_min_points must be at least 1")
     if params["cluster_min_height_m"] < 0.0:
         raise ValueError("cluster_min_height_m cannot be negative")
-    if params["cluster_small_object_min_points"] < 2:
-        raise ValueError("cluster_small_object_min_points must be at least 2")
-    if params["cluster_small_object_max_width_m"] <= 0.0:
-        raise ValueError("cluster_small_object_max_width_m must be positive")
     if params["cluster_hold_s"] < 0.0:
         raise ValueError("cluster_hold_s cannot be negative")
     if params["marker_lifetime_s"] <= 0.0:
@@ -956,7 +918,7 @@ def main():
                     params["vertical_support_enabled"]
                     and params["vertical_support_filter_cloud"]
                 ):
-                    scan_points = _filter_scan_arc_candidates(
+                    scan_points = _vertical_support_candidates(
                         scan_points,
                         params,
                     )
@@ -1003,21 +965,19 @@ def main():
                     )
                 )
 
-                nearest_distance = _nearest_distance(
-                    accumulated_points,
-                    params,
-                )
-
-                if not params["fast_nearest_enabled"]:
-                    nearest_distance_publisher.publish(
-                        Float32(
-                            data=(
-                                nearest_distance
-                                if nearest_distance is not None
-                                else float("nan")
-                            )
-                        )
+                if accumulated_points:
+                    nearest_distance = _nearest_distance(
+                        accumulated_points,
+                        params,
                     )
+    
+                    if (
+                        not params["fast_nearest_enabled"]
+                        and nearest_distance is not None
+                    ):
+                        nearest_distance_publisher.publish(
+                            Float32(data=nearest_distance)
+                        )
 
                 if params["cluster_enabled"]:
                     detected_clusters = _format_clusters(
@@ -1058,7 +1018,10 @@ def main():
                         )
                     )
     
-                nearest_text = nearest_distance
+                nearest_text = _nearest_distance(
+                    accumulated_points,
+                    params,
+                )
     
                 rospy.loginfo_throttle(
                     1.0,

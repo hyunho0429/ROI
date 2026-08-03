@@ -10,35 +10,11 @@ PACKAGE_SRC = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src
 if PACKAGE_SRC not in sys.path:
     sys.path.insert(0, PACKAGE_SRC)
 
-from path_planning.lidar_obstacle_filter import (
-    filter_scan_line_arcs,
-    filter_vertical_support,
-    is_obstacle_cluster_geometry,
-)
+from path_planning.lidar_obstacle_filter import filter_vertical_support
 
 
 def _point(x, y, z, ring):
-    return (
-        x,
-        y,
-        z,
-        math.sqrt(x * x + y * y + z * z),
-        1.0,
-        ring,
-        math.degrees(math.atan2(y, x)),
-    )
-
-
-def _filter_arcs(points):
-    return filter_scan_line_arcs(
-        points,
-        support_radius_m=0.65,
-        support_minimum_height_m=0.05,
-        arc_minimum_points=8,
-        arc_minimum_angle_deg=5.0,
-        arc_minimum_length_m=2.0,
-        arc_maximum_radial_thickness_m=0.35,
-    )
+    return (x, y, z, math.sqrt(x * x + y * y + z * z), 1.0, ring, 0.0)
 
 
 class LidarObstacleFilterTest(unittest.TestCase):
@@ -56,50 +32,6 @@ class LidarObstacleFilterTest(unittest.TestCase):
         filtered = filter_vertical_support(arc, 0.65, 0.05)
 
         self.assertEqual(filtered, [])
-
-    def test_hybrid_filter_rejects_long_single_ring_arc(self):
-        arc = [
-            _point(
-                8.0 * math.cos(math.radians(angle)),
-                8.0 * math.sin(math.radians(angle)),
-                -1.2,
-                3,
-            )
-            for angle in range(-20, 21)
-        ]
-
-        self.assertEqual(_filter_arcs(arc), [])
-
-    def test_hybrid_filter_keeps_small_distant_single_ring_target(self):
-        small_target = [
-            _point(20.0, -0.2, -0.5, 3),
-            _point(20.0, 0.0, -0.5, 3),
-            _point(20.0, 0.2, -0.5, 3),
-        ]
-
-        self.assertEqual(_filter_arcs(small_target), small_target)
-
-    def test_hybrid_filter_keeps_close_compact_single_ring_target(self):
-        small_target = [
-            _point(1.2, y, -0.5, 3)
-            for y in (-0.20, -0.15, -0.10, -0.05, 0.0, 0.05, 0.10, 0.15, 0.20)
-        ]
-
-        self.assertEqual(_filter_arcs(small_target), small_target)
-        self.assertTrue(
-            is_obstacle_cluster_geometry(small_target, 0.15, 2, 1.5)
-        )
-
-    def test_cluster_geometry_rejects_wide_flat_noise(self):
-        wide_flat_noise = [
-            _point(8.0, -2.0, -0.5, 3),
-            _point(8.0, 0.0, -0.5, 3),
-            _point(8.0, 2.0, -0.5, 3),
-        ]
-
-        self.assertFalse(
-            is_obstacle_cluster_geometry(wide_flat_noise, 0.15, 2, 1.5)
-        )
 
     def test_rejects_nearby_flat_returns_from_different_rings(self):
         flat_returns = [
@@ -121,7 +53,6 @@ class LidarObstacleFilterTest(unittest.TestCase):
         filtered = filter_vertical_support(obstacle, 0.65, 0.05)
 
         self.assertEqual(filtered, obstacle)
-        self.assertEqual(_filter_arcs(obstacle), obstacle)
 
     def test_rejects_different_rings_that_are_too_far_apart(self):
         separated_ground_rings = [

@@ -318,10 +318,8 @@ rostopic echo /morai/lidar/obstacles
 ```bash
 roslaunch path_planning morai_lidar_rviz.launch \
   cluster_tolerance_m:=0.8 \
-  cluster_min_points:=2 \
+  cluster_min_points:=3 \
   cluster_min_height_m:=0.15 \
-  cluster_small_object_min_points:=2 \
-  cluster_small_object_max_width_m:=1.5 \
   cluster_x_min_m:=1.0 \
   cluster_x_max_m:=40.0 \
   cluster_y_abs_m:=5.0 \
@@ -332,24 +330,20 @@ roslaunch path_planning morai_lidar_rviz.launch \
 장애물이 여러 개로 쪼개져 보이면 `cluster_tolerance_m`을 키우고, 바닥/노이즈가
 군집으로 잡히면 `cluster_min_points`를 키우거나 `cluster_z_min_m`을 높인다.
 
-바닥을 맞힌 단일 LiDAR ring이 원호 또는 동심원처럼 길게 이어지는 점은 기본
-`vertical_support_enabled:=true` 필터에서 제거한다. 다른 수직 ring이 지지하는
-점은 항상 유지하며, 단일 ring이어도 길이 `2.0 m` 미만인 조밀한 return은 작은
-물체일 수 있으므로 유지한다. 이 필터는 nearest distance, clustering 및 RViz 표시
-점군에 모두 적용된다.
+바닥을 맞힌 단일 LiDAR ring이 원호 또는 동심원처럼 보이는 점은 기본
+`vertical_support_enabled:=true` 필터에서 제거한다. 같은 수평 위치 반경 `0.65 m`
+안에 다른 ring의 점이 있으면서 높이 차이가 `0.05 m` 이상이어야 실제 장애물
+후보로 유지된다. 이 필터는 nearest distance, clustering 및 RViz 표시 점군에 모두
+적용된다.
 
 ```bash
 roslaunch path_planning morai_lidar_rviz.launch \
   vertical_support_radius_m:=0.65 \
-  vertical_support_min_height_m:=0.05 \
-  scan_arc_min_points:=8 \
-  scan_arc_min_length_m:=2.0
+  vertical_support_min_height_m:=0.05
 ```
 
-작은 물체는 높이 조건을 만족하지 않아도 점이 2개 이상이고 폭이 `1.5 m` 이하이면
-compact small-object cluster로 인정한다. 거리값은 원호 판별이 끝난 완성 scan에서
-30 Hz로 publish하므로 기본 `fast_nearest_enabled`는 `false`이다. 원본 점군은
-유지하고 장애물 판정에서만 원호를 제외하려면
+먼 장애물이 너무 많이 사라지면 `vertical_support_radius_m`을 `0.8` 정도로
+늘린다. 원본 점군은 유지하고 장애물 판정에서만 원호를 제외하려면
 `vertical_support_filter_cloud:=false`를 사용한다.
 
 LiDAR 회전 속도는 30 Hz를 그대로 권장한다. 20 Hz로 낮추면 한 회전에 걸리는 시간이
