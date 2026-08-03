@@ -367,6 +367,43 @@ roslaunch path_planning morai_lidar_rviz.launch \
 늘린다. 원본 점군은 유지하고 장애물 판정에서만 원호를 제외하려면
 `vertical_support_filter_cloud:=false`를 사용한다.
 
+### 차량 크기 기반 인접 차선 공간 확인
+
+Competition Vehicle Status에서 확인한 ego 크기 `xyz=(4.635, 1.892, 2.434)m`를
+각각 길이, 폭, 높이로 사용한다. 기본 차선 폭 `3.5m`에서 좌우 인접 차선의 LiDAR
+클러스터를 찾고 현재 ego 위치를 포함하는 전후 빈 구간을 계산한다.
+
+기본 종방향 여유는 앞뒤 각각 `1.0m`이므로 필요한 물리적 빈 공간은
+`4.635 + 1.0 + 1.0 = 6.635m`이다. 차선 한쪽의 횡방향 여유는
+`(3.5 - 1.892) / 2 = 0.804m`이고 기본 최소 조건은 `0.2m`이다. 앞이나 뒤에
+장애물 클러스터가 없으면 해당 방향의 `40m` LiDAR 확인 경계를 빈 구간 경계로
+사용한다.
+
+```bash
+roslaunch path_planning morai_lidar_rviz.launch \
+  merge_gap_enabled:=true \
+  ego_size_x_m:=4.635 \
+  ego_size_y_m:=1.892 \
+  ego_size_z_m:=2.434 \
+  adjacent_lane_width_m:=3.5
+```
+
+좌우 상태는 조건 충족 여부와 관계없이 1초마다 항상 출력된다.
+
+```text
+MERGE_GAP GEOMETRY_ONLY | LEFT=AVAILABLE reason=available gap=... | RIGHT=BLOCKED reason=obstacle_alongside gap=...
+```
+
+- `CHECKING(1/3)`: 공간 조건을 만족했지만 연속 scan 확인 중
+- `AVAILABLE`: 기본 3 scan 연속으로 물리적 공간 조건 충족
+- `BLOCKED`: 차량이 옆에 있거나 앞뒤/차선 폭 여유가 부족함
+- `range_limit`: 해당 방향 `40m` 안에서 장애물이 검출되지 않아 확인 경계를 사용함
+- `obstacle`: 실제 장애물 cluster 표면을 공간 경계로 사용함
+
+이 결과는 차체가 들어갈 수 있는 **기하학적 공간 확인**일 뿐이다. 고속도로 차선
+변경 제어에는 앞뒤 차량의 상대속도, TTC, 차선 곡률 및 실제 차선 변경 궤적 검증이
+추가로 필요하다.
+
 LiDAR 회전 속도는 30 Hz를 그대로 권장한다. 20 Hz로 낮추면 한 회전에 걸리는 시간이
 길어져 동일한 차량 속도와 yaw rate에서 보상해야 할 왜곡량이 오히려 커진다. node는
 azimuth가 360도에서 0도로 넘어가는 시점에 한 회전을 완성하고, 각 UDP 패킷 수신

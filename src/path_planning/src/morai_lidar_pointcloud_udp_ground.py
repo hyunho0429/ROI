@@ -25,6 +25,11 @@ from visualization_msgs.msg import Marker, MarkerArray
 
 from path_planning.lidar_direct_localization import DirectGpsImuPoseEstimator
 from path_planning.lidar_deskew import deskew_scan, pose_at
+from path_planning.lidar_merge_gap import (
+    MergeGapTracker,
+    assess_merge_gaps,
+    format_merge_gap_status,
+)
 from path_planning.lidar_obstacle_filter import filter_vertical_support
 
 try:
@@ -358,6 +363,30 @@ def _cluster_candidate_points(points, params):
     return clusters[: params["cluster_max_clusters"]]
 
 
+def _merge_gap_candidate_clusters(points, params):
+    lane_width = params["adjacent_lane_width_m"]
+    lane_tolerance = (
+        0.5
+        * max(0.0, lane_width - params["ego_size_y_m"])
+        + params["gap_lane_lateral_allowance_m"]
+    )
+    adjacent_lane_points = [
+        point
+        for point in points
+        if min(
+            abs(point[POINT_Y] - lane_width),
+            abs(point[POINT_Y] + lane_width),
+        )
+        <= lane_tolerance
+    ]
+    gap_params = dict(params)
+    gap_params["cluster_x_min_m"] = -params["gap_detection_range_m"]
+    gap_params["cluster_x_max_m"] = params["gap_detection_range_m"]
+    gap_params["cluster_y_abs_m"] = lane_width + lane_tolerance
+    gap_params["cluster_max_clusters"] = params["gap_max_clusters"]
+    return _cluster_candidate_points(adjacent_lane_points, gap_params)
+
+
 def _summarize_cluster(points):
     xs = [point[POINT_X] for point in points]
     ys = [point[POINT_Y] for point in points]
@@ -532,7 +561,7 @@ def main():
         "lidar_yaw_offset_deg": float(_param("lidar_yaw_offset_deg", 0.0)),
         "fov_left_deg": float(_param("fov_left_deg", 180.0)),
         "fov_right_deg": float(_param("fov_right_deg", 180.0)),
-        "rear_blind_deg": float(_param("rear_blind_deg", 60.0)),
+        "rear_blind_deg": float(_param("rear_blind_deg", 0.0)),
         "x_min_m": float(_param("x_min_m", -40.0)),
         "x_max_m": float(_param("x_max_m", 40.0)),
         "y_abs_m": float(_param("y_abs_m", 40.0)),
@@ -583,6 +612,30 @@ def main():
         "cluster_y_abs_m": float(_param("cluster_y_abs_m", 5.0)),
         "cluster_z_min_m": float(_param("cluster_z_min_m", -1.4)),
         "cluster_z_max_m": float(_param("cluster_z_max_m", 2.5)),
+        "merge_gap_enabled": _bool_param("merge_gap_enabled", True),
+        "ego_size_x_m": float(_param("ego_size_x_m", 4.635)),
+        "ego_size_y_m": float(_param("ego_size_y_m", 1.892)),
+        "ego_size_z_m": float(_param("ego_size_z_m", 2.434)),
+        "adjacent_lane_width_m": float(
+            _param("adjacent_lane_width_m", 3.5)
+        ),
+        "gap_lane_lateral_allowance_m": float(
+            _param("gap_lane_lateral_allowance_m", 0.4)
+        ),
+        "gap_longitudinal_margin_m": float(
+            _param("gap_longitudinal_margin_m", 1.0)
+        ),
+        "gap_lateral_margin_m": float(
+            _param("gap_lateral_margin_m", 0.2)
+        ),
+        "gap_detection_range_m": float(
+            _param("gap_detection_range_m", 40.0)
+        ),
+        "gap_confirmation_scans": int(
+            _param("gap_confirmation_scans", 3)
+        ),
+        "gap_log_interval_s": float(_param("gap_log_interval_s", 1.0)),
+        "gap_max_clusters": int(_param("gap_max_clusters", 24)),
     }
 
     if params["packets_per_cloud"] < 1:
@@ -663,6 +716,54 @@ def main():
         raise ValueError("cluster_y_abs_m cannot be negative")
     if params["cluster_z_max_m"] <= params["cluster_z_min_m"]:
         raise ValueError("cluster z range must satisfy min < max")
+    if min(
+        params["ego_size_x_m"],
+        params["ego_size_y_m"],
+        params["ego_size_z_m"],
+    ) <= 0.0:
+        raise ValueError("ego xyz dimensions must be positive")
+    if params["adjacent_lane_width_m"] <= 0.0:
+        raise ValueError("adjacent_lane_width_m must be positive")
+    if params["gap_lane_lateral_allowance_m"] < 0.0:
+        raise ValueError("gap_lane_lateral_allowance_m cannot be negative")
+    if params["gap_longitudinal_margin_m"] < 0.0:
+        raise ValueError("gap_longitudinal_margin_m cannot be negative")
+    if params["gap_lateral_margin_m"] < 0.0:
+        raise ValueError("gap_lateral_margin_m cannot be negative")
+    if params["gap_detection_range_m"] <= 0.5 * params["ego_size_x_m"]:
+        raise ValueError("gap_detection_range_m is too short for ego length")
+    if params["gap_confirmation_scans"] < 1:
+        raise ValueError("gap_confirmation_scans must be at least 1")
+    if params["gap_log_interval_s"] <= 0.0:
+        raise ValueError("gap_log_interval_s must be positive")
+    if params["gap_max_clusters"] < 1:
+        raise ValueError("gap_max_clusters must be at least 1")
+    if params["merge_gap_enabled"]:
+        gap_range = params["gap_detection_range_m"]
+        lane_tolerance = (
+            0.5
+            * max(
+                0.0,
+                params["adjacent_lane_width_m"] - params["ego_size_y_m"],
+            )
+            + params["gap_lane_lateral_allowance_m"]
+        )
+        if params["x_min_m"] > -gap_range or params["x_max_m"] < gap_range:
+            raise ValueError(
+                "merge gap check requires x_min_m <= -gap_detection_range_m "
+                "and x_max_m >= gap_detection_range_m"
+            )
+        if params["y_abs_m"] < params["adjacent_lane_width_m"] + lane_tolerance:
+            raise ValueError("sample y_abs_m does not cover adjacent lane gap ROI")
+        if (
+            params["fov_left_deg"] < 180.0
+            or params["fov_right_deg"] < 180.0
+            or params["rear_blind_deg"] > 0.0
+        ):
+            raise ValueError(
+                "merge gap check requires full 360-degree sampling: "
+                "fov_left_deg=180, fov_right_deg=180, rear_blind_deg=0"
+            )
 
     if params["rolling_clouds"] > 1:
         rospy.logwarn(
@@ -771,9 +872,25 @@ def main():
         "on" if params["deskew_enabled"] else "off",
         pose_input_description,
     )
+    if params["merge_gap_enabled"]:
+        rospy.loginfo(
+            "Merge gap geometry check enabled: ego xyz=(%.3f, %.3f, %.3f)m, "
+            "lane_width=%.2fm, required_longitudinal_gap=%.3fm, "
+            "lateral_clearance=%.3fm, confirmation=%d scans",
+            params["ego_size_x_m"],
+            params["ego_size_y_m"],
+            params["ego_size_z_m"],
+            params["adjacent_lane_width_m"],
+            params["ego_size_x_m"]
+            + 2.0 * params["gap_longitudinal_margin_m"],
+            0.5
+            * (params["adjacent_lane_width_m"] - params["ego_size_y_m"]),
+            params["gap_confirmation_scans"],
+        )
 
     rolling_clouds = deque(maxlen=params["rolling_clouds"])
     display_rolling_clouds = deque(maxlen=params["display_rolling_clouds"])
+    merge_gap_tracker = MergeGapTracker(params["gap_confirmation_scans"])
 
     try:
         packet_batches = []
@@ -1017,6 +1134,54 @@ def main():
                             params["marker_lifetime_s"],
                         )
                     )
+
+                if params["merge_gap_enabled"]:
+                    merge_gap_clusters = _merge_gap_candidate_clusters(
+                        accumulated_points,
+                        params,
+                    )
+                    merge_gap_assessments = assess_merge_gaps(
+                        merge_gap_clusters,
+                        params["ego_size_x_m"],
+                        params["ego_size_y_m"],
+                        params["ego_size_z_m"],
+                        params["adjacent_lane_width_m"],
+                        params["gap_lane_lateral_allowance_m"],
+                        params["gap_longitudinal_margin_m"],
+                        params["gap_lateral_margin_m"],
+                        params["gap_detection_range_m"],
+                    )
+                    (
+                        merge_gap_assessments,
+                        available_sides,
+                        unavailable_sides,
+                    ) = merge_gap_tracker.update(merge_gap_assessments)
+                    left_gap_text = format_merge_gap_status(
+                        merge_gap_assessments["left"]
+                    )
+                    right_gap_text = format_merge_gap_status(
+                        merge_gap_assessments["right"]
+                    )
+                    rospy.loginfo_throttle(
+                        params["gap_log_interval_s"],
+                        "MERGE_GAP GEOMETRY_ONLY | %s | %s",
+                        left_gap_text,
+                        right_gap_text,
+                    )
+                    for side in available_sides:
+                        rospy.loginfo(
+                            "MERGE_GAP AVAILABLE (GEOMETRY_ONLY): %s",
+                            format_merge_gap_status(
+                                merge_gap_assessments[side]
+                            ),
+                        )
+                    for side in unavailable_sides:
+                        rospy.logwarn(
+                            "MERGE_GAP LOST (GEOMETRY_ONLY): %s",
+                            format_merge_gap_status(
+                                merge_gap_assessments[side]
+                            ),
+                        )
 
                 nearest_text = _nearest_distance(
                     accumulated_points,
