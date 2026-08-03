@@ -104,6 +104,27 @@ source devel/setup.bash
 
 ## 3. Competition Vehicle Status 정보 확인
 
+모든 해석 필드를 한 번에 확인하려면 전용 UDP 로거를 실행한다. 기본적으로 최신
+상태를 1초마다 한 블록으로 계속 출력하며 차량 제어 명령은 전송하지 않는다.
+
+```bash
+cd ~/ROI
+source devel/setup.bash
+
+python3 src/path_planning/src/morai_competition_vehicle_status_logger.py \
+  --host-port 9080 \
+  --destination-port 9081 \
+  --interval 1.0
+```
+
+한 번만 출력하고 종료하려면 `--count 1`, 모든 수신 패킷을 출력하려면
+`--interval 0`을 사용한다. 출력에는 control mode/gear, 페달과 조향각, 위치와
+자세, 속도·각속도·가속도, 차량 크기와 wheelbase/overhang, map/link ID 및 확장
+패킷의 타이어 lateral force/side slip/cornering stiffness가 포함된다.
+
+Destination Port `9081`은 한 프로세스만 사용해야 하므로 Stanley 주행 코드나 기존
+상태 점검기를 종료한 뒤 실행한다.
+
 다음 프로그램은 제어 명령을 보내지 않고 Competition Vehicle Status만 수신한다.
 
 ```bash
