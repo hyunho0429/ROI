@@ -25,6 +25,7 @@ from visualization_msgs.msg import Marker, MarkerArray
 
 from path_planning.lidar_direct_localization import DirectGpsImuPoseEstimator
 from path_planning.lidar_deskew import deskew_scan, pose_at
+from path_planning.lidar_obstacle_filter import filter_vertical_support
 
 try:
     from path_planning.morai_competition_config import BIND_IP
@@ -249,8 +250,8 @@ def _make_cloud(points, frame_id):
 
 
 def _nearest_candidate_distances(points, params):
-    return [
-        point[POINT_DISTANCE]
+    candidates = [
+        point
         for point in points
         if params["nearest_x_min_m"] <= point[POINT_X] <= params["nearest_x_max_m"]
         and abs(point[POINT_Y]) <= params["nearest_y_abs_m"]
@@ -258,6 +259,18 @@ def _nearest_candidate_distances(points, params):
         <= point[POINT_Z]
         <= params["nearest_z_max_m"]
     ]
+    candidates = _vertical_support_candidates(candidates, params)
+    return [point[POINT_DISTANCE] for point in candidates]
+
+
+def _vertical_support_candidates(points, params):
+    if not params["vertical_support_enabled"]:
+        return points
+    return filter_vertical_support(
+        points,
+        params["vertical_support_radius_m"],
+        params["vertical_support_min_height_m"],
+    )
 
 
 def _nearest_distance(points, params):
@@ -275,6 +288,7 @@ def _cluster_candidate_points(points, params):
         and abs(point[POINT_Y]) <= params["cluster_y_abs_m"]
         and params["cluster_z_min_m"] <= point[POINT_Z] <= params["cluster_z_max_m"]
     ]
+    candidates = _vertical_support_candidates(candidates, params)
     max_points = params["cluster_max_input_points"]
     if max_points > 0 and len(candidates) > max_points:
         step = int(math.ceil(float(len(candidates)) / float(max_points)))
@@ -531,6 +545,18 @@ def main():
         "ground_z_threshold_m": float(
             _param("ground_z_threshold_m", -1.5)
         ),
+        "vertical_support_enabled": _bool_param(
+            "vertical_support_enabled", True
+        ),
+        "vertical_support_filter_cloud": _bool_param(
+            "vertical_support_filter_cloud", True
+        ),
+        "vertical_support_radius_m": float(
+            _param("vertical_support_radius_m", 0.65)
+        ),
+        "vertical_support_min_height_m": float(
+            _param("vertical_support_min_height_m", 0.05)
+        ),
 
         "min_distance_m": float(_param("min_distance_m", 0.2)),
         "fast_nearest_enabled": _bool_param("fast_nearest_enabled", True),
@@ -601,6 +627,10 @@ def main():
         raise ValueError("FOV limits cannot exceed 180 degrees")
     if params["rear_blind_deg"] < 0.0 or params["rear_blind_deg"] > 180.0:
         raise ValueError("rear blind sector must be between 0 and 180 degrees")
+    if params["vertical_support_radius_m"] <= 0.0:
+        raise ValueError("vertical_support_radius_m must be positive")
+    if params["vertical_support_min_height_m"] < 0.0:
+        raise ValueError("vertical_support_min_height_m cannot be negative")
     if params["nearest_publish_interval_s"] <= 0.0:
         raise ValueError("nearest_publish_interval_s must be positive")
     if params["nearest_hold_s"] < 0.0:
@@ -883,6 +913,19 @@ def main():
                         pose_input_description,
                     )
 
+                unfiltered_scan_point_count = len(scan_points)
+                if (
+                    params["vertical_support_enabled"]
+                    and params["vertical_support_filter_cloud"]
+                ):
+                    scan_points = _vertical_support_candidates(
+                        scan_points,
+                        params,
+                    )
+                rejected_arc_point_count = (
+                    unfiltered_scan_point_count - len(scan_points)
+                )
+
                 rolling_clouds.append(scan_points)
                 display_rolling_clouds.append(
                     (time.monotonic(), scan_points)
@@ -909,16 +952,20 @@ def main():
                 ]
     
                 clusters = []
-    
-                if accumulated_points:
-    
-                    publisher.publish(
-                        _make_cloud(
-                            accumulated_points,
-                            params["frame_id"],
-                        )
+                publisher.publish(
+                    _make_cloud(
+                        accumulated_points,
+                        params["frame_id"],
                     )
-    
+                )
+                display_publisher.publish(
+                    _make_cloud(
+                        display_points,
+                        params["frame_id"],
+                    )
+                )
+
+                if accumulated_points:
                     nearest_distance = _nearest_distance(
                         accumulated_points,
                         params,
@@ -931,51 +978,43 @@ def main():
                         nearest_distance_publisher.publish(
                             Float32(data=nearest_distance)
                         )
-    
-                    if params["cluster_enabled"]:
-                        detected_clusters = _format_clusters(
-                            _cluster_candidate_points(
-                                accumulated_points,
-                                params,
-                            )
-                        )
 
-                        if detected_clusters:
-                            clusters = detected_clusters
-                            last_detected_clusters = detected_clusters
-                            last_cluster_seen_at = now
-                        elif (
-                            last_detected_clusters
-                            and last_cluster_seen_at is not None
-                            and now - last_cluster_seen_at
-                            <= params["cluster_hold_s"]
-                        ):
-                            clusters = last_detected_clusters
-                        else:
-                            clusters = []
-                            last_detected_clusters = []
-                            last_cluster_seen_at = None
-    
-                        obstacle_publisher.publish(
-                            String(
-                                data=_clusters_to_json(clusters)
-                            )
+                if params["cluster_enabled"]:
+                    detected_clusters = _format_clusters(
+                        _cluster_candidate_points(
+                            accumulated_points,
+                            params,
                         )
-    
-                        obstacle_marker_publisher.publish(
-                            _make_obstacle_markers(
-                                clusters,
-                                params["frame_id"],
-                                params["cluster_max_clusters"],
-                                params["marker_lifetime_s"],
-                            )
+                    )
+
+                    if detected_clusters:
+                        clusters = detected_clusters
+                        last_detected_clusters = detected_clusters
+                        last_cluster_seen_at = now
+                    elif (
+                        last_detected_clusters
+                        and last_cluster_seen_at is not None
+                        and now - last_cluster_seen_at
+                        <= params["cluster_hold_s"]
+                    ):
+                        clusters = last_detected_clusters
+                    else:
+                        clusters = []
+                        last_detected_clusters = []
+                        last_cluster_seen_at = None
+
+                    obstacle_publisher.publish(
+                        String(
+                            data=_clusters_to_json(clusters)
                         )
-    
-                if display_points:
-                    display_publisher.publish(
-                        _make_cloud(
-                            display_points,
+                    )
+
+                    obstacle_marker_publisher.publish(
+                        _make_obstacle_markers(
+                            clusters,
                             params["frame_id"],
+                            params["cluster_max_clusters"],
+                            params["marker_lifetime_s"],
                         )
                     )
     
@@ -987,7 +1026,8 @@ def main():
                 rospy.loginfo_throttle(
                     1.0,
                     "LiDAR cloud: packets=%d bad=%d pose=%d pose_bad=%d deskew=%s "
-                    "live_points=%d display_points=%d nearest=%s clusters=%d",
+                    "arc_removed=%d live_points=%d display_points=%d "
+                    "nearest=%s clusters=%d",
                     packets,
                     bad_packets,
                     pose_packets,
@@ -999,6 +1039,7 @@ def main():
                         if params["deskew_enabled"]
                         else "off"
                     ),
+                    rejected_arc_point_count,
                     len(accumulated_points),
                     len(display_points),
                     "n/a"

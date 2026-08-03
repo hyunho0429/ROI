@@ -330,6 +330,22 @@ roslaunch path_planning morai_lidar_rviz.launch \
 장애물이 여러 개로 쪼개져 보이면 `cluster_tolerance_m`을 키우고, 바닥/노이즈가
 군집으로 잡히면 `cluster_min_points`를 키우거나 `cluster_z_min_m`을 높인다.
 
+바닥을 맞힌 단일 LiDAR ring이 원호 또는 동심원처럼 보이는 점은 기본
+`vertical_support_enabled:=true` 필터에서 제거한다. 같은 수평 위치 반경 `0.65 m`
+안에 다른 ring의 점이 있으면서 높이 차이가 `0.05 m` 이상이어야 실제 장애물
+후보로 유지된다. 이 필터는 nearest distance, clustering 및 RViz 표시 점군에 모두
+적용된다.
+
+```bash
+roslaunch path_planning morai_lidar_rviz.launch \
+  vertical_support_radius_m:=0.65 \
+  vertical_support_min_height_m:=0.05
+```
+
+먼 장애물이 너무 많이 사라지면 `vertical_support_radius_m`을 `0.8` 정도로
+늘린다. 원본 점군은 유지하고 장애물 판정에서만 원호를 제외하려면
+`vertical_support_filter_cloud:=false`를 사용한다.
+
 LiDAR 회전 속도는 30 Hz를 그대로 권장한다. 20 Hz로 낮추면 한 회전에 걸리는 시간이
 길어져 동일한 차량 속도와 yaw rate에서 보상해야 할 왜곡량이 오히려 커진다. node는
 azimuth가 360도에서 0도로 넘어가는 시점에 한 회전을 완성하고, 각 UDP 패킷 수신

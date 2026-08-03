@@ -41,6 +41,12 @@
   <arg name="min_distance_m" default="0.2" />
   <arg name="ground_remove_enabled" default="true" />
   <arg name="ground_z_threshold_m" default="-1.5" />
+  <!-- Reject single-ring circular ground arcs unless another vertical ring
+       supports the return at nearly the same horizontal location. -->
+  <arg name="vertical_support_enabled" default="true" />
+  <arg name="vertical_support_filter_cloud" default="true" />
+  <arg name="vertical_support_radius_m" default="0.65" />
+  <arg name="vertical_support_min_height_m" default="0.05" />
 
   <!-- Nearest distance is computed from this obstacle-candidate area, not from all ground points. -->
   <arg name="fast_nearest_enabled" default="true" />
@@ -106,6 +112,10 @@
     <param name="min_distance_m" value="$(arg min_distance_m)" />
     <param name="ground_remove_enabled" value="$(arg ground_remove_enabled)" />
     <param name="ground_z_threshold_m" value="$(arg ground_z_threshold_m)" />
+    <param name="vertical_support_enabled" value="$(arg vertical_support_enabled)" />
+    <param name="vertical_support_filter_cloud" value="$(arg vertical_support_filter_cloud)" />
+    <param name="vertical_support_radius_m" value="$(arg vertical_support_radius_m)" />
+    <param name="vertical_support_min_height_m" value="$(arg vertical_support_min_height_m)" />
     <param name="fast_nearest_enabled" value="$(arg fast_nearest_enabled)" />
     <param name="nearest_publish_interval_s" value="$(arg nearest_publish_interval_s)" />
     <param name="nearest_hold_s" value="$(arg nearest_hold_s)" />
