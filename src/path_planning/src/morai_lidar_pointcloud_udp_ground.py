@@ -25,11 +25,7 @@ from visualization_msgs.msg import Marker, MarkerArray
 
 from path_planning.lidar_direct_localization import DirectGpsImuPoseEstimator
 from path_planning.lidar_deskew import deskew_scan, pose_at
-from path_planning.lidar_obstacle_filter import (
-    compact_single_ring_groups,
-    confirm_cluster_centroids,
-    filter_vertical_support,
-)
+from path_planning.lidar_obstacle_filter import filter_vertical_support
 
 try:
     from path_planning.morai_competition_config import BIND_IP
@@ -362,54 +358,6 @@ def _cluster_candidate_points(points, params):
     return clusters[: params["cluster_max_clusters"]]
 
 
-def _low_object_candidate_clusters(raw_points, strict_points, params):
-    if not params["low_object_enabled"]:
-        return []
-    strict_point_set = set(strict_points)
-    candidates = [
-        point
-        for point in raw_points
-        if point not in strict_point_set
-        and params["cluster_x_min_m"] <= point[POINT_X] <= params["cluster_x_max_m"]
-        and abs(point[POINT_Y]) <= params["cluster_y_abs_m"]
-        and params["low_object_z_min_m"]
-        <= point[POINT_Z]
-        <= params["low_object_z_max_m"]
-    ]
-    groups = compact_single_ring_groups(
-        candidates,
-        params["low_object_min_points"],
-        params["low_object_max_width_m"],
-    )
-    clusters = []
-    for group in groups:
-        cluster = _summarize_cluster(group)
-        cluster["kind"] = "low_object"
-        clusters.append(cluster)
-    clusters.sort(key=lambda cluster: cluster["nearest_distance_m"])
-    return clusters[: params["cluster_max_clusters"]]
-
-
-def _merge_distinct_clusters(primary, secondary, minimum_separation_m):
-    merged = list(primary)
-    minimum_separation_sq = float(minimum_separation_m) ** 2
-    for candidate in secondary:
-        duplicate = any(
-            (
-                candidate["centroid_x_m"] - cluster["centroid_x_m"]
-            ) ** 2
-            + (
-                candidate["centroid_y_m"] - cluster["centroid_y_m"]
-            ) ** 2
-            <= minimum_separation_sq
-            for cluster in merged
-        )
-        if not duplicate:
-            merged.append(candidate)
-    merged.sort(key=lambda cluster: cluster["nearest_distance_m"])
-    return merged
-
-
 def _summarize_cluster(points):
     xs = [point[POINT_X] for point in points]
     ys = [point[POINT_Y] for point in points]
@@ -422,7 +370,6 @@ def _summarize_cluster(points):
     nearest_distance = min(point[POINT_DISTANCE] for point in points)
     return {
         "id": 0,
-        "kind": "vertical",
         "point_count": len(points),
         "centroid_x_m": centroid_x,
         "centroid_y_m": centroid_y,
@@ -453,7 +400,6 @@ def _clusters_to_json(clusters):
     for cluster in clusters:
         ordered = {
             "id": cluster["id"],
-            "kind": cluster.get("kind", "vertical"),
             "point_count": cluster["point_count"],
             "distance_m": round(cluster["centroid_distance_m"], 3),
             "nearest_distance_m": round(cluster["nearest_distance_m"], 3),
@@ -498,7 +444,7 @@ def _make_obstacle_markers(clusters, frame_id, max_clusters, lifetime_s):
         marker.scale.y = max(0.2, cluster["max_y_m"] - cluster["min_y_m"])
         marker.scale.z = max(0.2, cluster["max_z_m"] - cluster["min_z_m"])
         marker.color.r = 1.0
-        marker.color.g = 0.75 if cluster.get("kind") == "low_object" else 0.25
+        marker.color.g = 0.25
         marker.color.b = 0.05
         marker.color.a = 0.45
         marker.lifetime = rospy.Duration(lifetime_s)
@@ -520,9 +466,8 @@ def _make_obstacle_markers(clusters, frame_id, max_clusters, lifetime_s):
         text.color.g = 1.0
         text.color.b = 1.0
         text.color.a = 1.0
-        text.text = "#{id} {kind} {distance:.1f}m {angle:+.0f}deg n={count}".format(
+        text.text = "#{id} {distance:.1f}m {angle:+.0f}deg n={count}".format(
             id=cluster["id"],
-            kind="LOW" if cluster.get("kind") == "low_object" else "OBS",
             distance=cluster["centroid_distance_m"],
             angle=cluster["bearing_deg"],
             count=cluster["point_count"],
@@ -612,19 +557,9 @@ def main():
         "vertical_support_min_height_m": float(
             _param("vertical_support_min_height_m", 0.05)
         ),
-        "low_object_enabled": _bool_param("low_object_enabled", True),
-        "low_object_min_points": int(_param("low_object_min_points", 2)),
-        "low_object_max_width_m": float(
-            _param("low_object_max_width_m", 1.2)
-        ),
-        "low_object_z_min_m": float(_param("low_object_z_min_m", -1.4)),
-        "low_object_z_max_m": float(_param("low_object_z_max_m", 0.3)),
-        "low_object_confirmation_distance_m": float(
-            _param("low_object_confirmation_distance_m", 1.0)
-        ),
 
         "min_distance_m": float(_param("min_distance_m", 0.2)),
-        "fast_nearest_enabled": _bool_param("fast_nearest_enabled", False),
+        "fast_nearest_enabled": _bool_param("fast_nearest_enabled", True),
         "nearest_publish_interval_s": float(
             _param("nearest_publish_interval_s", 0.05)
         ),
@@ -696,14 +631,6 @@ def main():
         raise ValueError("vertical_support_radius_m must be positive")
     if params["vertical_support_min_height_m"] < 0.0:
         raise ValueError("vertical_support_min_height_m cannot be negative")
-    if params["low_object_min_points"] < 2:
-        raise ValueError("low_object_min_points must be at least 2")
-    if params["low_object_max_width_m"] <= 0.0:
-        raise ValueError("low_object_max_width_m must be positive")
-    if params["low_object_z_max_m"] <= params["low_object_z_min_m"]:
-        raise ValueError("low object z range must satisfy min < max")
-    if params["low_object_confirmation_distance_m"] <= 0.0:
-        raise ValueError("low_object_confirmation_distance_m must be positive")
     if params["nearest_publish_interval_s"] <= 0.0:
         raise ValueError("nearest_publish_interval_s must be positive")
     if params["nearest_hold_s"] < 0.0:
@@ -861,7 +788,6 @@ def main():
         last_nearest_publish_at = 0.0
         last_detected_clusters = []
         last_cluster_seen_at = None
-        previous_low_object_candidates = []
     
         while not rospy.is_shutdown():
     
@@ -987,7 +913,6 @@ def main():
                         pose_input_description,
                     )
 
-                raw_scan_points = scan_points
                 unfiltered_scan_point_count = len(scan_points)
                 if (
                     params["vertical_support_enabled"]
@@ -1000,17 +925,6 @@ def main():
                 rejected_arc_point_count = (
                     unfiltered_scan_point_count - len(scan_points)
                 )
-                current_low_object_candidates = _low_object_candidate_clusters(
-                    raw_scan_points,
-                    scan_points,
-                    params,
-                )
-                confirmed_low_object_clusters = confirm_cluster_centroids(
-                    current_low_object_candidates,
-                    previous_low_object_candidates,
-                    params["low_object_confirmation_distance_m"],
-                )
-                previous_low_object_candidates = current_low_object_candidates
 
                 rolling_clouds.append(scan_points)
                 display_rolling_clouds.append(
@@ -1051,24 +965,26 @@ def main():
                     )
                 )
 
-                nearest_distance = _nearest_distance(
-                    accumulated_points,
-                    params,
-                )
-
-                if params["cluster_enabled"]:
-                    strict_clusters = _cluster_candidate_points(
+                if accumulated_points:
+                    nearest_distance = _nearest_distance(
                         accumulated_points,
                         params,
                     )
+
+                    if (
+                        not params["fast_nearest_enabled"]
+                        and nearest_distance is not None
+                    ):
+                        nearest_distance_publisher.publish(
+                            Float32(data=nearest_distance)
+                        )
+
+                if params["cluster_enabled"]:
                     detected_clusters = _format_clusters(
-                        _merge_distinct_clusters(
-                            strict_clusters,
-                            confirmed_low_object_clusters,
-                            params["cluster_tolerance_m"],
-                        )[
-                            : params["cluster_max_clusters"]
-                        ]
+                        _cluster_candidate_points(
+                            accumulated_points,
+                            params,
+                        )
                     )
 
                     if detected_clusters:
@@ -1102,32 +1018,15 @@ def main():
                         )
                     )
 
-                if clusters:
-                    cluster_nearest_distance = min(
-                        cluster["nearest_distance_m"] for cluster in clusters
-                    )
-                    nearest_distance = (
-                        cluster_nearest_distance
-                        if nearest_distance is None
-                        else min(nearest_distance, cluster_nearest_distance)
-                    )
-                if not params["fast_nearest_enabled"]:
-                    nearest_distance_publisher.publish(
-                        Float32(
-                            data=(
-                                nearest_distance
-                                if nearest_distance is not None
-                                else float("nan")
-                            )
-                        )
-                    )
-
-                nearest_text = nearest_distance
+                nearest_text = _nearest_distance(
+                    accumulated_points,
+                    params,
+                )
     
                 rospy.loginfo_throttle(
                     1.0,
                     "LiDAR cloud: packets=%d bad=%d pose=%d pose_bad=%d deskew=%s "
-                    "arc_removed=%d low=%d/%d live_points=%d display_points=%d "
+                    "arc_removed=%d live_points=%d display_points=%d "
                     "nearest=%s clusters=%d",
                     packets,
                     bad_packets,
@@ -1141,8 +1040,6 @@ def main():
                         else "off"
                     ),
                     rejected_arc_point_count,
-                    len(confirmed_low_object_clusters),
-                    len(current_low_object_candidates),
                     len(accumulated_points),
                     len(display_points),
                     "n/a"

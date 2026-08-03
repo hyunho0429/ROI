@@ -346,25 +346,6 @@ roslaunch path_planning morai_lidar_rviz.launch \
 늘린다. 원본 점군은 유지하고 장애물 판정에서만 원호를 제외하려면
 `vertical_support_filter_cloud:=false`를 사용한다.
 
-높이가 낮아 한 개 ring에만 걸리는 물체는 Strict 점군에 다시 넣지 않고 별도
-low-object 검출 경로에서 처리한다. 폭 `1.2 m` 이하의 짧은 return이 연속된 두
-scan에서 `1.0 m` 이내 위치에 반복될 때만 장애물로 확정한다. RViz 라벨에는 `LOW`,
-일반 수직 장애물에는 `OBS`가 표시된다. 긴 바닥 원호는 compact 폭 조건을 만족하지
-않으므로 제외된다.
-
-```bash
-roslaunch path_planning morai_lidar_rviz.launch \
-  low_object_enabled:=true \
-  low_object_min_points:=2 \
-  low_object_max_width_m:=1.2 \
-  low_object_z_min_m:=-1.4 \
-  low_object_z_max_m:=0.3 \
-  low_object_confirmation_distance_m:=1.0
-```
-
-거리 출력은 확정된 low-object cluster도 포함할 수 있도록 완성 scan 기준 30 Hz로
-계산하며, 기본 `fast_nearest_enabled`는 `false`이다.
-
 LiDAR 회전 속도는 30 Hz를 그대로 권장한다. 20 Hz로 낮추면 한 회전에 걸리는 시간이
 길어져 동일한 차량 속도와 yaw rate에서 보상해야 할 왜곡량이 오히려 커진다. node는
 azimuth가 360도에서 0도로 넘어가는 시점에 한 회전을 완성하고, 각 UDP 패킷 수신
