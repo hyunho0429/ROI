@@ -29,6 +29,8 @@
   <arg name="z_min_m" default="-2.5" />
   <arg name="z_max_m" default="3.0" />
   <arg name="min_distance_m" default="0.2" />
+  <arg name="ground_remove_enabled" default="true" />
+  <arg name="ground_z_threshold_m" default="-1.5" />
 
   <!-- Nearest distance is computed from this obstacle-candidate area, not from all ground points. -->
   <arg name="nearest_x_min_m" default="1.0" />
@@ -50,8 +52,8 @@
   <arg name="cluster_z_max_m" default="2.5" />
 
   <node pkg="path_planning"
-        type="morai_lidar_pointcloud_udp.py"
-        name="morai_lidar_pointcloud_udp"
+        type="morai_lidar_pointcloud_udp_ground.py"
+        name="morai_lidar_pointcloud_udp_ground"
         output="screen">
     <param name="bind_ip" value="$(arg bind_ip)" />
     <param name="host_port" value="$(arg host_port)" />
@@ -77,6 +79,8 @@
     <param name="z_min_m" value="$(arg z_min_m)" />
     <param name="z_max_m" value="$(arg z_max_m)" />
     <param name="min_distance_m" value="$(arg min_distance_m)" />
+    <param name="ground_remove_enabled" value="$(arg ground_remove_enabled)" />
+    <param name="ground_z_threshold_m" value="$(arg ground_z_threshold_m)" />
     <param name="nearest_x_min_m" value="$(arg nearest_x_min_m)" />
     <param name="nearest_x_max_m" value="$(arg nearest_x_max_m)" />
     <param name="nearest_y_abs_m" value="$(arg nearest_y_abs_m)" />
