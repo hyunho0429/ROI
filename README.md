@@ -352,21 +352,6 @@ compact small-object cluster로 인정한다. 거리값은 원호 판별이 끝�
 유지하고 장애물 판정에서만 원호를 제외하려면
 `vertical_support_filter_cloud:=false`를 사용한다.
 
-원호 필터는 다음 두 실행 버전으로 분리되어 있다.
-
-```bash
-# 현재 권장 hybrid 버전: 긴 원호만 제거하고 작은 단일-ring 물체는 유지
-roslaunch path_planning morai_lidar_rviz.launch
-
-# strict 버전: 다른 수직 ring 지지가 없는 모든 점을 제거
-roslaunch path_planning morai_lidar_rviz_strict.launch
-```
-
-Hybrid 실행 코드는 `morai_lidar_pointcloud_udp_ground.py`, strict 실행 코드는
-`morai_lidar_pointcloud_udp_ground_strict.py`이다. UDP 수신, GPS/IMU deskew 및
-PointCloud 생성 구현은 공통 코드를 사용하고 ring 필터와 작은 물체 판정 기준만
-분리되어 있다.
-
 LiDAR 회전 속도는 30 Hz를 그대로 권장한다. 20 Hz로 낮추면 한 회전에 걸리는 시간이
 길어져 동일한 차량 속도와 yaw rate에서 보상해야 할 왜곡량이 오히려 커진다. node는
 azimuth가 360도에서 0도로 넘어가는 시점에 한 회전을 완성하고, 각 UDP 패킷 수신

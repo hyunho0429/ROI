@@ -1,6 +1,5 @@
 <launch>
   <arg name="rviz" default="true" />
-  <arg name="lidar_node_type" default="morai_lidar_pointcloud_udp_ground.py" />
 
   <arg name="bind_ip" default="0.0.0.0" />
   <arg name="host_port" default="2000" />
@@ -45,7 +44,6 @@
   <!-- Reject single-ring circular ground arcs unless another vertical ring
        supports the return at nearly the same horizontal location. -->
   <arg name="vertical_support_enabled" default="true" />
-  <arg name="ring_filter_mode" default="hybrid" />
   <arg name="vertical_support_filter_cloud" default="true" />
   <arg name="vertical_support_radius_m" default="0.65" />
   <arg name="vertical_support_min_height_m" default="0.05" />
@@ -83,7 +81,7 @@
   <arg name="cluster_z_max_m" default="2.5" />
 
   <node pkg="path_planning"
-        type="$(arg lidar_node_type)"
+        type="morai_lidar_pointcloud_udp_ground.py"
         name="morai_lidar_pointcloud_udp_ground"
         output="screen">
     <param name="bind_ip" value="$(arg bind_ip)" />
@@ -121,7 +119,6 @@
     <param name="ground_remove_enabled" value="$(arg ground_remove_enabled)" />
     <param name="ground_z_threshold_m" value="$(arg ground_z_threshold_m)" />
     <param name="vertical_support_enabled" value="$(arg vertical_support_enabled)" />
-    <param name="ring_filter_mode" value="$(arg ring_filter_mode)" />
     <param name="vertical_support_filter_cloud" value="$(arg vertical_support_filter_cloud)" />
     <param name="vertical_support_radius_m" value="$(arg vertical_support_radius_m)" />
     <param name="vertical_support_min_height_m" value="$(arg vertical_support_min_height_m)" />
