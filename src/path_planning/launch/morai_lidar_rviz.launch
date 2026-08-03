@@ -27,10 +27,10 @@
   <arg name="pose_buffer_s" default="1.0" />
   <arg name="pose_extrapolation_limit_s" default="0.12" />
 
-  <!-- Near-360 scan by default, with only the ego rear sector hidden. -->
+  <!-- Full scan is required to verify a following vehicle in an adjacent lane. -->
   <arg name="fov_left_deg" default="180.0" />
   <arg name="fov_right_deg" default="180.0" />
-  <arg name="rear_blind_deg" default="60.0" />
+  <arg name="rear_blind_deg" default="0.0" />
   <arg name="lidar_yaw_offset_deg" default="0.0" />
 
   <arg name="x_min_m" default="-40.0" />
@@ -73,6 +73,19 @@
   <arg name="cluster_y_abs_m" default="5.0" />
   <arg name="cluster_z_min_m" default="-1.4" />
   <arg name="cluster_z_max_m" default="2.5" />
+
+  <!-- Static adjacent-lane gap precheck for the 2023 Hyundai Ioniq 5.
+       This is not a substitute for relative-speed/TTC validation. -->
+  <arg name="cut_in_gap_enabled" default="true" />
+  <arg name="ego_vehicle_length_m" default="4.635" />
+  <arg name="ego_vehicle_width_m" default="1.892" />
+  <arg name="adjacent_lane_width_m" default="3.5" />
+  <arg name="cut_in_lateral_allowance_m" default="0.5" />
+  <arg name="cut_in_front_clearance_m" default="15.0" />
+  <arg name="cut_in_rear_clearance_m" default="15.0" />
+  <arg name="cut_in_detection_range_m" default="40.0" />
+  <arg name="cut_in_confirmation_scans" default="3" />
+  <arg name="cut_in_max_clusters" default="24" />
 
   <node pkg="path_planning"
         type="morai_lidar_pointcloud_udp_ground.py"
@@ -138,6 +151,16 @@
     <param name="cluster_y_abs_m" value="$(arg cluster_y_abs_m)" />
     <param name="cluster_z_min_m" value="$(arg cluster_z_min_m)" />
     <param name="cluster_z_max_m" value="$(arg cluster_z_max_m)" />
+    <param name="cut_in_gap_enabled" value="$(arg cut_in_gap_enabled)" />
+    <param name="ego_vehicle_length_m" value="$(arg ego_vehicle_length_m)" />
+    <param name="ego_vehicle_width_m" value="$(arg ego_vehicle_width_m)" />
+    <param name="adjacent_lane_width_m" value="$(arg adjacent_lane_width_m)" />
+    <param name="cut_in_lateral_allowance_m" value="$(arg cut_in_lateral_allowance_m)" />
+    <param name="cut_in_front_clearance_m" value="$(arg cut_in_front_clearance_m)" />
+    <param name="cut_in_rear_clearance_m" value="$(arg cut_in_rear_clearance_m)" />
+    <param name="cut_in_detection_range_m" value="$(arg cut_in_detection_range_m)" />
+    <param name="cut_in_confirmation_scans" value="$(arg cut_in_confirmation_scans)" />
+    <param name="cut_in_max_clusters" value="$(arg cut_in_max_clusters)" />
   </node>
 
   <node if="$(arg rviz)"

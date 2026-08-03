@@ -346,6 +346,36 @@ roslaunch path_planning morai_lidar_rviz.launch \
 늘린다. 원본 점군은 유지하고 장애물 판정에서만 원호를 제외하려면
 `vertical_support_filter_cloud:=false`를 사용한다.
 
+### 인접 차선 끼어들기 공간 확인
+
+2023 Hyundai Ioniq 5의 길이 `4.635 m`, 폭 `1.892 m`를 기준으로 좌우 인접
+차선에서 현재 ego 위치의 앞차와 뒤차를 별도로 찾는다. 앞차의 후면과 뒤차의
+전면 사이 빈 공간이 차체 길이와 앞뒤 여유거리의 합 이상이고, 현재 ego 위치에서
+앞뒤 여유거리를 모두 만족할 때만 공간 후보로 판정한다. 기본 앞뒤 여유거리는 각각
+`15 m`이므로 필요한 전체 빈 공간은 `34.635 m`이다.
+
+후방 차량을 확인하지 못한 상태를 빈 공간으로 오인하지 않도록 앞차와 뒤차가 모두
+검출되어야 하며, `3` scan 연속 조건을 만족해야 다음 로그가 출력된다.
+
+```text
+끼어들기 공간 확보(정적 LiDAR 기준): LEFT free_gap=... required=34.63m ...
+```
+
+```bash
+roslaunch path_planning morai_lidar_rviz.launch \
+  cut_in_gap_enabled:=true \
+  adjacent_lane_width_m:=3.5 \
+  cut_in_front_clearance_m:=15.0 \
+  cut_in_rear_clearance_m:=15.0 \
+  cut_in_confirmation_scans:=3 \
+  rear_blind_deg:=0
+```
+
+이 판정은 LiDAR로 확인한 **정적 공간 후보**이다. 실제 고속 차선 변경 허가는
+앞뒤 차량의 상대속도, TTC, 차선 곡률과 차선 변경 궤적을 추가로 검사해야 한다.
+최소 회전반경 `5.87 m`, 최대 조향각 `40 deg`, 휠베이스 `3.0 m`는 이 후속
+궤적 생성 단계에서 사용하며 정적 빈 공간 계산에는 직접 사용하지 않는다.
+
 LiDAR 회전 속도는 30 Hz를 그대로 권장한다. 20 Hz로 낮추면 한 회전에 걸리는 시간이
 길어져 동일한 차량 속도와 yaw rate에서 보상해야 할 왜곡량이 오히려 커진다. node는
 azimuth가 360도에서 0도로 넘어가는 시점에 한 회전을 완성하고, 각 UDP 패킷 수신

@@ -24,6 +24,10 @@ from std_msgs.msg import Float32, Header, String
 from visualization_msgs.msg import Marker, MarkerArray
 
 from path_planning.lidar_direct_localization import DirectGpsImuPoseEstimator
+from path_planning.lidar_cut_in_gap import (
+    GapAvailabilityTracker,
+    assess_adjacent_lane_gaps,
+)
 from path_planning.lidar_deskew import deskew_scan, pose_at
 from path_planning.lidar_obstacle_filter import filter_vertical_support
 
@@ -358,6 +362,31 @@ def _cluster_candidate_points(points, params):
     return clusters[: params["cluster_max_clusters"]]
 
 
+def _cut_in_candidate_clusters(points, params):
+    cut_in_params = dict(params)
+    detection_range = params["cut_in_detection_range_m"]
+    lane_width = params["adjacent_lane_width_m"]
+    lane_tolerance = (
+        0.5
+        * (lane_width - params["ego_vehicle_width_m"])
+        + params["cut_in_lateral_allowance_m"]
+    )
+    adjacent_lane_points = [
+        point
+        for point in points
+        if min(
+            abs(point[POINT_Y] - lane_width),
+            abs(point[POINT_Y] + lane_width),
+        )
+        <= lane_tolerance
+    ]
+    cut_in_params["cluster_x_min_m"] = -detection_range
+    cut_in_params["cluster_x_max_m"] = detection_range
+    cut_in_params["cluster_y_abs_m"] = lane_width + lane_tolerance
+    cut_in_params["cluster_max_clusters"] = params["cut_in_max_clusters"]
+    return _cluster_candidate_points(adjacent_lane_points, cut_in_params)
+
+
 def _summarize_cluster(points):
     xs = [point[POINT_X] for point in points]
     ys = [point[POINT_Y] for point in points]
@@ -532,7 +561,7 @@ def main():
         "lidar_yaw_offset_deg": float(_param("lidar_yaw_offset_deg", 0.0)),
         "fov_left_deg": float(_param("fov_left_deg", 180.0)),
         "fov_right_deg": float(_param("fov_right_deg", 180.0)),
-        "rear_blind_deg": float(_param("rear_blind_deg", 60.0)),
+        "rear_blind_deg": float(_param("rear_blind_deg", 0.0)),
         "x_min_m": float(_param("x_min_m", -40.0)),
         "x_max_m": float(_param("x_max_m", 40.0)),
         "y_abs_m": float(_param("y_abs_m", 40.0)),
@@ -583,6 +612,32 @@ def main():
         "cluster_y_abs_m": float(_param("cluster_y_abs_m", 5.0)),
         "cluster_z_min_m": float(_param("cluster_z_min_m", -1.4)),
         "cluster_z_max_m": float(_param("cluster_z_max_m", 2.5)),
+        "cut_in_gap_enabled": _bool_param("cut_in_gap_enabled", True),
+        "ego_vehicle_length_m": float(
+            _param("ego_vehicle_length_m", 4.635)
+        ),
+        "ego_vehicle_width_m": float(
+            _param("ego_vehicle_width_m", 1.892)
+        ),
+        "adjacent_lane_width_m": float(
+            _param("adjacent_lane_width_m", 3.5)
+        ),
+        "cut_in_lateral_allowance_m": float(
+            _param("cut_in_lateral_allowance_m", 0.5)
+        ),
+        "cut_in_front_clearance_m": float(
+            _param("cut_in_front_clearance_m", 15.0)
+        ),
+        "cut_in_rear_clearance_m": float(
+            _param("cut_in_rear_clearance_m", 15.0)
+        ),
+        "cut_in_detection_range_m": float(
+            _param("cut_in_detection_range_m", 40.0)
+        ),
+        "cut_in_confirmation_scans": int(
+            _param("cut_in_confirmation_scans", 3)
+        ),
+        "cut_in_max_clusters": int(_param("cut_in_max_clusters", 24)),
     }
 
     if params["packets_per_cloud"] < 1:
@@ -663,6 +718,26 @@ def main():
         raise ValueError("cluster_y_abs_m cannot be negative")
     if params["cluster_z_max_m"] <= params["cluster_z_min_m"]:
         raise ValueError("cluster z range must satisfy min < max")
+    if params["ego_vehicle_length_m"] <= 0.0:
+        raise ValueError("ego_vehicle_length_m must be positive")
+    if params["ego_vehicle_width_m"] <= 0.0:
+        raise ValueError("ego_vehicle_width_m must be positive")
+    if params["adjacent_lane_width_m"] <= params["ego_vehicle_width_m"]:
+        raise ValueError(
+            "adjacent_lane_width_m must be greater than ego_vehicle_width_m"
+        )
+    if params["cut_in_lateral_allowance_m"] < 0.0:
+        raise ValueError("cut_in_lateral_allowance_m cannot be negative")
+    if params["cut_in_front_clearance_m"] < 0.0:
+        raise ValueError("cut_in_front_clearance_m cannot be negative")
+    if params["cut_in_rear_clearance_m"] < 0.0:
+        raise ValueError("cut_in_rear_clearance_m cannot be negative")
+    if params["cut_in_detection_range_m"] <= 0.0:
+        raise ValueError("cut_in_detection_range_m must be positive")
+    if params["cut_in_confirmation_scans"] < 1:
+        raise ValueError("cut_in_confirmation_scans must be at least 1")
+    if params["cut_in_max_clusters"] < 2:
+        raise ValueError("cut_in_max_clusters must be at least 2")
 
     if params["rolling_clouds"] > 1:
         rospy.logwarn(
@@ -670,6 +745,12 @@ def main():
             "use 1 while driving because deskew compensates motion only within "
             "each rotation",
             params["rolling_clouds"],
+        )
+    if params["cut_in_gap_enabled"] and params["rear_blind_deg"] > 0.0:
+        rospy.logwarn(
+            "cut-in gap detection requires rear visibility; rear_blind_deg=%.1f "
+            "can hide following vehicles and prevent an available result",
+            params["rear_blind_deg"],
         )
 
     publisher = rospy.Publisher(params["topic"], PointCloud2, queue_size=1)
@@ -771,9 +852,29 @@ def main():
         "on" if params["deskew_enabled"] else "off",
         pose_input_description,
     )
+    if params["cut_in_gap_enabled"]:
+        rospy.loginfo(
+            "Static cut-in gap check: ego=%.3fx%.3fm lane_width=%.2fm, "
+            "front_clearance=%.1fm rear_clearance=%.1fm required_gap=%.3fm, "
+            "confirmation=%d scans",
+            params["ego_vehicle_length_m"],
+            params["ego_vehicle_width_m"],
+            params["adjacent_lane_width_m"],
+            params["cut_in_front_clearance_m"],
+            params["cut_in_rear_clearance_m"],
+            (
+                params["ego_vehicle_length_m"]
+                + params["cut_in_front_clearance_m"]
+                + params["cut_in_rear_clearance_m"]
+            ),
+            params["cut_in_confirmation_scans"],
+        )
 
     rolling_clouds = deque(maxlen=params["rolling_clouds"])
     display_rolling_clouds = deque(maxlen=params["display_rolling_clouds"])
+    cut_in_gap_tracker = GapAvailabilityTracker(
+        params["cut_in_confirmation_scans"]
+    )
 
     try:
         packet_batches = []
@@ -1017,6 +1118,45 @@ def main():
                             params["marker_lifetime_s"],
                         )
                     )
+
+                if params["cut_in_gap_enabled"]:
+                    cut_in_clusters = _cut_in_candidate_clusters(
+                        accumulated_points,
+                        params,
+                    )
+                    cut_in_assessments = assess_adjacent_lane_gaps(
+                        cut_in_clusters,
+                        params["ego_vehicle_length_m"],
+                        params["ego_vehicle_width_m"],
+                        params["adjacent_lane_width_m"],
+                        params["cut_in_lateral_allowance_m"],
+                        params["cut_in_front_clearance_m"],
+                        params["cut_in_rear_clearance_m"],
+                    )
+                    (
+                        cut_in_assessments,
+                        secured_sides,
+                        lost_sides,
+                    ) = cut_in_gap_tracker.update(cut_in_assessments)
+                    for side in secured_sides:
+                        assessment = cut_in_assessments[side]
+                        rospy.loginfo(
+                            "끼어들기 공간 확보(정적 LiDAR 기준): %s "
+                            "free_gap=%.2fm required=%.2fm "
+                            "front_clearance=%.2fm rear_clearance=%.2fm",
+                            side.upper(),
+                            assessment["free_gap_m"],
+                            assessment["required_gap_m"],
+                            assessment["front_clearance_m"],
+                            assessment["rear_clearance_m"],
+                        )
+                    for side in lost_sides:
+                        assessment = cut_in_assessments[side]
+                        rospy.logwarn(
+                            "끼어들기 공간 해제(정적 LiDAR 기준): %s reason=%s",
+                            side.upper(),
+                            assessment["reason"],
+                        )
 
                 nearest_text = _nearest_distance(
                     accumulated_points,
