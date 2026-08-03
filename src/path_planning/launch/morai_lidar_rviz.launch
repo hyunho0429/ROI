@@ -47,9 +47,13 @@
   <arg name="vertical_support_filter_cloud" default="true" />
   <arg name="vertical_support_radius_m" default="0.65" />
   <arg name="vertical_support_min_height_m" default="0.05" />
+  <arg name="scan_arc_min_points" default="8" />
+  <arg name="scan_arc_min_angle_deg" default="5.0" />
+  <arg name="scan_arc_min_length_m" default="2.0" />
+  <arg name="scan_arc_max_radial_thickness_m" default="0.35" />
 
   <!-- Nearest distance is computed from this obstacle-candidate area, not from all ground points. -->
-  <arg name="fast_nearest_enabled" default="true" />
+  <arg name="fast_nearest_enabled" default="false" />
   <arg name="nearest_publish_interval_s" default="0.05" />
   <arg name="nearest_hold_s" default="0.20" />
   <arg name="nearest_min_points" default="2" />
@@ -62,8 +66,10 @@
   <!-- Euclidean/grid clustering parameters for obstacle candidates. -->
   <arg name="cluster_enabled" default="true" />
   <arg name="cluster_tolerance_m" default="0.8" />
-  <arg name="cluster_min_points" default="3" />
+  <arg name="cluster_min_points" default="2" />
   <arg name="cluster_min_height_m" default="0.15" />
+  <arg name="cluster_small_object_min_points" default="2" />
+  <arg name="cluster_small_object_max_width_m" default="1.5" />
   <arg name="cluster_hold_s" default="0.15" />
   <arg name="marker_lifetime_s" default="0.20" />
   <arg name="cluster_max_clusters" default="8" />
@@ -116,6 +122,10 @@
     <param name="vertical_support_filter_cloud" value="$(arg vertical_support_filter_cloud)" />
     <param name="vertical_support_radius_m" value="$(arg vertical_support_radius_m)" />
     <param name="vertical_support_min_height_m" value="$(arg vertical_support_min_height_m)" />
+    <param name="scan_arc_min_points" value="$(arg scan_arc_min_points)" />
+    <param name="scan_arc_min_angle_deg" value="$(arg scan_arc_min_angle_deg)" />
+    <param name="scan_arc_min_length_m" value="$(arg scan_arc_min_length_m)" />
+    <param name="scan_arc_max_radial_thickness_m" value="$(arg scan_arc_max_radial_thickness_m)" />
     <param name="fast_nearest_enabled" value="$(arg fast_nearest_enabled)" />
     <param name="nearest_publish_interval_s" value="$(arg nearest_publish_interval_s)" />
     <param name="nearest_hold_s" value="$(arg nearest_hold_s)" />
@@ -129,6 +139,8 @@
     <param name="cluster_tolerance_m" value="$(arg cluster_tolerance_m)" />
     <param name="cluster_min_points" value="$(arg cluster_min_points)" />
     <param name="cluster_min_height_m" value="$(arg cluster_min_height_m)" />
+    <param name="cluster_small_object_min_points" value="$(arg cluster_small_object_min_points)" />
+    <param name="cluster_small_object_max_width_m" value="$(arg cluster_small_object_max_width_m)" />
     <param name="cluster_hold_s" value="$(arg cluster_hold_s)" />
     <param name="marker_lifetime_s" value="$(arg marker_lifetime_s)" />
     <param name="cluster_max_clusters" value="$(arg cluster_max_clusters)" />
