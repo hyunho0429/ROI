@@ -960,7 +960,7 @@ def main():
         front_half_width_m=params["behavior_front_half_width_m"],
         monitor_ttc_s=params["behavior_monitor_ttc_s"],
         slowdown_ttc_s=params["behavior_slowdown_ttc_s"],
-        avoid_ttc_s=params["behavior_avoid_ttc_s"],
+        
         brake_ttc_s=params["behavior_brake_ttc_s"],
         follow_distance_m=params["behavior_follow_distance_m"],
         emergency_distance_m=params["behavior_emergency_distance_m"],
