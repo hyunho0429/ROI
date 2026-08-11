@@ -32,6 +32,9 @@ catkin_install_python(PROGRAMS
   src/lidar_monitor.py
   src/morai_lidar_pointcloud_udp.py
   src/morai_lidar_pointcloud_udp_ground.py
+  src/morai_lidar_euclidean_clustering.py
+  src/morai_lidar_3d_bounding_box.py
+  src/morai_lidar_kalman_hungarian.py
   src/morai_pure_pursuit_ins_udp.py
   src/morai_pure_pursuit_dead_reckoning_udp.py
   src/morai_stanley_udp.py
