@@ -29,6 +29,8 @@ class PurePursuitNode:
         path_file = rospy.get_param("~path_file")
         self.points = load_mgeo_path(path_file)
         self.target_speed = float(rospy.get_param("~target_speed_mps", 2.0))
+        if self.target_speed < 0.0:
+            raise ValueError("target_speed_mps must be zero or positive")
         self.max_steering = float(
             rospy.get_param("~max_steering_rad", math.radians(40.0))
         )
@@ -63,10 +65,13 @@ class PurePursuitNode:
         self.timer = rospy.Timer(rospy.Duration(1.0 / max(self.rate_hz, 1.0)), self.control_callback)
 
         rospy.logwarn(
-            "Pure Pursuit 제어=%s path=%s points=%d wheelbase=%.3f lookahead_min=%.3f",
+            "Pure Pursuit 제어=%s path=%s points=%d speed=%.2fm/s (%.1fkm/h) "
+            "wheelbase=%.3f lookahead_min=%.3f",
             self.enable_control,
             path_file,
             len(self.points),
+            self.target_speed,
+            self.target_speed * 3.6,
             wheelbase,
             lookahead_min,
         )
