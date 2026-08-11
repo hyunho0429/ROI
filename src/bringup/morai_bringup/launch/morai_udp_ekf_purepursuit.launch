@@ -1,7 +1,7 @@
 <launch>
   <!-- GPS·IMU·EgoStatus UDP + MGeo EKF + Pure Pursuit 실제 통합 런치 -->
   <arg name="workspace_path" default="$(env HOME)/morai_ws" />
-  <arg name="path_file" default="$(arg workspace_path)/data/routes/2026_molit_comp_global_path.txt" />
+  <arg name="path_file" default="$(find morai_bringup)/../../../data/routes/2026_molit_comp_global_path.txt" />
   <arg name="bind_ip" default="0.0.0.0" />
   <arg name="gps_port" default="3001" />
   <arg name="imu_port" default="4001" />
