@@ -83,8 +83,12 @@ class MergeGapNode:
             self._stale_callback,
         )
         rospy.logwarn(
-            "LiDAR merge-gap perception only: input=%s ego=%.3fx%.3fx%.3fm "
-            "lane=%.2fm headway=%.2fs min_ttc=%.2fs confirmation=%d",
+            "\n"
+            "================ MERGE SPACE MONITOR STARTED ================\n"
+            "input=%s | ego=%.3fx%.3fx%.3fm | lane=%.2fm\n"
+            "headway=%.2fs | min_ttc=%.2fs | confirmation=%d scans\n"
+            "AVAILABLE means perception-only clearance, not lane-change control.\n"
+            "===============================================================",
             self.input_topic,
             self.vehicle_length_m,
             self.vehicle_width_m,
@@ -136,20 +140,36 @@ class MergeGapNode:
 
         left_text = format_tracked_merge_gap_status(assessments["left"])
         right_text = format_tracked_merge_gap_status(assessments["right"])
-        rospy.loginfo_throttle(
+        # WARN level is intentional: ROS terminals render this periodic status in
+        # a more visible color than ordinary INFO output.
+        rospy.logwarn_throttle(
             self.log_interval_s,
-            "MERGE_GAP TRACKED | %s | %s",
+            "\n"
+            "===================== MERGE SPACE =====================\n"
+            "LEFT  | %s\n"
+            "RIGHT | %s\n"
+            "=======================================================",
             left_text,
             right_text,
         )
         for side in became_available:
             rospy.logwarn(
-                "MERGE_GAP AVAILABLE: %s",
+                "\n"
+                "#######################################################\n"
+                ">>> MERGE SPACE AVAILABLE: %s <<<\n"
+                "%s\n"
+                "#######################################################",
+                side.upper(),
                 format_tracked_merge_gap_status(assessments[side]),
             )
         for side in became_unavailable:
             rospy.logwarn(
-                "MERGE_GAP LOST: %s",
+                "\n"
+                "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n"
+                ">>> MERGE SPACE LOST/BLOCKED: %s <<<\n"
+                "%s\n"
+                "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!",
+                side.upper(),
                 format_tracked_merge_gap_status(assessments[side]),
             )
 
@@ -169,7 +189,10 @@ class MergeGapNode:
             self.stale_published = True
         rospy.logwarn_throttle(
             2.0,
-            "MERGE_GAP INVALID: tracking input stale for more than %.2fs",
+            "\n"
+            "!!!!!!!!!!!!!!!! MERGE SPACE INVALID !!!!!!!!!!!!!!!!\n"
+            "Tracking input stale for more than %.2fs; do not merge.\n"
+            "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!",
             self.stale_timeout_s,
         )
 

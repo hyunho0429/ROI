@@ -23,8 +23,8 @@ LiDAR UDP 포트는 한 프로세스만 열 수 있으므로 아래 통합 launc
 ```bash
 cd ~/morai_ws/src/ROI
 git fetch origin
-git switch dev/pure_pursuit
-git pull --ff-only origin dev/pure_pursuit
+git switch feat/lidar
+git pull --ff-only origin feat/lidar
 
 cd ~/morai_ws
 source /opt/ros/noetic/setup.bash
@@ -83,6 +83,10 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_tracking.launch \
 
 - 결과: `/morai/lidar/tracking/results`
 - 시각화: Track ID, box, 상대속도 벡터
+- Tracking 실행에는 끼어들기 공간 모니터도 기본 포함된다. 터미널에 매초
+  `MERGE SPACE` 배너가 표시되고 RViz에는 왼쪽·오른쪽 공간 상태가 함께
+  표시된다.
+- 공간 판단 결과: `/morai/lidar/merge_gap/results`
 - Kalman filter: 위치와 속도를 예측·보정한다.
 - Hungarian assignment: 현재 box와 기존 track의 전체 거리 비용이 최소가
   되도록 1:1 대응시킨다.
@@ -103,7 +107,7 @@ minimum_ttc_s:=3.0 confirmation_scans:=3`을 추가해 판단 기준을 조정�
 
 - 결과: `/morai/lidar/merge_gap/results`
 - 시각화: 왼쪽·오른쪽 목표 차선 공간을 빨강/노랑/초록으로 표시
-- 로그: `MERGE_GAP TRACKED`, `MERGE_GAP AVAILABLE`, `MERGE_GAP LOST`
+- 로그: `MERGE SPACE`, `MERGE SPACE AVAILABLE`, `MERGE SPACE LOST/BLOCKED`
 
 기본 차량 크기는 `4.635 × 1.892 × 2.434 m`, 차선 폭은 `3.5 m`다.
 각 목표 차선에서 ego 옆과 겹치는 box가 없어야 하고, 앞·뒤 차량까지의
@@ -130,9 +134,11 @@ rostopic hz /morai/lidar/tracking/results
 로그 예시:
 
 ```text
-MERGE_GAP TRACKED | LEFT=CHECKING(2/3) ... | RIGHT=BLOCKED ...
-MERGE_GAP AVAILABLE: LEFT=AVAILABLE reason=available ...
-MERGE_GAP LOST: LEFT=BLOCKED reason=rear_ttc_short ...
+===================== MERGE SPACE =====================
+LEFT  | LEFT=CHECKING(2/3) ...
+RIGHT | RIGHT=BLOCKED ...
+>>> MERGE SPACE AVAILABLE: LEFT <<<
+>>> MERGE SPACE LOST/BLOCKED: LEFT <<<
 ```
 
 ## 실제 제어 활성화

@@ -55,6 +55,11 @@ Visualization Manager:
       Marker Topic: /morai/lidar/tracking/markers
       Name: Track IDs Boxes and Velocity
       Queue Size: 10
+    - Class: rviz/MarkerArray
+      Enabled: true
+      Marker Topic: /morai/lidar/merge_gap/markers
+      Name: Left Right Merge Gap Status
+      Queue Size: 10
   Enabled: true
   Global Options:
     Background Color: 30; 30; 30

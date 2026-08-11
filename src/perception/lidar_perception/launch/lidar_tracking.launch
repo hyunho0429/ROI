@@ -5,6 +5,15 @@
   <arg name="destination_port" default="2001" />
   <arg name="odometry_topic" default="/localization/odometry" />
   <arg name="min_hits" default="3" />
+  <arg name="merge_gap_enabled" default="true" />
+  <arg name="vehicle_length_m" default="4.635" />
+  <arg name="vehicle_width_m" default="1.892" />
+  <arg name="vehicle_height_m" default="2.434" />
+  <arg name="lane_width_m" default="3.5" />
+  <arg name="longitudinal_margin_m" default="1.0" />
+  <arg name="time_headway_s" default="1.5" />
+  <arg name="minimum_ttc_s" default="3.0" />
+  <arg name="confirmation_scans" default="3" />
   <include file="$(find lidar_perception)/launch/lidar_algorithm_pipeline.launch">
     <arg name="algorithm_type" value="lidar_tracking_node.py" />
     <arg name="algorithm_name" value="lidar_tracking" />
@@ -16,5 +25,18 @@
     <arg name="destination_port" value="$(arg destination_port)" />
     <arg name="odometry_topic" value="$(arg odometry_topic)" />
     <arg name="min_hits" value="$(arg min_hits)" />
+  </include>
+
+  <!-- Tracking is the minimum stage that can evaluate relative speed and TTC. -->
+  <include if="$(arg merge_gap_enabled)"
+           file="$(find lidar_perception)/launch/lidar_merge_gap_monitor.launch">
+    <arg name="vehicle_length_m" value="$(arg vehicle_length_m)" />
+    <arg name="vehicle_width_m" value="$(arg vehicle_width_m)" />
+    <arg name="vehicle_height_m" value="$(arg vehicle_height_m)" />
+    <arg name="lane_width_m" value="$(arg lane_width_m)" />
+    <arg name="longitudinal_margin_m" value="$(arg longitudinal_margin_m)" />
+    <arg name="time_headway_s" value="$(arg time_headway_s)" />
+    <arg name="minimum_ttc_s" value="$(arg minimum_ttc_s)" />
+    <arg name="confirmation_scans" value="$(arg confirmation_scans)" />
   </include>
 </launch>
