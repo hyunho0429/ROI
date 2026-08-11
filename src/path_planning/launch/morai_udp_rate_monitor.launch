@@ -1,0 +1,60 @@
+<launch>
+    <!-- UDP timing diagnostic. Run instead of the driving controller when
+         checking whether MORAI packets arrive in real time. -->
+    <arg name="bind_ip" default="0.0.0.0"/>
+    <arg name="duration" default="0.0"/>
+    <arg name="report_interval" default="1.0"/>
+    <arg name="stale_timeout" default="0.5"/>
+
+    <arg name="gps_port" default="3001"/>
+    <arg name="imu_port" default="4001"/>
+    <!-- Set these two to the MORAI Camera sensor Host/Destination ports.
+         They default to 0 because camera ports are configured per sensor. -->
+    <arg name="camera_host_port" default="0"/>
+    <arg name="camera_destination_port" default="0"/>
+    <arg name="lidar_host_port" default="2000"/>
+    <arg name="lidar_destination_port" default="2001"/>
+    <arg name="competition_status_host_port" default="9080"/>
+    <arg name="competition_status_destination_port" default="9081"/>
+    <arg name="collision_host_port" default="9091"/>
+    <arg name="collision_destination_port" default="9092"/>
+
+    <arg name="send_control" default="false"/>
+    <arg name="control_ip" default="192.168.0.151"/>
+    <arg name="ego_ctrl_cmd_host_port" default="9093"/>
+    <arg name="ego_ctrl_cmd_destination_port" default="9094"/>
+    <arg name="control_rate_hz" default="30.0"/>
+    <arg name="control_protocol" default="25s4"/>
+    <arg name="tx_accel" default="0.0"/>
+    <arg name="tx_brake" default="0.0"/>
+    <arg name="tx_steer" default="0.0"/>
+
+    <node pkg="path_planning"
+          type="morai_udp_rate_monitor.py"
+          name="morai_udp_rate_monitor"
+          output="screen"
+          required="true"
+          args="--bind-ip $(arg bind_ip)
+                --duration $(arg duration)
+                --report-interval $(arg report_interval)
+                --stale-timeout $(arg stale_timeout)
+                --gps-port $(arg gps_port)
+                --imu-port $(arg imu_port)
+                --camera-host-port $(arg camera_host_port)
+                --camera-port $(arg camera_destination_port)
+                --lidar-host-port $(arg lidar_host_port)
+                --lidar-port $(arg lidar_destination_port)
+                --competition-status-host-port $(arg competition_status_host_port)
+                --competition-status-port $(arg competition_status_destination_port)
+                --collision-host-port $(arg collision_host_port)
+                --collision-port $(arg collision_destination_port)
+                --send-control $(arg send_control)
+                --control-ip $(arg control_ip)
+                --control-port $(arg ego_ctrl_cmd_host_port)
+                --control-source-port $(arg ego_ctrl_cmd_destination_port)
+                --control-rate-hz $(arg control_rate_hz)
+                --control-protocol $(arg control_protocol)
+                --tx-accel $(arg tx_accel)
+                --tx-brake $(arg tx_brake)
+                --tx-steer $(arg tx_steer)"/>
+</launch>

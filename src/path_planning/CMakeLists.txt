@@ -25,6 +25,7 @@ catkin_install_python(PROGRAMS
   src/morai_global_csv_recorder.py
   src/morai_gps_csv_recorder.py
   src/morai_udp_control_check.py
+  src/morai_udp_rate_monitor.py
   src/morai_competition_status_inspect.py
   src/morai_competition_vehicle_status_logger.py
   src/morai_lidar_intensity_inspect.py
