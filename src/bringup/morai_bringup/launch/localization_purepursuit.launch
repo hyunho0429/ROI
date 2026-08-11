@@ -1,0 +1,49 @@
+<launch>
+  <!-- 2025_Hyundai_ioniq5 차량 모델 제원: wheelbase 3.000 m -->
+  <arg name="workspace_path" default="$(env HOME)/morai_ws" />
+  <arg name="path_file" default="$(arg workspace_path)/data/routes/2026_molit_comp_global_path.txt" />
+  <arg name="bind_ip" default="0.0.0.0" />
+  <arg name="gps_port" default="3001" />
+  <arg name="imu_port" default="4001" />
+  <arg name="enable_control" default="false" />
+  <arg name="wheelbase_m" default="3.0" />
+
+  <!-- 1. MORAI UDP -> /gps, /Imu -->
+  <include file="$(find morai_udp_bridge)/launch/morai_udp_bridge.launch">
+    <arg name="bind_ip" value="$(arg bind_ip)" />
+    <arg name="gps_port" value="$(arg gps_port)" />
+    <arg name="imu_port" value="$(arg imu_port)" />
+    <arg name="gps_frame_id" value="gps_link" />
+    <arg name="imu_frame_id" value="imu_link" />
+    <!-- ROS 수신 시각을 사용해 GPS/IMU 시간축을 일단 통일한다. -->
+    <arg name="imu_use_packet_time" value="false" />
+  </include>
+
+  <!-- 2. 센서 장착 위치: base_link는 뒤 차축 중앙 -->
+  <node pkg="tf"
+        type="static_transform_publisher"
+        name="base_link_to_gps_link"
+        args="0 0 1.2 0 0 0 base_link gps_link 100" />
+  <node pkg="tf"
+        type="static_transform_publisher"
+        name="base_link_to_imu_link"
+        args="0 0 0 0 0 0 base_link imu_link 100" />
+
+  <!-- 3. /gps -> MGeo local ENU /localization/gps -->
+  <include file="$(find gps_mgeo_converter)/launch/gps_mgeo_converter.launch">
+    <arg name="gps_xyz_x" value="0.0" />
+    <arg name="gps_xyz_y" value="0.0" />
+    <arg name="gps_xyz_z" value="1.2" />
+  </include>
+
+  <!-- 4. MGeo GPS + IMU -> /localization/odometry -->
+  <include file="$(find ekf_local_enu)/launch/ekf_local_enu.launch" />
+
+  <!-- 5. MGeo path + estimated pose -> /ctrl_cmd (기본은 미출력) -->
+  <include file="$(find purepursuit_mgeo)/launch/purepursuit_mgeo.launch">
+    <arg name="workspace_path" value="$(arg workspace_path)" />
+    <arg name="path_file" value="$(arg path_file)" />
+    <arg name="enable_control" value="$(arg enable_control)" />
+    <arg name="wheelbase_m" value="$(arg wheelbase_m)" />
+  </include>
+</launch>

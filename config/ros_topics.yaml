@@ -1,0 +1,120 @@
+# MORAI ROS 네이티브 인터페이스 설정
+# 출처:
+# MORAI-ROS_morai_msgs beta_drive 브랜치
+# MORAI SIM ROS 센서 및 ROS Network Settings 공식 문서
+
+transport_mode: native_ros
+ros_package: morai_msgs
+
+topics:
+  gps:
+    topic: /gps
+    message_type: morai_msgs/GPSMessage
+    consumer: localization
+    use_for_ekf: true
+    note: 위경도·고도 필드는 설치된 beta_drive 메시지 정의를 rosmsg show로 확인한다.
+
+  imu:
+    topic: /Imu
+    message_type: sensor_msgs/Imu
+    consumer: localization
+    use_for_ekf: true
+    note: orientation, angular_velocity, linear_acceleration과 timestamp를 사용한다.
+
+  ego_status:
+    topic: /Ego_topic
+    message_type: morai_msgs/EgoVehicleStatus
+    consumer: localization_validation
+    use_for_ekf: false
+    note: ENU 위치·속도·가속도·heading을 제공하는 개발 검증용 기준값이다.
+
+  lidar:
+    topic: /lidar3D
+    message_type: sensor_msgs/PointCloud2
+    consumer: detection
+    frame_id: velodyne
+
+  cameras:
+    message_type: sensor_msgs/CompressedImage
+    default_topic: /imag_jpeg/compressed
+    required_count: 4
+    note: 카메라 4대를 구분하려면 MORAI ROS 설정에서 센서별 고유 topic을 지정한다.
+    front:
+      topic: /camera/front/image/compressed
+      frame_id: front_camera
+    left:
+      topic: /camera/left/image/compressed
+      frame_id: left_camera
+    right:
+      topic: /camera/right/image/compressed
+      frame_id: right_camera
+    aux:
+      topic: /camera/aux/image/compressed
+      frame_id: aux_camera
+
+  object_status:
+    topic: /Object_topic
+    message_type: morai_msgs/ObjectStatusList
+    consumer: validation_only
+    use_for_detection: false
+    note: 시뮬레이터 ground truth 성격의 개발 검증용 정보이다.
+
+  collision:
+    topic: /CollisionData
+    message_type: morai_msgs/CollisionData
+    consumer: diagnostics
+
+  traffic_light_status:
+    topic: /GetTrafficLightStatus
+    message_type: morai_msgs/GetTrafficLightStatus
+    consumer: validation_only
+    note: 카메라 신호등 인식의 대회 런타임 입력으로 사용하지 않는다.
+
+  control:
+    topic: /ctrl_cmd
+    message_type: morai_msgs/CtrlCmd
+    producer: control
+    field_name: longlCmdType
+    steering_unit: rad
+
+  save_sensor_data:
+    topic: /SaveSensorData
+    message_type: morai_msgs/SaveSensorData
+    producer: recording
+    direction: ubuntu_to_morai
+
+  replay_info:
+    topic: /ReplayInfo_topic
+    message_type: morai_msgs/ReplayInfo
+    producer: morai_replay
+    consumer: replay_validation
+    note: Rosbag Replay에서 발행되는 차량·주변 객체 통합 정보이다.
+
+services:
+  replay_control:
+    service: /Morai_SimProc
+    service_type: morai_msgs/MoraiSimProcSrv
+    request_type: morai_msgs/MoraiSimProcHandle
+    response_type: morai_msgs/MoraiSrvResponse
+
+optional_time:
+  clock_topic: /clock
+  use_sim_time: false
+  enable_when_clock_available: true
+  note: MORAI SIM Time Manager 또는 rosbag play --clock을 사용할 때만 true로 바꾼다.
+
+internal_topics:
+  localization_odometry: /localization/odometry
+  localization_pose: /localization/pose
+  localization_status: /localization/status
+  detection_obstacles: /detection/obstacles
+  detection_safety_stop: /detection/safety_stop
+  control_reference_path: /control/reference_path
+  control_command: /control/ctrl_cmd
+
+udp_fallback:
+  enabled: true
+  note: ROS 네이티브를 사용하지 못하는 경우에만 기존 UDP 브릿지를 사용한다.
+  camera_ports_file: config/sensor_ports.yaml
+  gps_destination_port: 3001
+  imu_destination_port: 4001

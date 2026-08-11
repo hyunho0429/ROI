@@ -1,0 +1,64 @@
+# MORAI 센서 전송 설정
+# 기본 운용은 MORAI ROS 네이티브 토픽이다.
+# UDP 포트는 ROS 네이티브 연결이 불가능한 경우의 fallback 브릿지용이다.
+
+transport:
+  primary: native_ros
+  ros_topics_file: config/ros_topics.yaml
+  udp_fallback_enabled: true
+
+network:
+  morai_host_ip: "192.168.0.151"
+  ubuntu_bind_ip: "0.0.0.0"
+  ubuntu_algorithm_ip: "192.168.0.200"
+
+udp_fallback:
+  cameras:
+    front:
+      host_sensor_port: 1100
+      destination_port: 1101
+    left:
+      host_sensor_port: 1110
+      destination_port: 1111
+    right:
+      host_sensor_port: 1120
+      destination_port: 1121
+    aux:
+      host_sensor_port: 1130
+      destination_port: 1131
+  lidar:
+    model: VLP16
+    host_sensor_port: 2000
+    destination_port: 2001
+  gps:
+    protocol: NMEA0183
+    destination_port: 3001
+    packet_size: 1028
+    allow_short_packets: true
+    sentences:
+      - GPRMC
+      - GPGGA
+    validate_checksum: true
+  imu:
+    protocol: MORAI_IMU
+    destination_port: 4001
+    packet_size: 115
+    legacy_packet_size: 107
+    data_size: 80
+    accepted_data_lengths: [80, 88]
+    byte_order: little_endian
+  control:
+    ubuntu_source_port: 9094
+    morai_destination_port: 9093
+  ego_status:
+    morai_host_port: 908
+    ubuntu_destination_port: 909
+    packet_size: 181
+    note: MORAI EgoVehicleStatus를 수신하는 UDP 포트
+
+internal_output_topics:
+  camera_front: /camera/front/image/compressed
+  camera_left: /camera/left/image/compressed
+  camera_right: /camera/right/image/compressed
+  camera_aux: /camera/aux/image/compressed
+  lidar: /lidar3D

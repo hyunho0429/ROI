@@ -1,0 +1,49 @@
+# MORAI ROS 기록·재생 설정
+# 주행 localization/detection 입력과 별도 계층으로 관리한다.
+
+recording:
+  rosbag_directory: data/rosbags
+  save_sensor_data_topic: /SaveSensorData
+  save_sensor_data_message: morai_msgs/SaveSensorData
+  default_morai_sensor_directory: MoraiLauncher_{os}_Data/SaveFile/SensorData
+  custom_filename_enabled: true
+  note: SaveSensorData는 현재 시뮬레이션 프레임의 센서 저장이며 rosbag record와 다르다.
+
+  rosbag_profiles:
+    localization_alignment:
+      topics:
+        - /gps
+        - /Imu
+        - /Ego_topic
+        - /clock
+    perception:
+      topics:
+        - /camera/front/image/compressed
+        - /camera/left/image/compressed
+        - /camera/right/image/compressed
+        - /camera/aux/image/compressed
+        - /lidar3D
+        - /clock
+    full_validation:
+      topics:
+        - /gps
+        - /Imu
+        - /Ego_topic
+        - /camera/front/image/compressed
+        - /camera/left/image/compressed
+        - /camera/right/image/compressed
+        - /camera/aux/image/compressed
+        - /lidar3D
+        - /ReplayInfo_topic
+        - /clock
+
+replay:
+  replay_info_topic: /ReplayInfo_topic
+  replay_info_message: morai_msgs/ReplayInfo
+  replay_control_service: /Morai_SimProc
+  replay_control_service_type: morai_msgs/MoraiSimProcSrv
+  network_replay_requires_rosbridge: true
+  use_sim_time: true
+  play_rate: 1.0
+  note: 재생 중에도 localization은 raw GPS/IMU 토픽을 사용하고 ReplayInfo는 검증용으로만 사용한다.
+

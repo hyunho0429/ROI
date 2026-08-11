@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>morai_udp_bridge</name>
+  <version>0.1.0</version>
+  <description>MORAI GPS·IMU UDP 센서를 ROS 토픽으로 변환하는 브릿지</description>
+
+  <maintainer email="team@example.com">MORAI 자율주행팀</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+
+  <depend>rospy</depend>
+  <depend>sensor_msgs</depend>
+  <depend>morai_msgs</depend>
+
+  <export>
+  </export>
+</package>

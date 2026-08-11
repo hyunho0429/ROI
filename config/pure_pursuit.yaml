@@ -1,0 +1,23 @@
+# MGeo ENU Pure Pursuit 설정
+
+topics:
+  pose: /localization/odometry
+  command: /ctrl_cmd
+  lookahead_point: /control/lookahead_point
+
+path_file: data/routes/2026_molit_comp_global_path.txt
+
+# 2025_Hyundai_ioniq5: 뒤 차축 중앙-앞 차축 중앙 거리
+wheelbase_m: 3.0
+target_speed_mps: 2.0
+lookahead_min_m: 4.0
+lookahead_gain: 0.35
+goal_tolerance_m: 1.5
+control_rate_hz: 20.0
+# 최대 휠각 40 deg = 0.6981317008 rad
+max_steering_rad: 0.6981317008
+
+# MORAI CtrlCmd의 longitudinal command mode.
+# 실제 설치된 morai_msgs/CtrlCmd.msg를 rosmsg show로 확인한다.
+longl_cmd_type: 2
+enable_control: false

@@ -1,0 +1,27 @@
+# 차량 기준점과 센서의 정적 외부 파라미터
+#
+# base_link의 원점은 차량 뒤 차축 중앙으로 정의한다.
+# base_link 축: x 전방, y 좌측, z 위쪽
+# 사용자가 지정한 MORAI 센서 위치를 그대로 기록한다.
+
+frames:
+  map: map
+  base_link: base_link
+  gps: gps_link
+  imu: imu_link
+
+base_link_definition: rear_axle_center
+
+sensors:
+  gps_link:
+    xyz_m: [0.0, 0.0, 1.2]
+    rpy_deg: [0.0, 0.0, 0.0]
+  imu_link:
+    xyz_m: [0.0, 0.0, 0.0]
+    rpy_deg: [0.0, 0.0, 0.0]
+
+notes:
+  - GPS의 x, y가 0이므로 평면상 GPS 안테나와 base_link 위치는 동일하다.
+  - GPS 고도는 base_link 고도로 사용할 때 1.2 m를 차감한다.
+  - IMU는 base_link와 같은 위치·자세로 정의되어 있다.
+  - 차량 모델은 2025_Hyundai_ioniq5이며 wheelbase는 3.000 m이다.

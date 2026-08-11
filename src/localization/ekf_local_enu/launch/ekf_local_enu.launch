@@ -1,0 +1,18 @@
+<launch>
+  <node pkg="ekf_local_enu"
+        type="ekf_local_enu_node.py"
+        name="ekf_local_enu"
+        output="screen">
+    <param name="gps_topic" value="/localization/gps" />
+    <param name="imu_topic" value="/Imu" />
+    <param name="odom_topic" value="/localization/odometry" />
+    <param name="pose_topic" value="/localization/pose" />
+    <param name="map_frame" value="map" />
+    <param name="base_frame" value="base_link" />
+    <param name="use_imu_orientation" value="true" />
+    <param name="yaw_offset_deg" value="0.0" />
+    <param name="default_gps_variance_m2" value="1.0" />
+    <param name="default_yaw_std_deg" value="8.0" />
+    <param name="publish_tf" value="true" />
+  </node>
+</launch>
