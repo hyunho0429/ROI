@@ -106,9 +106,14 @@ rosrun tf tf_echo map base_link
 roslaunch morai_bringup morai_udp_ekf_purepursuit.launch \
   morai_host_ip:=192.168.0.151 \
   control_remote_port:=9093 \
+  target_speed_mps:=2.0 \
   wheelbase_m:=3.0 \
   enable_control:=true
 ```
+
+`target_speed_mps`는 목표 주행 속도를 m/s 단위로 설정한다. 예를 들어
+`5.0 m/s = 18 km/h`, `10.0 m/s = 36 km/h`이다. 실행 중 값을 바꾸는
+동적 속도 제어는 아니므로 속도를 변경할 때는 launch를 다시 실행한다.
 
 이때 `/ctrl_cmd`의 ROS 값은 다음처럼 UDP EgoCtrlCmd로 변환된다.
 

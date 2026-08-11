@@ -1,12 +1,13 @@
 <launch>
   <!-- 2025_Hyundai_ioniq5 차량 모델 제원: wheelbase 3.000 m -->
   <arg name="workspace_path" default="$(env HOME)/morai_ws" />
-  <arg name="path_file" default="$(arg workspace_path)/data/routes/2026_molit_comp_global_path.txt" />
+  <arg name="path_file" default="$(find morai_bringup)/../../../data/routes/2026_molit_comp_global_path.txt" />
   <arg name="bind_ip" default="0.0.0.0" />
   <arg name="gps_port" default="3001" />
   <arg name="imu_port" default="4001" />
   <arg name="enable_control" default="false" />
   <arg name="wheelbase_m" default="3.0" />
+  <arg name="target_speed_mps" default="2.0" />
 
   <!-- 1. MORAI UDP -> /gps, /Imu -->
   <include file="$(find morai_udp_bridge)/launch/morai_udp_bridge.launch">
@@ -45,5 +46,6 @@
     <arg name="path_file" value="$(arg path_file)" />
     <arg name="enable_control" value="$(arg enable_control)" />
     <arg name="wheelbase_m" value="$(arg wheelbase_m)" />
+    <arg name="target_speed_mps" value="$(arg target_speed_mps)" />
   </include>
 </launch>

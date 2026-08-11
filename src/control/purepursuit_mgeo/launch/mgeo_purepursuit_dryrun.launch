@@ -3,6 +3,7 @@
   <arg name="workspace_path" default="$(env HOME)/morai_ws" />
   <arg name="path_file" default="$(arg workspace_path)/data/routes/2026_molit_comp_global_path.txt" />
   <arg name="wheelbase_m" default="3.0" />
+  <arg name="target_speed_mps" default="2.0" />
 
   <node pkg="purepursuit_mgeo"
         type="purepursuit_mgeo_node.py"
@@ -13,7 +14,7 @@
     <param name="command_topic" value="/ctrl_cmd" />
     <param name="lookahead_topic" value="/control/lookahead_point" />
     <param name="wheelbase_m" value="$(arg wheelbase_m)" />
-    <param name="target_speed_mps" value="2.0" />
+    <param name="target_speed_mps" value="$(arg target_speed_mps)" />
     <param name="lookahead_min_m" value="4.0" />
     <param name="lookahead_gain" value="0.35" />
     <param name="goal_tolerance_m" value="1.5" />
@@ -29,7 +30,7 @@
     <param name="path_file" value="$(arg path_file)" />
     <param name="pose_topic" value="/localization/odometry" />
     <param name="rate_hz" value="10.0" />
-    <param name="speed_mps" value="2.0" />
+    <param name="speed_mps" value="$(arg target_speed_mps)" />
     <param name="loop" value="false" />
     <param name="goal_hold_sec" value="1.0" />
   </node>
