@@ -48,6 +48,7 @@ rospack profile
 roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_euclidean.launch \
   morai_host_ip:=192.168.56.1 \
   control_remote_port:=9093 \
+  target_speed_mps:=2.0 \
   enable_control:=false \
   rviz:=true
 ```
@@ -61,6 +62,7 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_euclidean.launch \
 roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_bbox.launch \
   morai_host_ip:=192.168.56.1 \
   control_remote_port:=9093 \
+  target_speed_mps:=2.0 \
   enable_control:=false \
   rviz:=true
 ```
@@ -74,6 +76,7 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_bbox.launch \
 roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_tracking.launch \
   morai_host_ip:=192.168.56.1 \
   control_remote_port:=9093 \
+  target_speed_mps:=2.0 \
   enable_control:=false \
   rviz:=true
 ```
@@ -90,6 +93,7 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_tracking.launch \
 roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_merge_gap.launch \
   morai_host_ip:=192.168.56.1 \
   control_remote_port:=9093 \
+  target_speed_mps:=2.0 \
   enable_control:=false \
   rviz:=true
 ```
@@ -140,9 +144,14 @@ GPS, IMU, EKF, LiDAR와 인지 결과를 먼저 확인한 뒤 동일 명령의
 roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_merge_gap.launch \
   morai_host_ip:=192.168.56.1 \
   control_remote_port:=9093 \
+  target_speed_mps:=5.0 \
   enable_control:=true \
   rviz:=true
 ```
 
 현재 끼어들기 결과는 인지 출력이다. `AVAILABLE`이 되어도 자동 차선 변경
 명령은 내리지 않으며 기존 Pure Pursuit는 주어진 global path를 계속 추종한다.
+
+`target_speed_mps`는 목표 속도의 m/s 값이다. `2.0m/s=7.2km/h`,
+`5.0m/s=18km/h`, `10.0m/s=36km/h`이며 실행 중 동적으로 바뀌지 않으므로
+변경할 때는 launch를 다시 실행한다.

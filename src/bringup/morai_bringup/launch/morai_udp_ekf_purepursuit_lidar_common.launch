@@ -13,6 +13,7 @@
   <arg name="control_remote_port" default="9093" />
   <arg name="control_source_port" default="9094" />
   <arg name="wheelbase_m" default="3.0" />
+  <arg name="target_speed_mps" default="2.0" />
   <arg name="enable_control" default="false" />
   <arg name="rviz" default="true" />
 
@@ -27,6 +28,7 @@
     <arg name="control_remote_port" value="$(arg control_remote_port)" />
     <arg name="control_source_port" value="$(arg control_source_port)" />
     <arg name="wheelbase_m" value="$(arg wheelbase_m)" />
+    <arg name="target_speed_mps" value="$(arg target_speed_mps)" />
     <arg name="enable_control" value="$(arg enable_control)" />
   </include>
 

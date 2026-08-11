@@ -4,6 +4,7 @@
   <arg name="bind_ip" default="0.0.0.0" />
   <arg name="morai_host_ip" default="192.168.0.151" />
   <arg name="control_remote_port" default="9093" />
+  <arg name="target_speed_mps" default="2.0" />
   <arg name="enable_control" default="false" />
   <arg name="rviz" default="true" />
   <include file="$(find morai_bringup)/launch/morai_udp_ekf_purepursuit_lidar_common.launch">
@@ -13,6 +14,7 @@
     <arg name="bind_ip" value="$(arg bind_ip)" />
     <arg name="morai_host_ip" value="$(arg morai_host_ip)" />
     <arg name="control_remote_port" value="$(arg control_remote_port)" />
+    <arg name="target_speed_mps" value="$(arg target_speed_mps)" />
     <arg name="enable_control" value="$(arg enable_control)" />
     <arg name="rviz" value="$(arg rviz)" />
   </include>
