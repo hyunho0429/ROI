@@ -4,10 +4,6 @@
 `run+camera`, `running` 폴더의 코드는 정리 대상이며, 필요한 개념과 설정은
 이 폴더의 문서로만 관리합니다.
 
-Pure Pursuit 주행 스택과 UDP LiDAR의 Euclidean clustering, 3D bounding box,
-Kalman+Hungarian tracking, 끼어들기 공간 판단 통합 실행법은
-[`docs/LIDAR_PURE_PURSUIT_INTEGRATION.md`](docs/LIDAR_PURE_PURSUIT_INTEGRATION.md)를 참고합니다.
-
 ## 고정된 카메라 포트
 
 | 센서 | MORAI Host Sensor Port | Ubuntu Destination Port |
