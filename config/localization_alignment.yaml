@@ -1,0 +1,56 @@
+# 실제 MORAI ROS 기록으로 계산하기 전의 정렬 결과 템플릿
+# 계산·검증 전에는 절대로 transform_validated를 true로 바꾸지 않는다.
+
+transform_validated: false
+calibration_status: awaiting_live_bag
+
+source:
+  gps_topic: /gps
+  gps_message_type: morai_msgs/GPSMessage
+  imu_topic: /Imu
+  imu_message_type: sensor_msgs/Imu
+  reference_topic: /Ego_topic
+  reference_message_type: morai_msgs/EgoVehicleStatus
+  stationary_bag: data/rosbags/alignment_stationary.bag
+  straight_bag: data/rosbags/alignment_straight.bag
+
+map:
+  frame_id: map
+  coordinate_system: ENU
+  mgeo_map_name: R_KR_PR_K-city_2025
+  utm_zone: 52
+  local_origin_in_global_utm_m: [302595.0, 4124145.0, 0.0]
+
+gps_field_check:
+  completed: false
+  latitude_field: null
+  longitude_field: null
+  altitude_field: null
+  course_field: null
+  position_unit: unknown
+  course_unit: unknown
+
+planar_transform:
+  model: SE2
+  yaw_offset_rad: null
+  translation_xy_m: [null, null]
+  z_offset_m: null
+
+validation_metrics:
+  gps_stationary_std_xy_m: [null, null]
+  gps_to_ego_mean_error_xy_m: [null, null]
+  gps_to_ego_max_error_m: null
+  straight_heading_error_deg: null
+  initial_path_lateral_error_m: null
+  sample_count_stationary: 0
+  sample_count_straight: 0
+
+validation:
+  reference_used_only_for_calibration: true
+  gps_stationary_std_threshold_m: 0.5
+  gps_to_ego_mean_error_threshold_m: 1.0
+  heading_error_threshold_deg: 3.0
+  initial_path_lateral_error_threshold_m: 1.0
+  validation_bags_are_recorded: false
+  repeated_trial_consistent: false
+

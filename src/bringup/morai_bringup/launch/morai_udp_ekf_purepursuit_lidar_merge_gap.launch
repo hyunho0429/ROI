@@ -1,0 +1,55 @@
+<launch>
+  <arg name="workspace_path" default="$(env HOME)/morai_ws" />
+  <arg name="path_file" default="$(find morai_bringup)/../../../data/routes/2026_molit_comp_global_path.txt" />
+  <arg name="bind_ip" default="0.0.0.0" />
+  <arg name="gps_port" default="3001" />
+  <arg name="imu_port" default="4001" />
+  <arg name="ego_status_port" default="909" />
+  <arg name="lidar_host_port" default="2000" />
+  <arg name="lidar_port" default="2001" />
+  <arg name="morai_host_ip" default="192.168.0.151" />
+  <arg name="control_remote_port" default="9093" />
+  <arg name="control_source_port" default="9094" />
+  <arg name="wheelbase_m" default="3.0" />
+  <arg name="enable_control" default="false" />
+  <arg name="rviz" default="true" />
+
+  <arg name="vehicle_length_m" default="4.635" />
+  <arg name="vehicle_width_m" default="1.892" />
+  <arg name="vehicle_height_m" default="2.434" />
+  <arg name="lane_width_m" default="3.5" />
+  <arg name="longitudinal_margin_m" default="1.0" />
+  <arg name="time_headway_s" default="1.5" />
+  <arg name="minimum_ttc_s" default="3.0" />
+  <arg name="confirmation_scans" default="3" />
+
+  <include file="$(find morai_bringup)/launch/morai_udp_ekf_purepursuit.launch">
+    <arg name="workspace_path" value="$(arg workspace_path)" />
+    <arg name="path_file" value="$(arg path_file)" />
+    <arg name="bind_ip" value="$(arg bind_ip)" />
+    <arg name="gps_port" value="$(arg gps_port)" />
+    <arg name="imu_port" value="$(arg imu_port)" />
+    <arg name="ego_status_port" value="$(arg ego_status_port)" />
+    <arg name="morai_host_ip" value="$(arg morai_host_ip)" />
+    <arg name="control_remote_port" value="$(arg control_remote_port)" />
+    <arg name="control_source_port" value="$(arg control_source_port)" />
+    <arg name="wheelbase_m" value="$(arg wheelbase_m)" />
+    <arg name="enable_control" value="$(arg enable_control)" />
+  </include>
+
+  <include file="$(find lidar_perception)/launch/lidar_merge_gap.launch">
+    <arg name="rviz" value="$(arg rviz)" />
+    <arg name="bind_ip" value="$(arg bind_ip)" />
+    <arg name="host_port" value="$(arg lidar_host_port)" />
+    <arg name="destination_port" value="$(arg lidar_port)" />
+    <arg name="odometry_topic" value="/localization/odometry" />
+    <arg name="vehicle_length_m" value="$(arg vehicle_length_m)" />
+    <arg name="vehicle_width_m" value="$(arg vehicle_width_m)" />
+    <arg name="vehicle_height_m" value="$(arg vehicle_height_m)" />
+    <arg name="lane_width_m" value="$(arg lane_width_m)" />
+    <arg name="longitudinal_margin_m" value="$(arg longitudinal_margin_m)" />
+    <arg name="time_headway_s" value="$(arg time_headway_s)" />
+    <arg name="minimum_ttc_s" value="$(arg minimum_ttc_s)" />
+    <arg name="confirmation_scans" value="$(arg confirmation_scans)" />
+  </include>
+</launch>

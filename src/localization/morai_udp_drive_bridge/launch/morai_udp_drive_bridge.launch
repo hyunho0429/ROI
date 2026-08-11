@@ -1,0 +1,33 @@
+<launch>
+  <!-- MORAI Ego Status 수신 + CtrlCmd UDP 송신 -->
+  <arg name="status_bind_ip" default="0.0.0.0" />
+  <arg name="status_port" default="909" />
+  <arg name="status_topic" default="/Ego_topic" />
+  <arg name="status_frame_id" default="map" />
+  <arg name="control_remote_ip" default="192.168.0.151" />
+  <!-- MORAI Network Settings의 Cmd Control Destination Port와 맞춘다. -->
+  <arg name="control_remote_port" default="9093" />
+  <arg name="control_bind_ip" default="0.0.0.0" />
+  <!-- Ubuntu 송신 포트. 기존 팀 설정(9094)을 유지하며 필요하면 0으로 바꿀 수 있다. -->
+  <arg name="control_bind_port" default="9094" />
+  <arg name="command_topic" default="/ctrl_cmd" />
+
+  <node pkg="morai_udp_drive_bridge"
+        type="morai_udp_drive_bridge_node.py"
+        name="morai_udp_drive_bridge"
+        output="screen">
+    <param name="status_bind_ip" value="$(arg status_bind_ip)" />
+    <param name="status_port" value="$(arg status_port)" />
+    <param name="status_topic" value="$(arg status_topic)" />
+    <param name="status_frame_id" value="$(arg status_frame_id)" />
+    <param name="control_remote_ip" value="$(arg control_remote_ip)" />
+    <param name="control_remote_port" value="$(arg control_remote_port)" />
+    <param name="control_bind_ip" value="$(arg control_bind_ip)" />
+    <param name="control_bind_port" value="$(arg control_bind_port)" />
+    <param name="command_topic" value="$(arg command_topic)" />
+    <param name="max_wheel_angle_rad" value="0.6981317008" />
+    <param name="send_rate_hz" value="20.0" />
+    <param name="command_timeout_sec" value="0.5" />
+    <param name="status_use_packet_time" value="false" />
+  </node>
+</launch>

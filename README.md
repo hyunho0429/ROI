@@ -13,6 +13,11 @@ UDP 기반 자율주행 코드이다.
 ROS는 프로세스 실행과 인자 전달에만 사용한다. GPS, IMU, Competition Vehicle
 Status, CollisionData 및 Ego Ctrl Cmd는 모두 UDP로 통신한다.
 
+Pure Pursuit UDP·EKF 주행 스택과 LiDAR의 Euclidean clustering, 3D bounding
+box, Kalman+Hungarian tracking 및 끼어들기 공간 판단 통합 실행법은
+[`docs/LIDAR_PURE_PURSUIT_INTEGRATION.md`](docs/LIDAR_PURE_PURSUIT_INTEGRATION.md)를
+참고한다.
+
 ## 기본 제어 설정
 
 메인 코드는 다음 형식의 제어 패킷을 전송한다.

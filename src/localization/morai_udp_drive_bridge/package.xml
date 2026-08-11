@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>morai_udp_drive_bridge</name>
+  <version>0.1.0</version>
+  <description>MORAI EgoVehicleStatus UDP 수신과 EgoCtrlCmd UDP 송신 브릿지</description>
+
+  <maintainer email="team@example.com">MORAI 자율주행팀</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+  <depend>geometry_msgs</depend>
+  <depend>morai_msgs</depend>
+  <depend>rospy</depend>
+
+  <export>
+  </export>
+</package>

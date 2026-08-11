@@ -1,0 +1,50 @@
+# MORAI GPS·IMU UDP 수신 설정
+#
+# MORAI PC의 Sensor Network 설정에서 아래 destination port로 전송한다.
+# bind_ip는 Ubuntu 알고리즘 PC의 수신 주소이며, 여러 NIC를 사용할 때는
+# 실제 연결된 인터페이스 주소 대신 우선 0.0.0.0으로 수신하는 것을 권장한다.
+
+bind_ip: 0.0.0.0
+
+gps:
+  destination_port: 3001
+  protocol: NMEA0183
+  packet_size: 1028
+  allow_short_packets: true
+  sentences:
+    - GPRMC
+    - GPGGA
+  validate_checksum: true
+  # UDP GPS에는 MORAI map offset이 포함되지 않으므로 실험으로 채운다.
+  east_offset: 0.0
+  north_offset: 0.0
+
+imu:
+  destination_port: 4001
+  protocol: MORAI_IMU
+  packet_size: 115
+  legacy_packet_size: 107
+  data_size: 80
+  accepted_data_lengths: [80, 88]
+  byte_order: little_endian
+  use_packet_time: true
+  normalize_orientation: true
+
+ego_status:
+  host_port: 908
+  destination_port: 909
+  packet_size: 181
+  protocol: MORAI_EGO_VEHICLE_STATUS
+  # 위치는 ENU m, heading/steer는 deg, velocity는 UDP 원본 km/h이다.
+  use_for_ekf: false
+
+control:
+  host_port: 9094
+  destination_port: 9093
+  packet_size: 55
+  protocol: MORAI_EGO_CTRL_CMD
+  # ROS CtrlCmd velocity(m/s), steering(rad)를 UDP km/h, -1~1로 변환한다.
+
+ros_topics:
+  gps: /gps
+  imu: /Imu

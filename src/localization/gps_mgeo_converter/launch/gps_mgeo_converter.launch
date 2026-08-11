@@ -1,0 +1,20 @@
+<launch>
+  <arg name="gps_xyz_x" default="0.0" />
+  <arg name="gps_xyz_y" default="0.0" />
+  <arg name="gps_xyz_z" default="1.2" />
+
+  <node pkg="gps_mgeo_converter"
+        type="gps_mgeo_converter_node.py"
+        name="gps_mgeo_converter"
+        output="screen">
+    <rosparam param="local_origin_utm">[302595.0, 4124145.0, 0.0]</rosparam>
+    <rosparam param="gps_xyz_in_base_link" subst_value="true">[$(arg gps_xyz_x), $(arg gps_xyz_y), $(arg gps_xyz_z)]</rosparam>
+    <param name="map_frame" value="map" />
+    <param name="base_frame" value="base_link" />
+    <param name="gps_topic" value="/gps" />
+    <param name="imu_topic" value="/Imu" />
+    <param name="point_topic" value="/gps_mgeo" />
+    <param name="odom_topic" value="/localization/gps" />
+    <param name="require_valid_status" value="true" />
+  </node>
+</launch>

@@ -1,0 +1,27 @@
+<launch>
+  <arg name="bind_ip" default="0.0.0.0" />
+  <arg name="gps_port" default="3001" />
+  <arg name="imu_port" default="4001" />
+  <arg name="gps_topic" default="/gps" />
+  <arg name="imu_topic" default="/Imu" />
+  <arg name="gps_frame_id" default="gps_link" />
+  <arg name="imu_frame_id" default="imu_link" />
+  <arg name="imu_use_packet_time" default="false" />
+
+  <node pkg="morai_udp_bridge"
+        type="morai_udp_bridge_node.py"
+        name="morai_udp_bridge"
+        output="screen">
+    <param name="bind_ip" value="$(arg bind_ip)" />
+    <param name="gps_port" value="$(arg gps_port)" />
+    <param name="imu_port" value="$(arg imu_port)" />
+    <param name="gps_topic" value="$(arg gps_topic)" />
+    <param name="imu_topic" value="$(arg imu_topic)" />
+    <param name="gps_frame_id" value="$(arg gps_frame_id)" />
+    <param name="imu_frame_id" value="$(arg imu_frame_id)" />
+    <param name="gps_validate_checksum" value="true" />
+    <param name="imu_allow_legacy_107" value="true" />
+    <param name="imu_use_packet_time" value="$(arg imu_use_packet_time)" />
+    <param name="imu_normalize_orientation" value="true" />
+  </node>
+</launch>

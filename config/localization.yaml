@@ -1,0 +1,80 @@
+# MORAI 초기 로컬라이제이션 공통 설정
+# 좌표계 정의는 docs/좌표계_EKF_초기화_설계.md를 따른다.
+
+frames:
+  map: map
+  base_link: base_link
+  imu: imu_link
+  lidar: velodyne
+
+transport:
+  primary: native_ros
+  ros_topics_file: config/ros_topics.yaml
+  udp_fallback_enabled: true
+
+map:
+  coordinate_system: ENU
+  x_axis: east
+  y_axis: north
+  z_axis: up
+  utm_zone: 52
+  datum: WGS84
+  local_origin_in_global_utm_m: [302595.0, 4124145.0, 0.0]
+  use_local_mgeo_coordinates: true
+  allow_per_run_path_translation: false
+  allow_path_rotation_to_initial_gps_yaw: false
+
+gps:
+  source_topic: /gps
+  message_type: morai_msgs/GPSMessage
+  output_frame: map
+  max_rate_hz: 30
+  initialization_samples: 10
+  max_initial_axis_std_m: 0.5
+  use_course_when_stationary: false
+  min_speed_for_course_mps: 1.0
+  gps_blackout_policy: continue_imu_prediction
+  udp_fallback_destination_port: 3001
+  require_rosmsg_field_check: true
+
+imu:
+  source_topic: /Imu
+  message_type: sensor_msgs/Imu
+  input_frame: imu_link
+  max_rate_hz: 50
+  yaw_rate_unit: rad_per_sec
+  acceleration_unit: m_per_sec2
+  gravity_compensation: verify_from_live_message
+  udp_fallback_destination_port: 4001
+
+validation:
+  source_topic: /Ego_topic
+  message_type: morai_msgs/EgoVehicleStatus
+  use_in_ekf: false
+  position_frame: map
+  heading_unit: deg
+  path_first_point_xyz_m: [-131.68979755061446, -428.3310229377821, 28.543960281954277]
+  sample_ego_initial_xyz_m: [-131.48599243164063, -427.96099853515625, 28.882999420166016]
+  sample_ego_initial_yaw_deg: 62.515
+  expected_initial_path_distance_m: 0.4224
+  expected_initial_heading_error_deg: 1.2169
+
+ekf:
+  state: [x_map, y_map, yaw_map, forward_velocity, gyro_bias, accel_bias]
+  prediction_rate_hz: 50
+  gps_update_enabled: true
+  yaw_wrap: [-3.141592653589793, 3.141592653589793]
+  initial_position_std_m: 0.5
+  initial_yaw_std_deg: 5.0
+  ready_position_error_m: 1.0
+  ready_yaw_error_deg: 3.0
+
+alignment:
+  mode: fixed_gps_to_map_transform
+  provisional_utm_to_map_xy: subtract_local_origin
+  transform_validated: false
+  validation_reference_topic: /Ego_topic
+  validation_reference_message: morai_msgs/EgoVehicleStatus
+  require_live_reference_check: true
+  save_calibration_to: config/localization_alignment.yaml
+

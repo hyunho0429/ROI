@@ -1,0 +1,18 @@
+<launch>
+  <arg name="rviz" default="true" />
+  <arg name="bind_ip" default="0.0.0.0" />
+  <arg name="host_port" default="2000" />
+  <arg name="destination_port" default="2001" />
+  <arg name="odometry_topic" default="/localization/odometry" />
+  <include file="$(find lidar_perception)/launch/lidar_algorithm_pipeline.launch">
+    <arg name="algorithm_type" value="lidar_euclidean_node.py" />
+    <arg name="algorithm_name" value="lidar_euclidean" />
+    <arg name="result_prefix" value="euclidean" />
+    <arg name="rviz_config" value="morai_lidar_euclidean.rviz" />
+    <arg name="rviz" value="$(arg rviz)" />
+    <arg name="bind_ip" value="$(arg bind_ip)" />
+    <arg name="host_port" value="$(arg host_port)" />
+    <arg name="destination_port" value="$(arg destination_port)" />
+    <arg name="odometry_topic" value="$(arg odometry_topic)" />
+  </include>
+</launch>
