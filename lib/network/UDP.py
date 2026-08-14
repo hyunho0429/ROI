@@ -51,5 +51,5 @@ class Sender:
 
     def send(self, data):
         pacekd_data = ctypes.string_at(ctypes.addressof(data), ctypes.sizeof(data))       
-        print(pacekd_data, len(pacekd_data))
+#         print(pacekd_data, len(pacekd_data))
         self.socket.sendto(pacekd_data,(self.ip,self.port))
