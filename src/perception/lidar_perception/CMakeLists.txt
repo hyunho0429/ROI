@@ -3,6 +3,7 @@ project(lidar_perception)
 
 find_package(catkin REQUIRED COMPONENTS
   geometry_msgs
+  message_generation
   nav_msgs
   rospy
   sensor_msgs
@@ -10,8 +11,21 @@ find_package(catkin REQUIRED COMPONENTS
   visualization_msgs
 )
 
+add_message_files(
+  FILES
+  LidarObstacle.msg
+  LidarObstacleArray.msg
+)
+
+generate_messages(
+  DEPENDENCIES
+  std_msgs
+)
+
 catkin_python_setup()
-catkin_package()
+catkin_package(
+  CATKIN_DEPENDS geometry_msgs message_runtime nav_msgs rospy sensor_msgs std_msgs visualization_msgs
+)
 
 catkin_install_python(PROGRAMS
   scripts/morai_lidar_udp_source.py

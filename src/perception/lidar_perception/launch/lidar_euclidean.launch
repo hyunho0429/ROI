@@ -4,6 +4,9 @@
   <arg name="host_port" default="2000" />
   <arg name="destination_port" default="2001" />
   <arg name="odometry_topic" default="/localization/odometry" />
+  <arg name="lidar_x_m" default="0.0" />
+  <arg name="lidar_y_m" default="0.0" />
+  <arg name="lidar_yaw_deg" default="0.0" />
   <include file="$(find lidar_perception)/launch/lidar_algorithm_pipeline.launch">
     <arg name="algorithm_type" value="lidar_euclidean_node.py" />
     <arg name="algorithm_name" value="lidar_euclidean" />
@@ -14,5 +17,8 @@
     <arg name="host_port" value="$(arg host_port)" />
     <arg name="destination_port" value="$(arg destination_port)" />
     <arg name="odometry_topic" value="$(arg odometry_topic)" />
+    <arg name="lidar_x_m" value="$(arg lidar_x_m)" />
+    <arg name="lidar_y_m" value="$(arg lidar_y_m)" />
+    <arg name="lidar_yaw_deg" value="$(arg lidar_yaw_deg)" />
   </include>
 </launch>

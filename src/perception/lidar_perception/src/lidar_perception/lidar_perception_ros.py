@@ -10,20 +10,30 @@ import colorsys
 import json
 import math
 import struct
+import threading
 
 import rospy
 from geometry_msgs.msg import Point
+from nav_msgs.msg import Odometry
 from sensor_msgs import point_cloud2
 from sensor_msgs.msg import PointCloud2, PointField
 from std_msgs.msg import Header, String
 from visualization_msgs.msg import Marker, MarkerArray
 
+from lidar_perception.msg import LidarObstacle, LidarObstacleArray
 from lidar_perception.lidar_bounding_box import bounding_boxes
 from lidar_perception.lidar_euclidean_clustering import (
     euclidean_cluster_indices,
     select_roi,
 )
 from lidar_perception.lidar_kalman_hungarian import KalmanHungarianTracker
+from lidar_perception.lidar_map_tracking import (
+    Pose2DHistory,
+    oriented_bounding_boxes,
+    quaternion_to_yaw,
+    resolve_box_heading,
+    transform_box_to_map,
+)
 
 
 CLUSTER_FIELDS = [
@@ -504,14 +514,49 @@ class KalmanHungarianNode(_ClusterProcessor):
 
     def __init__(self):
         self.velocity_scale_s = float(_param("velocity_scale_s", 1.0))
+        match_distance_m = float(_param("match_distance_m", 3.0))
+        max_missed = int(_param("max_missed", 6))
+        min_hits = int(_param("min_hits", 3))
+        process_accel_std_mps2 = float(_param("process_accel_std_mps2", 4.0))
+        measurement_noise_m = float(_param("measurement_noise_m", 0.35))
         self.tracker = KalmanHungarianTracker(
-            match_distance_m=float(_param("match_distance_m", 3.0)),
-            max_missed=int(_param("max_missed", 6)),
-            min_hits=int(_param("min_hits", 3)),
-            process_accel_std_mps2=float(
-                _param("process_accel_std_mps2", 4.0)
-            ),
-            measurement_noise_m=float(_param("measurement_noise_m", 0.35)),
+            match_distance_m=match_distance_m,
+            max_missed=max_missed,
+            min_hits=min_hits,
+            process_accel_std_mps2=process_accel_std_mps2,
+            measurement_noise_m=measurement_noise_m,
+        )
+        self.map_tracker = KalmanHungarianTracker(
+            match_distance_m=match_distance_m,
+            max_missed=max_missed,
+            min_hits=min_hits,
+            process_accel_std_mps2=process_accel_std_mps2,
+            measurement_noise_m=measurement_noise_m,
+        )
+        self.odometry_topic = _param("odometry_topic", "/localization/odometry")
+        self.map_obstacle_topic = _param(
+            "map_obstacle_topic", "/perception/lidar/tracked_obstacles_map"
+        )
+        self.map_frame = _param("map_frame", "map")
+        self.pose_max_age_s = float(_param("pose_max_age_s", 0.25))
+        self.lidar_x_m = float(_param("lidar_x_m", 0.0))
+        self.lidar_y_m = float(_param("lidar_y_m", 0.0))
+        self.lidar_yaw_rad = math.radians(float(_param("lidar_yaw_deg", 0.0)))
+        self.heading_velocity_threshold_mps = float(
+            _param("heading_velocity_threshold_mps", 0.5)
+        )
+        self.pose_history = Pose2DHistory(float(_param("pose_history_s", 2.0)))
+        self.pose_lock = threading.Lock()
+        self.map_obstacle_publisher = rospy.Publisher(
+            self.map_obstacle_topic,
+            LidarObstacleArray,
+            queue_size=1,
+        )
+        self.odometry_subscriber = rospy.Subscriber(
+            self.odometry_topic,
+            Odometry,
+            self._odometry_callback,
+            queue_size=50,
         )
         super().__init__("tracking")
         rospy.loginfo(
@@ -522,15 +567,99 @@ class KalmanHungarianNode(_ClusterProcessor):
             self.tracker.max_missed,
         )
         rospy.logwarn(
-            "Tracker velocities are ego-relative in morai_lidar frame; "
-            "the UDP source deskews each scan but does not transform tracks "
-            "to a world frame between scans."
+            "/morai/lidar/tracking/results remains ego-relative for RViz; "
+            "%s is tracked separately in the map frame for path planning.",
+            self.map_obstacle_topic,
+        )
+        rospy.loginfo(
+            "Map obstacle output: odometry=%s topic=%s frame=%s",
+            self.odometry_topic,
+            self.map_obstacle_topic,
+            self.map_frame,
+        )
+
+    def _odometry_callback(self, message):
+        stamp = message.header.stamp
+        timestamp_s = (
+            stamp.to_sec() if stamp.to_sec() > 0.0 else rospy.Time.now().to_sec()
+        )
+        orientation = message.pose.pose.orientation
+        yaw_rad = quaternion_to_yaw(
+            orientation.x,
+            orientation.y,
+            orientation.z,
+            orientation.w,
+        )
+        position = message.pose.pose.position
+        with self.pose_lock:
+            self.pose_history.append(timestamp_s, position.x, position.y, yaw_rad)
+
+    def _map_pose_at(self, stamp):
+        with self.pose_lock:
+            return self.pose_history.pose_at(stamp.to_sec(), self.pose_max_age_s)
+
+    def _publish_map_obstacles(self, points, cluster_indices, stamp):
+        pose = self._map_pose_at(stamp)
+        if pose is None:
+            rospy.logwarn_throttle(
+                1.0,
+                "Map obstacle output is waiting for timestamp-aligned %s",
+                self.odometry_topic,
+            )
+            return
+
+        ego_x_m, ego_y_m, ego_yaw_rad = pose
+        local_boxes = oriented_bounding_boxes(points, cluster_indices)
+        map_detections = [
+            transform_box_to_map(
+                box,
+                ego_x_m,
+                ego_y_m,
+                ego_yaw_rad,
+                self.lidar_x_m,
+                self.lidar_y_m,
+                self.lidar_yaw_rad,
+            )
+            for box in local_boxes
+        ]
+        map_tracks = self.map_tracker.update(map_detections, stamp.to_sec())
+
+        message = LidarObstacleArray()
+        message.header.stamp = stamp
+        message.header.frame_id = self.map_frame
+        for track in map_tracks:
+            if not track["confirmed"]:
+                continue
+            obstacle = LidarObstacle()
+            obstacle.id = int(track["track_id"])
+            obstacle.center_x_map = float(track["center_x_m"])
+            obstacle.center_y_map = float(track["center_y_m"])
+            obstacle.yaw = resolve_box_heading(
+                track["yaw_rad"],
+                track["velocity_x_mps"],
+                track["velocity_y_mps"],
+                self.heading_velocity_threshold_mps,
+            )
+            obstacle.length = float(track["length_m"])
+            obstacle.width = float(track["width_m"])
+            obstacle.velocity_x_map = float(track["velocity_x_mps"])
+            obstacle.velocity_y_map = float(track["velocity_y_mps"])
+            message.obstacles.append(obstacle)
+        message.obstacle_count = len(message.obstacles)
+        self.map_obstacle_publisher.publish(message)
+        rospy.loginfo_throttle(
+            1.0,
+            "Map obstacles: topic=%s count=%d stamp=%.3f",
+            self.map_obstacle_topic,
+            message.obstacle_count,
+            stamp.to_sec(),
         )
 
     def _callback(self, message):
         points, cluster_indices, stamp, frame_id = self._extract_clusters(message)
         detections = bounding_boxes(points, cluster_indices)
         tracks = self.tracker.update(detections, stamp.to_sec())
+        self._publish_map_obstacles(points, cluster_indices, stamp)
         self.marker_publisher.publish(
             _tracking_markers(
                 tracks,

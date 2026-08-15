@@ -1,5 +1,8 @@
 # Pure Pursuit + UDP LiDAR 인지 실행법
 
+전체 LiDAR 토픽과 map 장애물 메시지 계약은
+[`LIDAR_TOPIC_CONTRACT.md`](LIDAR_TOPIC_CONTRACT.md)를 참고한다.
+
 ## 구성
 
 MORAI 외부 통신은 UDP를 사용한다.
@@ -87,6 +90,8 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_tracking.launch \
   `MERGE SPACE` 배너가 표시되고 RViz에는 왼쪽·오른쪽 공간 상태가 함께
   표시된다.
 - 공간 판단 결과: `/morai/lidar/merge_gap/results`
+- map 좌표 장애물 결과: `/perception/lidar/tracked_obstacles_map`
+  (`lidar_perception/LidarObstacleArray`)
 - Kalman filter: 위치와 속도를 예측·보정한다.
 - Hungarian assignment: 현재 box와 기존 track의 전체 거리 비용이 최소가
   되도록 1:1 대응시킨다.

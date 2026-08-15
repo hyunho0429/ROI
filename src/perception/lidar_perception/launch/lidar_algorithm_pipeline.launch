@@ -8,6 +8,10 @@
   <arg name="host_port" default="2000" />
   <arg name="destination_port" default="2001" />
   <arg name="odometry_topic" default="/localization/odometry" />
+  <arg name="map_obstacle_topic" default="/perception/lidar/tracked_obstacles_map" />
+  <arg name="lidar_x_m" default="0.0" />
+  <arg name="lidar_y_m" default="0.0" />
+  <arg name="lidar_yaw_deg" default="0.0" />
   <arg name="deskew_enabled" default="true" />
   <arg name="cluster_tolerance_m" default="0.8" />
   <arg name="cluster_min_points" default="3" />
@@ -32,6 +36,12 @@
         name="$(arg algorithm_name)"
         output="screen">
     <param name="input_topic" value="/morai/lidar/live_points" />
+    <param name="odometry_topic" value="$(arg odometry_topic)" />
+    <param name="map_obstacle_topic" value="$(arg map_obstacle_topic)" />
+    <param name="map_frame" value="map" />
+    <param name="lidar_x_m" value="$(arg lidar_x_m)" />
+    <param name="lidar_y_m" value="$(arg lidar_y_m)" />
+    <param name="lidar_yaw_deg" value="$(arg lidar_yaw_deg)" />
     <param name="cluster_cloud_topic" value="/morai/lidar/$(arg result_prefix)/clustered_points" />
     <param name="marker_topic" value="/morai/lidar/$(arg result_prefix)/markers" />
     <param name="result_topic" value="/morai/lidar/$(arg result_prefix)/results" />

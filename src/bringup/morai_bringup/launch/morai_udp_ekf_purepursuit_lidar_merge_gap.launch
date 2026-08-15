@@ -11,6 +11,9 @@
   <arg name="control_remote_port" default="9093" />
   <arg name="control_source_port" default="9094" />
   <arg name="wheelbase_m" default="3.0" />
+  <arg name="lidar_x_m" default="0.0" />
+  <arg name="lidar_y_m" default="0.0" />
+  <arg name="lidar_yaw_deg" default="0.0" />
   <arg name="target_speed_mps" default="2.0" />
   <arg name="enable_control" default="false" />
   <arg name="rviz" default="true" />
@@ -45,6 +48,9 @@
     <arg name="host_port" value="$(arg lidar_host_port)" />
     <arg name="destination_port" value="$(arg lidar_port)" />
     <arg name="odometry_topic" value="/localization/odometry" />
+    <arg name="lidar_x_m" value="$(arg lidar_x_m)" />
+    <arg name="lidar_y_m" value="$(arg lidar_y_m)" />
+    <arg name="lidar_yaw_deg" value="$(arg lidar_yaw_deg)" />
     <arg name="vehicle_length_m" value="$(arg vehicle_length_m)" />
     <arg name="vehicle_width_m" value="$(arg vehicle_width_m)" />
     <arg name="vehicle_height_m" value="$(arg vehicle_height_m)" />
