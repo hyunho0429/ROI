@@ -1,7 +1,7 @@
 # MORAI 대회 자율주행
 
-`dev/stanley` 브랜치는 MORAI 25.S4 대회 환경에서 전역 경로를 추종하기 위한
-UDP 기반 자율주행 코드이다.
+`dev/merged_sensor` 브랜치는 MORAI 25.S4 대회 환경에서 전역 경로를 추종하는
+UDP 기반 자율주행 코드에 LiDAR와 카메라 인식을 통합한 브랜치이다.
 
 - 횡방향 제어: Pure Pursuit
 - 종방향 제어: PID
@@ -54,10 +54,11 @@ PID의 양수 출력은 `accel`, 음수 출력은 `brake`로 분리한다. Pure 
 | 3D LiDAR Intensity | MORAI → 알고리즘 | 2000 | 2001 |
 | Ego Ctrl Cmd | 알고리즘 → MORAI | 9093 | 9094 |
 
-현재 네트워크 기준 MORAI Host IP는 `192.168.56.1`, 알고리즘 PC Destination IP는
-`192.168.56.101`이다. MORAI에서 GPS, IMU, Competition Vehicle Status 및
-CollisionData의 Destination IP는 `192.168.56.101`로 설정한다. Ego Ctrl Cmd의
-`control_ip`에는 MORAI 시뮬레이터가 실행되는 `192.168.56.1`을 사용한다.
+아래의 `192.168.56.x` 값은 기존 단독 Python 실행 예제의 네트워크 구성이다.
+통합 launch는 `feat/lidar` 설정을 이어받아 로컬 센서 수신에는
+`bind_ip=0.0.0.0`, 기본 제어 목적지에는 `morai_host_ip=192.168.0.151`을 사용한다.
+MORAI 센서의 Destination IP는 기존 `feat/lidar`에서 사용하던 Ubuntu PC의 실제
+IP를 그대로 유지하면 되며 통합 launch 명령에 로컬 IP를 따로 넣지 않는다.
 
 알고리즘 PC의 IP는 다음 명령으로 확인할 수 있다.
 
@@ -71,7 +72,7 @@ hostname -I
 
 ```bash
 cd ~
-git clone -b dev/stanley --single-branch https://github.com/hyunho0429/ROI.git
+git clone -b dev/merged_sensor --single-branch https://github.com/hyunho0429/ROI.git
 cd ROI
 ```
 
@@ -80,11 +81,11 @@ cd ROI
 ```bash
 cd ~/ROI
 git fetch origin
-git switch dev/stanley
-git pull origin dev/stanley
+git switch dev/merged_sensor
+git pull origin dev/merged_sensor
 ```
 
-구버전 Git에서 `git switch`가 지원되지 않으면 `git checkout dev/stanley`를
+구버전 Git에서 `git switch`가 지원되지 않으면 `git checkout dev/merged_sensor`를
 사용한다.
 
 ## 2. 최초 빌드
@@ -613,36 +614,220 @@ roslaunch path_planning kcity_2025_dijkstra.launch \
 
 ## LiDAR + 카메라 통합 실행
 
-`dev/merged_sensor` 브랜치는 기존 Pure Pursuit 주행 및 LiDAR tracking/RViz를
-변경하지 않고, 차선 후보 인식 화면과 YOLO 객체 탐지 화면을 별도 프로세스로
-동시에 실행한다.
+### 기능
+
+`dev/merged_sensor`는 `feat/lidar`의 주행 및 LiDAR 코드를 그대로 유지하면서
+`feature-camera`의 카메라 기능을 ROS launch로 함께 실행한다.
+
+- GPS/IMU 기반 위치 추정과 Pure Pursuit 경로 추종
+- PID 종방향 제어 및 MORAI Ego Ctrl Cmd UDP 송신
+- 3D LiDAR UDP 수신, clustering, bounding box, Kalman+Hungarian tracking
+- LiDAR tracking 결과와 끼어들기 공간 판단을 RViz에 표시
+- 전방 카메라 영상의 ONNX 차선 segmentation 및 차선 후보 추적
+- YOLOv8 기본 객체 탐지
+- 커스텀 모델이 있을 때 신호등과 MORAI 장애물 탐지 결과 중첩
+- LiDAR/RViz, 차선 인식, YOLO 화면을 하나의 `roslaunch`로 실행
+
+차선과 YOLO는 각각 독립 프로세스로 실행된다. 한 카메라 프로세스에 문제가 생겨도
+기존 주행 및 LiDAR 코드를 직접 변경하거나 같은 프로세스에서 종료시키지 않는다.
+기존 LiDAR 전용 launch도 그대로 남아 있으므로 종전 실행법을 계속 사용할 수 있다.
+
+### 코드 구조
+
+```text
+ROI/
+├── Sensor/                         # feature-camera 원본 카메라 기능
+│   ├── LaneCandidates.py           # 차선 segmentation, 후보 추출 및 화면 표시
+│   ├── YoloCamera_v2.py            # 기본/커스텀 YOLO 탐지 및 화면 표시
+│   └── lane_segmentation.onnx      # 차선 segmentation 모델
+├── lib/
+│   ├── define/Camera.py            # MORAI 카메라 UDP 데이터 구조/파싱
+│   └── network/UDP.py              # 카메라 UDP Receiver
+├── src/
+│   ├── bringup/morai_bringup/
+│   │   └── launch/
+│   │       ├── morai_udp_ekf_purepursuit_lidar_tracking.launch
+│   │       │                       # 기존 feat/lidar 통합 launch
+│   │       └── morai_udp_ekf_purepursuit_lidar_camera.launch
+│   │                               # 주행+LiDAR+카메라 최상위 launch
+│   ├── perception/lidar_perception/
+│   │                               # 기존 LiDAR 인식 노드와 RViz 설정
+│   ├── perception/camera_perception/
+│   │   ├── launch/camera_perception.launch
+│   │   └── scripts/camera_feature_runner.py
+│   │                               # 카메라 원본 코드를 roslaunch에서 실행하는 어댑터
+│   ├── path_planning/              # UDP 주행, 경로 추종 및 LiDAR 연동
+│   ├── localization/               # GPS/IMU/EKF 위치 추정
+│   └── control/                    # Pure Pursuit 관련 패키지
+└── docs/LIDAR_CAMERA_INTEGRATION.md
+```
+
+최상위 launch의 실행 관계는 다음과 같다.
+
+```text
+morai_udp_ekf_purepursuit_lidar_camera.launch
+├── morai_udp_ekf_purepursuit_lidar_tracking.launch
+│   ├── 기존 GPS/IMU/EKF/Pure Pursuit 주행 스택
+│   └── 기존 LiDAR tracking + merge-gap + RViz
+└── camera_perception.launch
+    ├── lane_camera  → Sensor/LaneCandidates.py
+    └── yolo_camera  → Sensor/YoloCamera_v2.py
+```
+
+### 센서 및 모델 준비
+
+MORAI의 센서 목적지 IP는 기존 `feat/lidar`에서 사용하던 ROS Ubuntu PC의 실제
+IP를 그대로 사용한다. 프로그램은 LiDAR와 카메라 모두 동일한 로컬 수신 주소
+`bind_ip=0.0.0.0`에 bind하므로 실행 명령에서 IP를 따로 지정할 필요가 없다.
+
+| 기능 | 기본 수신 포트 | 비고 |
+|---|---:|---|
+| GPS | `3001` | 기존 주행 스택 |
+| IMU | `4001` | 기존 주행 스택 |
+| LiDAR | `2001` | RViz/tracking 입력 |
+| 차선 카메라 | `1101` | `LaneCandidates.py` |
+| YOLO 카메라 | `1131` | `YoloCamera_v2.py` |
+
+MORAI 센서 설정의 포트가 위 값과 일치해야 하며 Ubuntu 방화벽에서도 해당 UDP
+수신을 허용해야 한다.
+
+- `Sensor/lane_segmentation.onnx`: 저장소에 포함되어 있다.
+- `yolov8n.pt`: 저장소에 없으며 Ultralytics가 최초 실행 시 내려받을 수 있다.
+- `Sensor/null.pt`: 커스텀 신호등/장애물 모델이며 저장소에 포함되어 있지 않다.
+
+커스텀 모델이 없으면 경고를 출력하고 기본 YOLO 객체 탐지만 계속한다. 커스텀
+탐지가 필요하면 모델을 `Sensor/null.pt`에 복사하거나 launch 인자로 절대 경로를
+지정한다.
+
+### 최초 설치와 빌드
+
+저장소 루트가 catkin workspace이다.
 
 ```bash
-cd ~/morai_ws
+cd ~/ROI
+git fetch origin
+git switch dev/merged_sensor
+git pull origin dev/merged_sensor
+
+source /opt/ros/noetic/setup.bash
+python3 -m pip install -r src/path_planning/requirements.txt
+python3 -m pip install -r requirements.txt
 catkin_make
 source devel/setup.bash
-
-roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
-  enable_control:=false
 ```
 
-LiDAR와 카메라는 동일한 로컬 수신 주소 `bind_ip`(기본 `0.0.0.0`)를 사용한다.
-MORAI의 LiDAR UDP 포트는 기본 `2001`, 차선 카메라는 `1101`, YOLO 카메라는
-`1131`이다. 실제 센서 설정과 다르면 launch 인자로 변경한다. 안전을 위해
-`enable_control` 기본값은 `false`이며 센서 화면과 경로를 확인한 뒤에만 `true`로
-바꾼다.
-
-카메라 Python 의존성은 다음과 같이 설치한다.
+새 터미널에서는 다음 두 환경 설정을 다시 적용한다.
 
 ```bash
-python3 -m pip install -r requirements.txt
+cd ~/ROI
+source /opt/ros/noetic/setup.bash
+source devel/setup.bash
 ```
 
-차선 모델 `Sensor/lane_segmentation.onnx`는 저장소에 포함되어 있다. 기본 YOLO
-모델 `yolov8n.pt`는 Ultralytics가 최초 실행 시 내려받을 수 있다. 커스텀 신호등
-모델은 저장소에 포함되지 않으므로 `Sensor/null.pt`에 복사하거나
-`custom_model_path:=/절대/경로/model.pt`를 지정한다. 커스텀 모델이 없어도 기본
-YOLO 객체 탐지는 계속 실행된다.
+### 1단계: 인식 화면만 안전하게 확인
 
-전체 인자와 개별 실행법은
+`enable_control`의 기본값은 `false`이다. 다음 명령은 제어 송신을 비활성화한
+상태로 기존 LiDAR RViz, 차선 인식 화면, YOLO 화면을 동시에 실행한다.
+
+```bash
+cd ~/ROI
+source /opt/ros/noetic/setup.bash
+source devel/setup.bash
+
+roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch
+```
+
+정상 실행 시 다음 화면이 나타난다.
+
+1. LiDAR tracking 및 merge-gap 상태를 표시하는 RViz
+2. 차선 원본/ROI/후보 결과를 표시하는 `LaneCandidates` 화면
+3. 객체 bounding box를 표시하는 `MORAI Cam 4 Traffic & Object Monitor` 화면
+
+종료할 때는 launch 터미널에서 `Ctrl+C`를 누른다. OpenCV 창에서 누르는
+`q` 또는 `Esc`는 해당 카메라 프로세스만 종료할 수 있다.
+
+### 2단계: 실제 주행 활성화
+
+센서 수신, 경로, RViz, 조향 방향과 비상 정지를 확인한 뒤에만 제어를 켠다.
+
+```bash
+roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
+  enable_control:=true
+```
+
+목표 속도를 함께 지정하는 예:
+
+```bash
+roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
+  enable_control:=true \
+  target_speed_mps:=2.0
+```
+
+### 주요 launch 인자
+
+| 인자 | 기본값 | 설명 |
+|---|---:|---|
+| `bind_ip` | `0.0.0.0` | LiDAR와 카메라의 공통 로컬 UDP bind 주소 |
+| `morai_host_ip` | `192.168.0.151` | Ego Ctrl Cmd를 보낼 MORAI PC 주소 |
+| `enable_control` | `false` | 차량 제어 UDP 송신 여부 |
+| `target_speed_mps` | `2.0` | Pure Pursuit 목표 속도 |
+| `rviz` | `true` | LiDAR RViz 실행 여부 |
+| `enable_lane` | `true` | 차선 인식 프로세스 실행 여부 |
+| `lane_port` | `1101` | 차선 카메라 UDP 수신 포트 |
+| `enable_yolo` | `true` | YOLO 프로세스 실행 여부 |
+| `yolo_port` | `1131` | YOLO 카메라 UDP 수신 포트 |
+| `base_model_path` | `yolov8n.pt` | 기본 YOLO 모델 경로/이름 |
+| `custom_model_path` | `null.pt` | 커스텀 YOLO 모델 경로/이름 |
+| `yolo_confidence` | `0.4` | YOLO confidence 임계값 |
+
+커스텀 모델의 절대 경로를 지정하는 예:
+
+```bash
+roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
+  custom_model_path:=/home/user/models/morai_signal.pt
+```
+
+카메라만 개별 실행하는 예:
+
+```bash
+roslaunch camera_perception camera_perception.launch
+```
+
+YOLO를 끄고 차선 인식만 실행하는 예:
+
+```bash
+roslaunch camera_perception camera_perception.launch enable_yolo:=false
+```
+
+### 문제 해결
+
+#### RViz는 뜨지만 LiDAR 점군이 보이지 않음
+
+- MORAI LiDAR Destination Port가 `2001`인지 확인한다.
+- 기존 `feat/lidar`와 동일한 Destination IP가 설정되어 있는지 확인한다.
+- 다른 LiDAR 수신 프로세스가 같은 UDP 포트를 사용 중인지 확인한다.
+
+#### 차선 또는 YOLO 창이 뜨지 않음
+
+- MORAI 카메라 Destination Port가 각각 `1101`, `1131`인지 확인한다.
+- Ubuntu의 `DISPLAY` 및 X11 GUI 환경을 확인한다.
+- `python3 -m pip install -r requirements.txt`가 완료됐는지 확인한다.
+- 같은 카메라 포트를 사용하는 기존 Python 프로그램을 종료한다.
+
+#### 기본 YOLO 모델을 내려받지 못함
+
+- 최초 실행 시 Ubuntu PC의 인터넷 연결을 확인한다.
+- 미리 받은 `yolov8n.pt`의 절대 경로를 `base_model_path`로 지정한다.
+
+#### 커스텀 탐지가 표시되지 않음
+
+- `Sensor/null.pt` 또는 `custom_model_path`가 실제 파일을 가리키는지 확인한다.
+- 모델의 class 이름과 학습 데이터가 현재 후처리 조건과 맞는지 확인한다.
+
+#### 화면은 정상인데 차량이 움직이지 않음
+
+- 기본값은 `enable_control=false`이다. 안전 확인 후 `true`로 지정한다.
+- `morai_host_ip`, 제어 포트, `ctrl_mode=2`, `gear=4`를 확인한다.
+
+더 자세한 센서별 설명과 개별 실행법은
 [`docs/LIDAR_CAMERA_INTEGRATION.md`](docs/LIDAR_CAMERA_INTEGRATION.md)를 참고한다.
