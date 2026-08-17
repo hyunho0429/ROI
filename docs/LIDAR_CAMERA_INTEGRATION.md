@@ -20,11 +20,12 @@ MORAI 센서 설정의 수신 IP/포트를 다음 기본값과 맞춘다.
 | 기능 | 기본 주소/포트 |
 |---|---|
 | LiDAR | `0.0.0.0:2001` |
-| 차선 카메라 | `192.168.0.200:1101` |
-| YOLO 카메라 | `192.168.0.200:1131` |
+| 차선 카메라 | `0.0.0.0:1101` |
+| YOLO 카메라 | `0.0.0.0:1131` |
 
-`camera_ip`은 카메라 UDP를 수신하는 Ubuntu PC의 실제 IP로 설정한다. VM/NAT/방화벽
-구성에서도 MORAI가 이 주소로 UDP를 보낼 수 있어야 한다.
+통합 launch의 `camera_ip`은 기본적으로 LiDAR와 동일한 `bind_ip`를 사용한다.
+기본 `0.0.0.0`은 Ubuntu PC의 모든 네트워크 인터페이스에서 UDP를 수신한다.
+MORAI 센서의 목적지 IP는 별도로 Ubuntu PC의 실제 IP로 설정해야 한다.
 
 ## 전체 실행
 
@@ -32,7 +33,6 @@ MORAI 센서 설정의 수신 IP/포트를 다음 기본값과 맞춘다.
 
 ```bash
 roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
-  camera_ip:=192.168.0.200 \
   enable_control:=false
 ```
 
@@ -46,7 +46,6 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
 
 ```bash
 roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
-  camera_ip:=192.168.0.200 \
   enable_control:=true \
   target_speed_mps:=2.0
 ```
@@ -70,7 +69,6 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
 
 ```bash
 roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
-  camera_ip:=192.168.0.200 \
   custom_model_path:=/home/user/models/morai_signal.pt
 ```
 
@@ -82,14 +80,14 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
 
 ```bash
 roslaunch camera_perception camera_perception.launch \
-  camera_ip:=192.168.0.200
+  camera_ip:=0.0.0.0
 ```
 
 한 기능씩 끌 수도 있다.
 
 ```bash
 roslaunch camera_perception camera_perception.launch \
-  camera_ip:=192.168.0.200 enable_yolo:=false
+  camera_ip:=0.0.0.0 enable_yolo:=false
 ```
 
 GUI가 보이지 않으면 X11/`DISPLAY` 설정과 OpenCV GUI 지원 여부를 확인한다. 포트가

@@ -623,10 +623,10 @@ catkin_make
 source devel/setup.bash
 
 roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
-  camera_ip:=192.168.0.200 \
   enable_control:=false
 ```
 
+LiDAR와 카메라는 동일한 로컬 수신 주소 `bind_ip`(기본 `0.0.0.0`)를 사용한다.
 MORAI의 LiDAR UDP 포트는 기본 `2001`, 차선 카메라는 `1101`, YOLO 카메라는
 `1131`이다. 실제 센서 설정과 다르면 launch 인자로 변경한다. 안전을 위해
 `enable_control` 기본값은 `false`이며 센서 화면과 경로를 확인한 뒤에만 `true`로

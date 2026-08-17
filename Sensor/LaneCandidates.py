@@ -1049,7 +1049,7 @@ def run_offline(source, save_path=None, preview=True):
 
 
 # PC/가상머신마다 시뮬레이터 주소가 다르므로 환경변수와 CLI 인자로 바꿀 수 있게 둔다.
-IP = os.environ.get("MORAI_CAM_IP", "192.168.0.200")
+IP = os.environ.get("MORAI_CAM_IP", "0.0.0.0")
 PORT = int(os.environ.get("MORAI_CAM_PORT", "1101"))
 latest_frame = None
 frame_lock = threading.Lock()

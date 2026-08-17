@@ -15,7 +15,8 @@
 
   <!-- Camera defaults are preserved from feature-camera: lane=1101, YOLO=1131. -->
   <arg name="camera_stack_root" default="$(find camera_perception)/../../.." />
-  <arg name="camera_ip" default="192.168.0.200" />
+  <!-- Camera UDP receivers use the same local bind address as LiDAR. -->
+  <arg name="camera_ip" default="$(arg bind_ip)" />
   <arg name="enable_lane" default="true" />
   <arg name="lane_port" default="1101" />
   <arg name="enable_yolo" default="true" />

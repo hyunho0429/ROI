@@ -21,7 +21,7 @@ from lib.define.Camera import Camera
 from lib.network.UDP import Receiver
 
 # 공통 IP 설정 (기존 기본값은 유지하고 환경변수/CLI로 덮어쓸 수 있다.)
-IP = os.environ.get("MORAI_YOLO_CAM_IP", "192.168.0.200")
+IP = os.environ.get("MORAI_YOLO_CAM_IP", "0.0.0.0")
 
 # Cam 4 전용 설정 (Port: 1131)
 CAM_NAME = "Cam 4"

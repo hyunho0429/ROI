@@ -1,6 +1,6 @@
 <launch>
   <arg name="camera_stack_root" default="$(find camera_perception)/../../.." />
-  <arg name="camera_ip" default="192.168.0.200" />
+  <arg name="camera_ip" default="0.0.0.0" />
   <arg name="enable_lane" default="true" />
   <arg name="lane_port" default="1101" />
   <arg name="enable_yolo" default="true" />
