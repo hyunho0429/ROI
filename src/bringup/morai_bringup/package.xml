@@ -14,4 +14,5 @@
   <exec_depend>ekf_local_enu</exec_depend>
   <exec_depend>purepursuit_mgeo</exec_depend>
   <exec_depend>lidar_perception</exec_depend>
+  <exec_depend>camera_perception</exec_depend>
 </package>

@@ -610,3 +610,39 @@ roslaunch path_planning kcity_2025_dijkstra.launch \
   튜닝 상세
 - `src/path_planning/README_TUNNEL_LOCALIZATION.md`: GPS 음영 구간 위치 추정
 - `src/path_planning/README_GPS_CSV_RECORDER.md`: GPS 기준 경로 기록
+
+## LiDAR + 카메라 통합 실행
+
+`dev/merged_sensor` 브랜치는 기존 Pure Pursuit 주행 및 LiDAR tracking/RViz를
+변경하지 않고, 차선 후보 인식 화면과 YOLO 객체 탐지 화면을 별도 프로세스로
+동시에 실행한다.
+
+```bash
+cd ~/morai_ws
+catkin_make
+source devel/setup.bash
+
+roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
+  camera_ip:=192.168.0.200 \
+  enable_control:=false
+```
+
+MORAI의 LiDAR UDP 포트는 기본 `2001`, 차선 카메라는 `1101`, YOLO 카메라는
+`1131`이다. 실제 센서 설정과 다르면 launch 인자로 변경한다. 안전을 위해
+`enable_control` 기본값은 `false`이며 센서 화면과 경로를 확인한 뒤에만 `true`로
+바꾼다.
+
+카메라 Python 의존성은 다음과 같이 설치한다.
+
+```bash
+python3 -m pip install -r requirements.txt
+```
+
+차선 모델 `Sensor/lane_segmentation.onnx`는 저장소에 포함되어 있다. 기본 YOLO
+모델 `yolov8n.pt`는 Ultralytics가 최초 실행 시 내려받을 수 있다. 커스텀 신호등
+모델은 저장소에 포함되지 않으므로 `Sensor/null.pt`에 복사하거나
+`custom_model_path:=/절대/경로/model.pt`를 지정한다. 커스텀 모델이 없어도 기본
+YOLO 객체 탐지는 계속 실행된다.
+
+전체 인자와 개별 실행법은
+[`docs/LIDAR_CAMERA_INTEGRATION.md`](docs/LIDAR_CAMERA_INTEGRATION.md)를 참고한다.

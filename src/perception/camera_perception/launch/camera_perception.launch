@@ -1,0 +1,27 @@
+<launch>
+  <arg name="camera_stack_root" default="$(find camera_perception)/../../.." />
+  <arg name="camera_ip" default="192.168.0.200" />
+  <arg name="enable_lane" default="true" />
+  <arg name="lane_port" default="1101" />
+  <arg name="enable_yolo" default="true" />
+  <arg name="yolo_port" default="1131" />
+  <arg name="base_model_path" default="yolov8n.pt" />
+  <arg name="custom_model_path" default="null.pt" />
+  <arg name="yolo_confidence" default="0.4" />
+
+  <node if="$(arg enable_lane)"
+        pkg="camera_perception"
+        type="camera_feature_runner.py"
+        name="lane_camera"
+        output="screen"
+        respawn="false"
+        args="--mode lane --camera-stack-root $(arg camera_stack_root) --cam-ip $(arg camera_ip) --cam-port $(arg lane_port)" />
+
+  <node if="$(arg enable_yolo)"
+        pkg="camera_perception"
+        type="camera_feature_runner.py"
+        name="yolo_camera"
+        output="screen"
+        respawn="false"
+        args="--mode yolo --camera-stack-root $(arg camera_stack_root) --cam-ip $(arg camera_ip) --cam-port $(arg yolo_port) --base-model $(arg base_model_path) --custom-model $(arg custom_model_path) --confidence $(arg yolo_confidence)" />
+</launch>
