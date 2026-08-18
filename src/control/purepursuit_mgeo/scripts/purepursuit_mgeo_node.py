@@ -4,18 +4,15 @@
 from __future__ import annotations
 
 import math
-import time
 from typing import Optional
 
 import rospy
 from geometry_msgs.msg import PointStamped
-from lidar_perception.msg import MergeGapStatus
 from morai_msgs.msg import CtrlCmd
 from nav_msgs.msg import Odometry
 from std_msgs.msg import Float64
 
 from purepursuit_mgeo.path import MgeoPurePursuit, PathPoint, load_mgeo_path
-from purepursuit_mgeo.merge_gate import MergeDecisionGate
 
 
 def quaternion_to_yaw(x: float, y: float, z: float, w: float) -> float:
@@ -41,19 +38,6 @@ class PurePursuitNode:
         self.enable_control = bool(rospy.get_param("~enable_control", False))
         self.longl_cmd_type = int(rospy.get_param("~longl_cmd_type", 2))
         self.steering_sign = float(rospy.get_param("~steering_sign", 1.0))
-        self.merge_gate_enabled = bool(
-            rospy.get_param("~merge_gate_enabled", False)
-        )
-        self.merge_status_topic = rospy.get_param(
-            "~merge_status_topic", "/perception/merge_gap/status"
-        )
-        merge_target_side = rospy.get_param("~merge_target_side", "left")
-        merge_status_timeout_s = float(
-            rospy.get_param("~merge_status_timeout_s", 0.5)
-        )
-        self.merge_gate = MergeDecisionGate(
-            merge_target_side, merge_status_timeout_s
-        )
 
         wheelbase = float(rospy.get_param("~wheelbase_m", 3.0))
         lookahead_min = float(rospy.get_param("~lookahead_min_m", 4.0))
@@ -75,13 +59,6 @@ class PurePursuitNode:
         self.latest_odom: Optional[Odometry] = None
 
         rospy.Subscriber(self.pose_topic, Odometry, self.odom_callback, queue_size=10)
-        if self.merge_gate_enabled:
-            rospy.Subscriber(
-                self.merge_status_topic,
-                MergeGapStatus,
-                self.merge_status_callback,
-                queue_size=1,
-            )
         self.command_pub = rospy.Publisher(self.command_topic, CtrlCmd, queue_size=1)
         self.lookahead_pub = rospy.Publisher(self.lookahead_topic, PointStamped, queue_size=1)
         self.steering_preview_pub = rospy.Publisher("/control/steering_preview", Float64, queue_size=1)
@@ -98,26 +75,9 @@ class PurePursuitNode:
             wheelbase,
             lookahead_min,
         )
-        rospy.logwarn(
-            "Merge driving gate=%s topic=%s side=%s timeout=%.2fs; "
-            "gate only stops/allows the existing path and does not create a "
-            "lane-change trajectory.",
-            self.merge_gate_enabled,
-            self.merge_status_topic,
-            self.merge_gate.target_side,
-            self.merge_gate.timeout_s,
-        )
 
     def odom_callback(self, msg: Odometry) -> None:
         self.latest_odom = msg
-
-    def merge_status_callback(self, msg: MergeGapStatus) -> None:
-        self.merge_gate.update(
-            msg.valid,
-            msg.left_available,
-            msg.right_available,
-            time.monotonic(),
-        )
 
     def control_callback(self, _event: rospy.timer.TimerEvent) -> None:
         if self.latest_odom is None:
@@ -141,10 +101,6 @@ class PurePursuitNode:
             yaw,
             speed,
         )
-        merge_reason = "merge_gate_disabled"
-        if self.merge_gate_enabled:
-            merge_stop, merge_reason = self.merge_gate.stop_required(time.monotonic())
-            stop = stop or merge_stop
         steering = max(-self.max_steering, min(self.max_steering, steering))
 
         target_msg = PointStamped()
@@ -162,12 +118,11 @@ class PurePursuitNode:
 
         rospy.loginfo_throttle(
             2.0,
-            "Pure Pursuit index=%d lookahead=%.2f steering=%.4f stop=%s merge=%s",
+            "Pure Pursuit index=%d lookahead=%.2f steering=%.4f stop=%s",
             target_index,
             lookahead,
             steering,
             stop,
-            merge_reason,
         )
 
     def make_command(self, steering: float, stop: bool) -> CtrlCmd:

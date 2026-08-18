@@ -624,7 +624,6 @@ roslaunch path_planning kcity_2025_dijkstra.launch \
 - 3D LiDAR UDP 수신, clustering, bounding box, Kalman+Hungarian tracking
 - LiDAR tracking 결과와 끼어들기 공간 판단을 RViz에 표시
 - 끼어들기 좌·우 가능 여부와 map 장애물 목록을 ROS 메시지로 발행
-- 선택한 끼어들기 방향이 불가능하거나 메시지가 끊기면 선택적으로 주행 제동
 - 전방 카메라 영상의 ONNX 차선 segmentation 및 차선 후보 추적
 - YOLOv8 기본 객체 탐지
 - 커스텀 모델이 있을 때 신호등과 MORAI 장애물 탐지 결과 중첩
@@ -781,10 +780,7 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
 | `base_model_path` | `yolov8n.pt` | 기본 YOLO 모델 경로/이름 |
 | `custom_model_path` | `null.pt` | 커스텀 YOLO 모델 경로/이름 |
 | `yolo_confidence` | `0.4` | YOLO confidence 임계값 |
-| `merge_gate_enabled` | `false` | 끼어들기 상태 기반 주행 게이트 활성화 |
 | `merge_status_topic` | `/perception/merge_gap/status` | 끼어들기 상태 토픽 |
-| `merge_target_side` | `left` | `left`, `right`, `either` 중 게이트 방향 |
-| `merge_status_timeout_s` | `0.5` | 상태 수신 timeout과 fail-safe 제동 기준 |
 
 커스텀 모델의 절대 경로를 지정하는 예:
 
@@ -834,8 +830,6 @@ roslaunch camera_perception camera_perception.launch enable_yolo:=false
 
 - 기본값은 `enable_control=false`이다. 안전 확인 후 `true`로 지정한다.
 - `morai_host_ip`, 제어 포트, `ctrl_mode=2`, `gear=4`를 확인한다.
-- 주행 게이트를 켰다면 `/perception/merge_gap/status`의 `valid` 및 선택 방향
-  availability를 확인한다.
 
 ### 끼어들기 상태 토픽 사용
 
@@ -845,19 +839,10 @@ RViz의 좌·우 초록색 확정 상태와 동일한 판정을 map 장애물 �
 rostopic echo /perception/merge_gap/status
 ```
 
-기존 주행을 유지한 채 토픽만 발행하는 것이 기본 동작이다. 선택한 방향이 가능할
-때만 기존 경로 주행을 허용하려면 명시적으로 게이트를 켠다.
-
-```bash
-roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
-  enable_control:=true \
-  merge_gate_enabled:=true \
-  merge_target_side:=left
-```
-
-현재 게이트는 기존 경로의 진행/제동만 수행하며 실제 차선 변경 경로와 조향은
-생성하지 않는다. YOLO 차량 검출과 점선 차선 조건은 아직 최종 판정에 포함되지
-않으며, 현재 메시지의 `decision_source`는 `lidar_gap_only`이다.
+토픽은 왼쪽과 오른쪽을 매 주기 동시에 판단하며 기존 주행 제어에는 연결하지
+않는다. `left_available`, `right_available`, `any_available`을 다른 판단 또는 제어
+모듈에서 필요할 때 구독해 사용한다. YOLO 차량 검출과 점선 차선 조건은 아직 최종
+판정에 포함되지 않으며 현재 메시지의 `decision_source`는 `lidar_gap_only`이다.
 
 더 자세한 센서별 설명과 개별 실행법은
 [`docs/LIDAR_CAMERA_INTEGRATION.md`](docs/LIDAR_CAMERA_INTEGRATION.md)를 참고한다.

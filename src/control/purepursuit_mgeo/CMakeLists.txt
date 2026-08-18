@@ -3,7 +3,6 @@ project(purepursuit_mgeo)
 
 find_package(catkin REQUIRED COMPONENTS
   geometry_msgs
-  lidar_perception
   morai_msgs
   nav_msgs
   rospy
@@ -12,9 +11,7 @@ find_package(catkin REQUIRED COMPONENTS
 
 catkin_python_setup()
 
-catkin_package(
-  CATKIN_DEPENDS geometry_msgs lidar_perception morai_msgs nav_msgs rospy std_msgs
-)
+catkin_package()
 
 catkin_install_python(PROGRAMS
   scripts/purepursuit_mgeo_node.py

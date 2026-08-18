@@ -12,10 +12,6 @@
   <arg name="enable_control" default="false" />
   <arg name="wheelbase_m" default="3.0" />
   <arg name="target_speed_mps" default="2.0" />
-  <arg name="merge_gate_enabled" default="false" />
-  <arg name="merge_status_topic" default="/perception/merge_gap/status" />
-  <arg name="merge_target_side" default="left" />
-  <arg name="merge_status_timeout_s" default="0.5" />
 
   <!-- 1. MORAI GPS·IMU UDP -> /gps, /Imu -->
   <include file="$(find morai_udp_bridge)/launch/morai_udp_bridge.launch">
@@ -67,9 +63,5 @@
     <arg name="enable_control" value="$(arg enable_control)" />
     <arg name="wheelbase_m" value="$(arg wheelbase_m)" />
     <arg name="target_speed_mps" value="$(arg target_speed_mps)" />
-    <arg name="merge_gate_enabled" value="$(arg merge_gate_enabled)" />
-    <arg name="merge_status_topic" value="$(arg merge_status_topic)" />
-    <arg name="merge_target_side" value="$(arg merge_target_side)" />
-    <arg name="merge_status_timeout_s" value="$(arg merge_status_timeout_s)" />
   </include>
 </launch>

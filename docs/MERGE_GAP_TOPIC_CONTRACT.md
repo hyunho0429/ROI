@@ -5,11 +5,11 @@
 현재 끼어들기 가능 여부는 LiDAR tracking의 장애물 위치, bounding box, 상대 속도,
 앞뒤 여유 거리와 TTC만 사용한다. RViz에서 확정된 초록색 공간과 동일한 상태만
 `available=true`로 발행한다. 빨간색 `BLOCKED`와 노란색 `CHECKING`은 모두
-주행 측에서 불가로 취급한다.
+메시지에서 `available=false`로 발행한다.
 
 YOLO 차량 검출과 점선 차선 구간 조건은 아직 판정에 포함하지 않는다. 향후 두
 기능을 추가할 때 perception 노드에서 최종 availability 조건에 결합하면 메시지와
-주행 구독 인터페이스는 그대로 유지할 수 있다. 현재 `decision_source`는
+구독 인터페이스는 그대로 유지할 수 있다. 현재 `decision_source`는
 `lidar_gap_only`이다.
 
 ## 토픽
@@ -104,24 +104,8 @@ rostopic hz /perception/merge_gap/status
 rostopic info /perception/merge_gap/status
 ```
 
-## 주행 게이트
+## 제어와의 분리
 
-`purepursuit_mgeo`는 선택적으로 `MergeGapStatus`를 구독한다.
-
-- `merge_gate_enabled=false`(기본): 기존 주행을 완전히 보존하고 메시지는 모니터링만 한다.
-- `merge_gate_enabled=true`: 선택한 방향이 확정 가능할 때만 기존 경로 주행을 허용한다.
-- invalid, timeout, 불가 상태: brake 명령을 발행한다.
-- 가능 상태: 기존 Pure Pursuit 경로 추종을 계속한다.
-
-좌측 공간을 기준으로 게이트를 활성화하는 예:
-
-```bash
-roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
-  enable_control:=true \
-  merge_gate_enabled:=true \
-  merge_target_side:=left
-```
-
-`merge_target_side`는 `left`, `right`, `either` 중 하나이다. 이 게이트는 차선 변경
-경로 또는 조향을 생성하지 않는다. 실제 끼어들기 수행에는 별도의 차선 변경 경로
-생성 상태 머신이 추가로 필요하다.
+이 토픽은 좌·우 끼어들기 가능 여부를 판단해 발행할 뿐 Pure Pursuit 또는 차량
+제어 명령을 변경하지 않는다. 향후 별도의 행동 계획·차선 변경 모듈에서
+`left_available`, `right_available`, `any_available`을 구독해 사용할 수 있다.
