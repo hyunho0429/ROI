@@ -4,6 +4,10 @@
   <arg name="enable_control" default="false" />
   <arg name="wheelbase_m" default="3.0" />
   <arg name="target_speed_mps" default="2.0" />
+  <arg name="merge_gate_enabled" default="false" />
+  <arg name="merge_status_topic" default="/perception/merge_gap/status" />
+  <arg name="merge_target_side" default="left" />
+  <arg name="merge_status_timeout_s" default="0.5" />
 
   <node pkg="purepursuit_mgeo"
         type="purepursuit_mgeo_node.py"
@@ -21,5 +25,9 @@
     <param name="max_steering_rad" value="0.6981317008" />
     <param name="longl_cmd_type" value="2" />
     <param name="enable_control" value="$(arg enable_control)" />
+    <param name="merge_gate_enabled" value="$(arg merge_gate_enabled)" />
+    <param name="merge_status_topic" value="$(arg merge_status_topic)" />
+    <param name="merge_target_side" value="$(arg merge_target_side)" />
+    <param name="merge_status_timeout_s" value="$(arg merge_status_timeout_s)" />
   </node>
 </launch>

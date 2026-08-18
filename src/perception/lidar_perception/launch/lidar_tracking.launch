@@ -4,6 +4,8 @@
   <arg name="host_port" default="2000" />
   <arg name="destination_port" default="2001" />
   <arg name="odometry_topic" default="/localization/odometry" />
+  <arg name="map_obstacle_topic" default="/perception/lidar/tracked_obstacles_map" />
+  <arg name="merge_status_topic" default="/perception/merge_gap/status" />
   <arg name="lidar_x_m" default="0.0" />
   <arg name="lidar_y_m" default="0.0" />
   <arg name="lidar_yaw_deg" default="0.0" />
@@ -27,6 +29,7 @@
     <arg name="host_port" value="$(arg host_port)" />
     <arg name="destination_port" value="$(arg destination_port)" />
     <arg name="odometry_topic" value="$(arg odometry_topic)" />
+    <arg name="map_obstacle_topic" value="$(arg map_obstacle_topic)" />
     <arg name="lidar_x_m" value="$(arg lidar_x_m)" />
     <arg name="lidar_y_m" value="$(arg lidar_y_m)" />
     <arg name="lidar_yaw_deg" value="$(arg lidar_yaw_deg)" />
@@ -44,5 +47,7 @@
     <arg name="time_headway_s" value="$(arg time_headway_s)" />
     <arg name="minimum_ttc_s" value="$(arg minimum_ttc_s)" />
     <arg name="confirmation_scans" value="$(arg confirmation_scans)" />
+    <arg name="map_obstacle_topic" value="$(arg map_obstacle_topic)" />
+    <arg name="status_topic" value="$(arg merge_status_topic)" />
   </include>
 </launch>

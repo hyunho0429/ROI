@@ -10,6 +10,7 @@
   <buildtool_depend>catkin</buildtool_depend>
 
   <depend>geometry_msgs</depend>
+  <depend>lidar_perception</depend>
   <depend>morai_msgs</depend>
   <depend>nav_msgs</depend>
   <depend>rospy</depend>

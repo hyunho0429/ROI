@@ -12,6 +12,10 @@
   <arg name="lidar_yaw_deg" default="0.0" />
   <arg name="enable_control" default="false" />
   <arg name="rviz" default="true" />
+  <arg name="merge_gate_enabled" default="false" />
+  <arg name="merge_status_topic" default="/perception/merge_gap/status" />
+  <arg name="merge_target_side" default="left" />
+  <arg name="merge_status_timeout_s" default="0.5" />
 
   <!-- Camera defaults are preserved from feature-camera: lane=1101, YOLO=1131. -->
   <arg name="camera_stack_root" default="$(find camera_perception)/../../.." />
@@ -37,6 +41,10 @@
     <arg name="lidar_yaw_deg" value="$(arg lidar_yaw_deg)" />
     <arg name="enable_control" value="$(arg enable_control)" />
     <arg name="rviz" value="$(arg rviz)" />
+    <arg name="merge_gate_enabled" value="$(arg merge_gate_enabled)" />
+    <arg name="merge_status_topic" value="$(arg merge_status_topic)" />
+    <arg name="merge_target_side" value="$(arg merge_target_side)" />
+    <arg name="merge_status_timeout_s" value="$(arg merge_status_timeout_s)" />
   </include>
 
   <include file="$(find camera_perception)/launch/camera_perception.launch">

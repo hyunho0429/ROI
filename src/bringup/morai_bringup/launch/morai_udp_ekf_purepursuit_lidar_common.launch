@@ -19,6 +19,10 @@
   <arg name="target_speed_mps" default="2.0" />
   <arg name="enable_control" default="false" />
   <arg name="rviz" default="true" />
+  <arg name="merge_gate_enabled" default="false" />
+  <arg name="merge_status_topic" default="/perception/merge_gap/status" />
+  <arg name="merge_target_side" default="left" />
+  <arg name="merge_status_timeout_s" default="0.5" />
 
   <include file="$(find morai_bringup)/launch/morai_udp_ekf_purepursuit.launch">
     <arg name="workspace_path" value="$(arg workspace_path)" />
@@ -33,6 +37,10 @@
     <arg name="wheelbase_m" value="$(arg wheelbase_m)" />
     <arg name="target_speed_mps" value="$(arg target_speed_mps)" />
     <arg name="enable_control" value="$(arg enable_control)" />
+    <arg name="merge_gate_enabled" value="$(arg merge_gate_enabled)" />
+    <arg name="merge_status_topic" value="$(arg merge_status_topic)" />
+    <arg name="merge_target_side" value="$(arg merge_target_side)" />
+    <arg name="merge_status_timeout_s" value="$(arg merge_status_timeout_s)" />
   </include>
 
   <include file="$(find lidar_perception)/launch/$(arg lidar_launch)">
@@ -41,6 +49,7 @@
     <arg name="host_port" value="$(arg lidar_host_port)" />
     <arg name="destination_port" value="$(arg lidar_port)" />
     <arg name="odometry_topic" value="/localization/odometry" />
+    <arg name="merge_status_topic" value="$(arg merge_status_topic)" />
     <arg name="lidar_x_m" value="$(arg lidar_x_m)" />
     <arg name="lidar_y_m" value="$(arg lidar_y_m)" />
     <arg name="lidar_yaw_deg" value="$(arg lidar_yaw_deg)" />

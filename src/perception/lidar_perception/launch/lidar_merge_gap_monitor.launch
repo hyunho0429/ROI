@@ -8,6 +8,9 @@
   <arg name="time_headway_s" default="1.5" />
   <arg name="minimum_ttc_s" default="3.0" />
   <arg name="confirmation_scans" default="3" />
+  <arg name="status_topic" default="/perception/merge_gap/status" />
+  <arg name="map_obstacle_topic" default="/perception/lidar/tracked_obstacles_map" />
+  <arg name="map_obstacle_timeout_s" default="0.5" />
 
   <node pkg="lidar_perception"
         type="lidar_merge_gap_node.py"
@@ -16,6 +19,10 @@
     <param name="input_topic" value="/morai/lidar/tracking/results" />
     <param name="result_topic" value="/morai/lidar/merge_gap/results" />
     <param name="marker_topic" value="/morai/lidar/merge_gap/markers" />
+    <param name="status_topic" value="$(arg status_topic)" />
+    <param name="map_obstacle_topic" value="$(arg map_obstacle_topic)" />
+    <param name="map_frame" value="map" />
+    <param name="map_obstacle_timeout_s" value="$(arg map_obstacle_timeout_s)" />
     <param name="vehicle_length_m" value="$(arg vehicle_length_m)" />
     <param name="vehicle_width_m" value="$(arg vehicle_width_m)" />
     <param name="vehicle_height_m" value="$(arg vehicle_height_m)" />
