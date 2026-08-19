@@ -1,5 +1,5 @@
 <launch>
-  <arg name="camera_stack_root" default="$(find camera_perception)/../../.." />
+  <arg name="camera_stack_root" default="$(env HOME)/morai_ws/src/ROI" />
   <arg name="camera_ip" default="0.0.0.0" />
   <arg name="enable_lane" default="true" />
   <arg name="lane_port" default="1101" />
