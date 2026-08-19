@@ -21,7 +21,7 @@ def main():
     parser.add_argument("--base-model", default="yolov8n.pt")
     parser.add_argument("--custom-model", default="null.pt")
     parser.add_argument("--confidence", type=float, default=0.4)
-    args = parser.parse_args()
+    args, _ = parser.parse_known_args()
 
     stack_root = Path(args.camera_stack_root).expanduser().resolve()
     sensor_dir = stack_root / "Sensor"
