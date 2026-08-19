@@ -4,8 +4,9 @@
   <arg name="host_port" default="2000" />
   <arg name="destination_port" default="2001" />
   <arg name="odometry_topic" default="/localization/odometry" />
-  <!-- Accepted for compatibility with the shared bringup; this pipeline does not publish it. -->
-  <arg name="merge_status_topic" default="/perception/merge_gap/status" />
+  <!-- Accepted for compatibility with the shared bringup; this pipeline does not publish them. -->
+  <arg name="merge_available_topic" default="/perception/merge_gap/available" />
+  <arg name="merge_unavailable_topic" default="/perception/merge_gap/unavailable" />
   <arg name="lidar_x_m" default="0.0" />
   <arg name="lidar_y_m" default="0.0" />
   <arg name="lidar_yaw_deg" default="0.0" />

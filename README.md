@@ -780,7 +780,8 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
 | `base_model_path` | `yolov8n.pt` | 기본 YOLO 모델 경로/이름 |
 | `custom_model_path` | `null.pt` | 커스텀 YOLO 모델 경로/이름 |
 | `yolo_confidence` | `0.4` | YOLO confidence 임계값 |
-| `merge_status_topic` | `/perception/merge_gap/status` | 끼어들기 상태 토픽 |
+| `merge_available_topic` | `/perception/merge_gap/available` | 왼쪽 차선 끼어들기 가능 토픽 |
+| `merge_unavailable_topic` | `/perception/merge_gap/unavailable` | 왼쪽 차선 끼어들기 불가능 토픽 |
 
 커스텀 모델의 절대 경로를 지정하는 예:
 
@@ -833,16 +834,17 @@ roslaunch camera_perception camera_perception.launch enable_yolo:=false
 
 ### 끼어들기 상태 토픽 사용
 
-RViz의 좌·우 초록색 확정 상태와 동일한 판정을 map 장애물 목록과 함께 확인한다.
+RViz의 왼쪽 차선 확정 상태와 동일한 이진 판정을 확인한다.
 
 ```bash
-rostopic echo /perception/merge_gap/status
+rostopic echo /perception/merge_gap/available
+rostopic echo /perception/merge_gap/unavailable
 ```
 
-토픽은 왼쪽과 오른쪽을 매 주기 동시에 판단하며 기존 주행 제어에는 연결하지
-않는다. `left_available`, `right_available`, `any_available`을 다른 판단 또는 제어
-모듈에서 필요할 때 구독해 사용한다. YOLO 차량 검출과 점선 차선 조건은 아직 최종
-판정에 포함되지 않으며 현재 메시지의 `decision_source`는 `lidar_gap_only`이다.
+두 토픽은 모두 `std_msgs/Bool`이며 왼쪽 차선만 판단한다. 정상 입력에서는 두 값이
+항상 반대이고, LiDAR tracking 입력이 끊기면 안전하게 `available=false`,
+`unavailable=true`가 된다. 기존 주행 제어에는 연결하지 않는다. YOLO 차량 검출과
+점선 차선 조건은 아직 최종 판정에 포함되지 않는다.
 
 더 자세한 센서별 설명과 개별 실행법은
 [`docs/LIDAR_CAMERA_INTEGRATION.md`](docs/LIDAR_CAMERA_INTEGRATION.md)를 참고한다.

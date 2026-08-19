@@ -10,7 +10,8 @@
   <arg name="lidar_yaw_deg" default="0.0" />
   <arg name="enable_control" default="false" />
   <arg name="rviz" default="true" />
-  <arg name="merge_status_topic" default="/perception/merge_gap/status" />
+  <arg name="merge_available_topic" default="/perception/merge_gap/available" />
+  <arg name="merge_unavailable_topic" default="/perception/merge_gap/unavailable" />
   <include file="$(find morai_bringup)/launch/morai_udp_ekf_purepursuit_lidar_common.launch">
     <arg name="lidar_launch" value="lidar_tracking.launch" />
     <arg name="workspace_path" value="$(arg workspace_path)" />
@@ -24,6 +25,7 @@
     <arg name="lidar_yaw_deg" value="$(arg lidar_yaw_deg)" />
     <arg name="enable_control" value="$(arg enable_control)" />
     <arg name="rviz" value="$(arg rviz)" />
-    <arg name="merge_status_topic" value="$(arg merge_status_topic)" />
+    <arg name="merge_available_topic" value="$(arg merge_available_topic)" />
+    <arg name="merge_unavailable_topic" value="$(arg merge_unavailable_topic)" />
   </include>
 </launch>

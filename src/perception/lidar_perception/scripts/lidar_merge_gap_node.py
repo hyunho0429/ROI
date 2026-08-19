@@ -3,14 +3,11 @@
 
 import json
 import math
-import threading
 import time
 
 import rospy
-from std_msgs.msg import String
+from std_msgs.msg import Bool, String
 from visualization_msgs.msg import Marker, MarkerArray
-
-from lidar_perception.msg import LidarObstacleArray, MergeGapStatus
 
 from lidar_perception.lidar_merge_gap import (
     MergeGapTracker,
@@ -44,15 +41,11 @@ class MergeGapNode:
         self.marker_topic = _param(
             "marker_topic", "/morai/lidar/merge_gap/markers"
         )
-        self.status_topic = _param(
-            "status_topic", "/perception/merge_gap/status"
+        self.available_topic = _param(
+            "available_topic", "/perception/merge_gap/available"
         )
-        self.map_obstacle_topic = _param(
-            "map_obstacle_topic", "/perception/lidar/tracked_obstacles_map"
-        )
-        self.map_frame = _param("map_frame", "map")
-        self.map_obstacle_timeout_s = float(
-            _param("map_obstacle_timeout_s", 0.5)
+        self.unavailable_topic = _param(
+            "unavailable_topic", "/perception/merge_gap/unavailable"
         )
         self.frame_id = _param("frame_id", "morai_lidar")
         self.vehicle_length_m = float(_param("vehicle_length_m", 4.635))
@@ -75,14 +68,9 @@ class MergeGapNode:
         confirmation_scans = int(_param("confirmation_scans", 3))
         if self.stale_timeout_s <= 0.0:
             raise ValueError("stale_timeout_s must be positive")
-        if self.map_obstacle_timeout_s <= 0.0:
-            raise ValueError("map_obstacle_timeout_s must be positive")
         self.confirmation = MergeGapTracker(confirmation_scans)
         self.last_input_at = None
         self.stale_published = False
-        self.map_obstacle_lock = threading.Lock()
-        self.latest_map_obstacles = None
-        self.latest_map_obstacles_received_at = None
 
         self.result_publisher = rospy.Publisher(
             self.result_topic, String, queue_size=1
@@ -90,19 +78,16 @@ class MergeGapNode:
         self.marker_publisher = rospy.Publisher(
             self.marker_topic, MarkerArray, queue_size=1
         )
-        self.status_publisher = rospy.Publisher(
-            self.status_topic, MergeGapStatus, queue_size=1
+        self.available_publisher = rospy.Publisher(
+            self.available_topic, Bool, queue_size=1
+        )
+        self.unavailable_publisher = rospy.Publisher(
+            self.unavailable_topic, Bool, queue_size=1
         )
         self.subscriber = rospy.Subscriber(
             self.input_topic,
             String,
             self._tracking_callback,
-            queue_size=1,
-        )
-        self.map_obstacle_subscriber = rospy.Subscriber(
-            self.map_obstacle_topic,
-            LidarObstacleArray,
-            self._map_obstacle_callback,
             queue_size=1,
         )
         self.stale_timer = rospy.Timer(
@@ -126,75 +111,24 @@ class MergeGapNode:
             confirmation_scans,
         )
         rospy.logwarn(
-            "Merge status output=%s map_obstacles=%s frame=%s "
+            "LEFT merge state outputs: available=%s unavailable=%s "
             "source=lidar_gap_only",
-            self.status_topic,
-            self.map_obstacle_topic,
-            self.map_frame,
+            self.available_topic,
+            self.unavailable_topic,
         )
+        self._publish_binary_states()
 
-    def _map_obstacle_callback(self, message):
-        with self.map_obstacle_lock:
-            self.latest_map_obstacles = message
-            self.latest_map_obstacles_received_at = time.monotonic()
-
-    def _fresh_map_obstacles(self):
-        with self.map_obstacle_lock:
-            message = self.latest_map_obstacles
-            received_at = self.latest_map_obstacles_received_at
-        if message is None or received_at is None:
-            return None
-        if time.monotonic() - received_at > self.map_obstacle_timeout_s:
-            return None
-        if message.header.frame_id != self.map_frame:
-            rospy.logwarn_throttle(
-                1.0,
-                "Ignoring map obstacle frame %s; expected %s",
-                message.header.frame_id,
-                self.map_frame,
-            )
-            return None
-        return message
-
-    def _publish_typed_status(self, assessments=None, valid=True, reason=""):
-        map_obstacles = self._fresh_map_obstacles()
-        message = MergeGapStatus()
-        message.header.frame_id = self.map_frame
-        if map_obstacles is not None:
-            message.header.stamp = map_obstacles.header.stamp
-            message.timestamp = map_obstacles.header.stamp
-            message.obstacles = list(map_obstacles.obstacles)
-            message.obstacle_count = len(message.obstacles)
-        else:
-            message.header.stamp = rospy.Time.now()
-            message.timestamp = message.header.stamp
-            message.obstacle_count = 0
-
-        message.valid = bool(
-            valid and assessments is not None and map_obstacles is not None
+    def _publish_binary_states(self, assessments=None):
+        left_available = bool(
+            assessments is not None
+            and assessments["left"]["confirmed_available"]
         )
-        if message.valid:
-            message.left_available = bool(
-                assessments["left"]["confirmed_available"]
-            )
-            message.right_available = bool(
-                assessments["right"]["confirmed_available"]
-            )
-            message.left_reason = str(assessments["left"]["reason"])
-            message.right_reason = str(assessments["right"]["reason"])
-        else:
-            message.left_available = False
-            message.right_available = False
-            invalid_reason = reason or "map_obstacles_unavailable"
-            message.left_reason = invalid_reason
-            message.right_reason = invalid_reason
-        message.any_available = bool(
-            message.left_available or message.right_available
-        )
-        # Future YOLO vehicle and dashed-lane conditions should be added before
-        # setting availability. Consumers keep the same message contract.
-        message.decision_source = "lidar_gap_only"
-        self.status_publisher.publish(message)
+        available = Bool(data=left_available)
+        unavailable = Bool(data=not left_available)
+        # Future YOLO vehicle and dashed-lane conditions should be applied
+        # before publishing this final left-lane binary state.
+        self.available_publisher.publish(available)
+        self.unavailable_publisher.publish(unavailable)
 
     def _tracking_callback(self, message):
         self.last_input_at = time.monotonic()
@@ -228,16 +162,14 @@ class MergeGapNode:
             "valid": True,
             "algorithm": "euclidean_bbox_kalman_hungarian_dynamic_gap",
             "left": assessments["left"],
-            "right": assessments["right"],
         }
         self.result_publisher.publish(
             String(data=json.dumps(_json_safe(payload), ensure_ascii=False))
         )
-        self._publish_typed_status(assessments=assessments)
+        self._publish_binary_states(assessments)
         self.marker_publisher.publish(self._markers(assessments))
 
         left_text = format_tracked_merge_gap_status(assessments["left"])
-        right_text = format_tracked_merge_gap_status(assessments["right"])
         # WARN level is intentional: ROS terminals render this periodic status in
         # a more visible color than ordinary INFO output.
         rospy.logwarn_throttle(
@@ -245,30 +177,28 @@ class MergeGapNode:
             "\n"
             "===================== MERGE SPACE =====================\n"
             "LEFT  | %s\n"
-            "RIGHT | %s\n"
             "=======================================================",
             left_text,
-            right_text,
         )
-        for side in became_available:
+        if "left" in became_available:
             rospy.logwarn(
                 "\n"
                 "#######################################################\n"
                 ">>> MERGE SPACE AVAILABLE: %s <<<\n"
                 "%s\n"
                 "#######################################################",
-                side.upper(),
-                format_tracked_merge_gap_status(assessments[side]),
+                "LEFT",
+                left_text,
             )
-        for side in became_unavailable:
+        if "left" in became_unavailable:
             rospy.logwarn(
                 "\n"
                 "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n"
                 ">>> MERGE SPACE LOST/BLOCKED: %s <<<\n"
                 "%s\n"
                 "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!",
-                side.upper(),
-                format_tracked_merge_gap_status(assessments[side]),
+                "LEFT",
+                left_text,
             )
 
     def _stale_callback(self, _event):
@@ -300,10 +230,9 @@ class MergeGapNode:
             "algorithm": "euclidean_bbox_kalman_hungarian_dynamic_gap",
             "reason": reason,
             "left": {"confirmed_available": False},
-            "right": {"confirmed_available": False},
         }
         self.result_publisher.publish(String(data=json.dumps(payload)))
-        self._publish_typed_status(valid=False, reason=reason)
+        self._publish_binary_states()
         delete = Marker()
         delete.action = Marker.DELETEALL
         self.marker_publisher.publish(MarkerArray(markers=[delete]))
@@ -325,7 +254,7 @@ class MergeGapNode:
         ego.color.r, ego.color.g, ego.color.b, ego.color.a = 0.2, 0.5, 1.0, 0.35
         marker_array.markers.append(ego)
 
-        for index, side in enumerate(("left", "right")):
+        for index, side in enumerate(("left",)):
             assessment = assessments[side]
             if assessment["confirmed_available"]:
                 color = (0.1, 1.0, 0.2, 0.32)

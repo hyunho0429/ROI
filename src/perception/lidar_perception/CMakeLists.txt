@@ -15,7 +15,6 @@ add_message_files(
   FILES
   LidarObstacle.msg
   LidarObstacleArray.msg
-  MergeGapStatus.msg
 )
 
 generate_messages(
