@@ -1,0 +1,749 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+import rospy
+import json
+import math
+import tf2_ros
+
+from std_msgs.msg import String
+from tf.transformations import euler_from_quaternion
+
+
+class StableObstacleTracker:
+
+    def __init__(self):
+
+        rospy.init_node("obstacle_state_publisher_tracking_stable_v1")
+
+        # =========================================================
+        # Topics / Frames
+        # =========================================================
+
+        self.input_topic = rospy.get_param(
+            "~input_topic",
+            "/morai/lidar/obstacles"
+        )
+
+        self.output_topic = rospy.get_param(
+            "~output_topic",
+            "/detection/obstacle_states_stable"
+        )
+
+        self.map_frame = rospy.get_param(
+            "~map_frame",
+            "map"
+        )
+
+        self.source_frame = rospy.get_param(
+            "~source_frame",
+            "base_link"
+        )
+
+        # =========================================================
+        # Tracking parameters
+        # =========================================================
+
+        # 예측 위치와 현재 위치가 이 거리 이내면
+        # 같은 객체 후보
+        self.match_distance = rospy.get_param(
+            "~match_distance",
+            3.0
+        )
+
+        # LiDAR에서 잠깐 사라져도 이 시간까지 ID 유지
+        self.track_timeout = rospy.get_param(
+            "~track_timeout",
+            3.0
+        )
+
+        self.min_dt = rospy.get_param(
+            "~min_dt",
+            0.03
+        )
+
+        # 속도 LPF
+        self.velocity_alpha = rospy.get_param(
+            "~velocity_alpha",
+            0.35
+        )
+
+        # bbox 크기 차이에 대한 matching 가중치
+        self.size_weight = rospy.get_param(
+            "~size_weight",
+            0.25
+        )
+
+        # 순간적인 과도한 속도 방지
+        self.max_speed_mps = rospy.get_param(
+            "~max_speed_mps",
+            20.0
+        )
+
+        # =========================================================
+        # TF
+        # =========================================================
+
+        self.tf_buffer = tf2_ros.Buffer()
+
+        self.tf_listener = tf2_ros.TransformListener(
+            self.tf_buffer
+        )
+
+        # =========================================================
+        # Tracks
+        # =========================================================
+        #
+        # tracks[id] =
+        # {
+        #     x, y,
+        #     vx, vy,
+        #     length, width,
+        #     last_seen
+        # }
+        #
+        # =========================================================
+
+        self.tracks = {}
+
+        self.next_id = 0
+
+        # =========================================================
+        # ROS
+        # =========================================================
+
+        self.publisher = rospy.Publisher(
+            self.output_topic,
+            String,
+            queue_size=10
+        )
+
+        self.subscriber = rospy.Subscriber(
+            self.input_topic,
+            String,
+            self.obstacle_callback,
+            queue_size=1
+        )
+
+        rospy.loginfo(
+            "[StableTracker V1] Started"
+        )
+
+        rospy.loginfo(
+            "[StableTracker V1] Input  : %s",
+            self.input_topic
+        )
+
+        rospy.loginfo(
+            "[StableTracker V1] Output : %s",
+            self.output_topic
+        )
+
+        rospy.loginfo(
+            "[StableTracker V1] match_distance=%.1f m track_timeout=%.1f s",
+            self.match_distance,
+            self.track_timeout
+        )
+
+    # =============================================================
+    # TF
+    # =============================================================
+
+    def get_transform(self):
+
+        try:
+
+            return self.tf_buffer.lookup_transform(
+                self.map_frame,
+                self.source_frame,
+                rospy.Time(0),
+                rospy.Duration(0.1)
+            )
+
+        except Exception as e:
+
+            rospy.logwarn_throttle(
+                2.0,
+                "[StableTracker V1] TF failed: %s",
+                str(e)
+            )
+
+            return None
+
+    @staticmethod
+    def quaternion_to_yaw(q):
+
+        quaternion = [
+            q.x,
+            q.y,
+            q.z,
+            q.w
+        ]
+
+        _, _, yaw = euler_from_quaternion(
+            quaternion
+        )
+
+        return yaw
+
+    def local_to_map(
+        self,
+        x_local,
+        y_local,
+        transform
+    ):
+
+        t = transform.transform.translation
+        q = transform.transform.rotation
+
+        vehicle_yaw = self.quaternion_to_yaw(q)
+
+        cos_yaw = math.cos(vehicle_yaw)
+        sin_yaw = math.sin(vehicle_yaw)
+
+        x_map = (
+            t.x
+            + cos_yaw * x_local
+            - sin_yaw * y_local
+        )
+
+        y_map = (
+            t.y
+            + sin_yaw * x_local
+            + cos_yaw * y_local
+        )
+
+        return x_map, y_map
+
+    # =============================================================
+    # Track prediction
+    # =============================================================
+
+    def predict_track_position(
+        self,
+        track,
+        timestamp
+    ):
+
+        dt = timestamp - track["last_seen"]
+
+        if dt < 0.0:
+            dt = 0.0
+
+        predicted_x = (
+            track["x"]
+            + track["vx"] * dt
+        )
+
+        predicted_y = (
+            track["y"]
+            + track["vy"] * dt
+        )
+
+        return predicted_x, predicted_y
+
+    # =============================================================
+    # Matching
+    # =============================================================
+
+    def find_best_track(
+        self,
+        x,
+        y,
+        length,
+        width,
+        timestamp,
+        used_track_ids
+    ):
+
+        best_id = None
+        best_score = float("inf")
+
+        for track_id, track in self.tracks.items():
+
+            if track_id in used_track_ids:
+                continue
+
+            age = timestamp - track["last_seen"]
+
+            if age > self.track_timeout:
+                continue
+
+            # -----------------------------------------------------
+            # 이전 속도로 현재 예상 위치 계산
+            # -----------------------------------------------------
+
+            predicted_x, predicted_y = (
+                self.predict_track_position(
+                    track,
+                    timestamp
+                )
+            )
+
+            dx = x - predicted_x
+            dy = y - predicted_y
+
+            position_distance = math.hypot(
+                dx,
+                dy
+            )
+
+            # 위치가 너무 멀면 같은 객체 아님
+            if position_distance > self.match_distance:
+                continue
+
+            # -----------------------------------------------------
+            # bbox 크기도 약하게 비교
+            # -----------------------------------------------------
+
+            length_diff = abs(
+                length - track["length"]
+            )
+
+            width_diff = abs(
+                width - track["width"]
+            )
+
+            size_difference = (
+                length_diff
+                + width_diff
+            )
+
+            # -----------------------------------------------------
+            # Matching score
+            # -----------------------------------------------------
+
+            score = (
+                position_distance
+                + self.size_weight * size_difference
+            )
+
+            if score < best_score:
+
+                best_score = score
+                best_id = track_id
+
+        return best_id
+
+    # =============================================================
+    # Track creation
+    # =============================================================
+
+    def create_track(
+        self,
+        x,
+        y,
+        length,
+        width,
+        timestamp
+    ):
+
+        track_id = self.next_id
+
+        self.next_id += 1
+
+        self.tracks[track_id] = {
+
+            "x": x,
+            "y": y,
+
+            "vx": 0.0,
+            "vy": 0.0,
+
+            "length": length,
+            "width": width,
+
+            "last_seen": timestamp
+        }
+
+        rospy.loginfo(
+            "[TRACK CREATED] id=%d x=%.2f y=%.2f",
+            track_id,
+            x,
+            y
+        )
+
+        return track_id
+
+    # =============================================================
+    # Track update
+    # =============================================================
+
+    def update_track(
+        self,
+        track_id,
+        x,
+        y,
+        length,
+        width,
+        timestamp
+    ):
+
+        previous = self.tracks[track_id]
+
+        dt = timestamp - previous["last_seen"]
+
+        vx = previous["vx"]
+        vy = previous["vy"]
+
+        if dt >= self.min_dt:
+
+            raw_vx = (
+                x - previous["x"]
+            ) / dt
+
+            raw_vy = (
+                y - previous["y"]
+            ) / dt
+
+            raw_speed = math.hypot(
+                raw_vx,
+                raw_vy
+            )
+
+            # -----------------------------------------------------
+            # 비정상적인 순간 속도는 사용하지 않음
+            # -----------------------------------------------------
+
+            if raw_speed <= self.max_speed_mps:
+
+                alpha = self.velocity_alpha
+
+                vx = (
+                    alpha * raw_vx
+                    + (1.0 - alpha) * previous["vx"]
+                )
+
+                vy = (
+                    alpha * raw_vy
+                    + (1.0 - alpha) * previous["vy"]
+                )
+
+        # bbox도 약간 smoothing
+        length_filtered = (
+            0.4 * length
+            + 0.6 * previous["length"]
+        )
+
+        width_filtered = (
+            0.4 * width
+            + 0.6 * previous["width"]
+        )
+
+        self.tracks[track_id] = {
+
+            "x": x,
+            "y": y,
+
+            "vx": vx,
+            "vy": vy,
+
+            "length": length_filtered,
+            "width": width_filtered,
+
+            "last_seen": timestamp
+        }
+
+        return (
+            vx,
+            vy,
+            length_filtered,
+            width_filtered
+        )
+
+    # =============================================================
+    # Remove old tracks
+    # =============================================================
+
+    def remove_old_tracks(
+        self,
+        timestamp
+    ):
+
+        remove_ids = []
+
+        for track_id, track in self.tracks.items():
+
+            age = (
+                timestamp
+                - track["last_seen"]
+            )
+
+            if age > self.track_timeout:
+
+                remove_ids.append(
+                    track_id
+                )
+
+        for track_id in remove_ids:
+
+            rospy.loginfo(
+                "[TRACK REMOVED] id=%d",
+                track_id
+            )
+
+            del self.tracks[track_id]
+
+    # =============================================================
+    # Main callback
+    # =============================================================
+
+    def obstacle_callback(
+        self,
+        msg
+    ):
+
+        timestamp = rospy.Time.now().to_sec()
+
+        # ---------------------------------------------------------
+        # JSON
+        # ---------------------------------------------------------
+
+        try:
+
+            obstacles_raw = json.loads(
+                msg.data
+            )
+
+        except Exception as e:
+
+            rospy.logwarn_throttle(
+                2.0,
+                "[StableTracker V1] JSON error: %s",
+                str(e)
+            )
+
+            return
+
+        if not isinstance(
+            obstacles_raw,
+            list
+        ):
+            return
+
+        # ---------------------------------------------------------
+        # TF
+        # ---------------------------------------------------------
+
+        transform = self.get_transform()
+
+        if transform is None:
+            return
+
+        # ---------------------------------------------------------
+        # 오래된 track 정리
+        # ---------------------------------------------------------
+
+        self.remove_old_tracks(
+            timestamp
+        )
+
+        used_track_ids = set()
+
+        output_obstacles = []
+
+        # =========================================================
+        # Each obstacle
+        # =========================================================
+
+        for obs in obstacles_raw:
+
+            centroid = obs.get(
+                "centroid",
+                [0.0, 0.0, 0.0]
+            )
+
+            if len(centroid) < 2:
+                continue
+
+            center_x_local = float(
+                centroid[0]
+            )
+
+            center_y_local = float(
+                centroid[1]
+            )
+
+            # -----------------------------------------------------
+            # Bounding box
+            # -----------------------------------------------------
+
+            bbox_min = obs.get(
+                "bbox_min",
+                [0.0, 0.0, 0.0]
+            )
+
+            bbox_max = obs.get(
+                "bbox_max",
+                [0.0, 0.0, 0.0]
+            )
+
+            if (
+                len(bbox_min) >= 2
+                and len(bbox_max) >= 2
+            ):
+
+                size_x = abs(
+                    float(bbox_max[0])
+                    - float(bbox_min[0])
+                )
+
+                size_y = abs(
+                    float(bbox_max[1])
+                    - float(bbox_min[1])
+                )
+
+                length = max(
+                    size_x,
+                    size_y
+                )
+
+                width = min(
+                    size_x,
+                    size_y
+                )
+
+            else:
+
+                length = 0.0
+                width = 0.0
+
+            # -----------------------------------------------------
+            # map frame
+            # -----------------------------------------------------
+
+            (
+                center_x_map,
+                center_y_map
+            ) = self.local_to_map(
+                center_x_local,
+                center_y_local,
+                transform
+            )
+
+            # -----------------------------------------------------
+            # Matching
+            # -----------------------------------------------------
+
+            track_id = self.find_best_track(
+                center_x_map,
+                center_y_map,
+                length,
+                width,
+                timestamp,
+                used_track_ids
+            )
+
+            # -----------------------------------------------------
+            # New track
+            # -----------------------------------------------------
+
+            if track_id is None:
+
+                track_id = self.create_track(
+                    center_x_map,
+                    center_y_map,
+                    length,
+                    width,
+                    timestamp
+                )
+
+                velocity_x_map = 0.0
+                velocity_y_map = 0.0
+
+                filtered_length = length
+                filtered_width = width
+
+            # -----------------------------------------------------
+            # Existing track
+            # -----------------------------------------------------
+
+            else:
+
+                (
+                    velocity_x_map,
+                    velocity_y_map,
+                    filtered_length,
+                    filtered_width
+                ) = self.update_track(
+                    track_id,
+                    center_x_map,
+                    center_y_map,
+                    length,
+                    width,
+                    timestamp
+                )
+
+            used_track_ids.add(
+                track_id
+            )
+
+            obstacle_state = {
+
+                "id":
+                    int(track_id),
+
+                "center_x_map":
+                    float(center_x_map),
+
+                "center_y_map":
+                    float(center_y_map),
+
+                "yaw":
+                    0.0,
+
+                "length":
+                    float(filtered_length),
+
+                "width":
+                    float(filtered_width),
+
+                "velocity_x_map":
+                    float(velocity_x_map),
+
+                "velocity_y_map":
+                    float(velocity_y_map)
+            }
+
+            output_obstacles.append(
+                obstacle_state
+            )
+
+        # =========================================================
+        # Publish
+        # =========================================================
+
+        output = {
+
+            "timestamp":
+                float(timestamp),
+
+            "obstacle_count":
+                len(output_obstacles),
+
+            "obstacles":
+                output_obstacles
+        }
+
+        output_msg = String()
+
+        output_msg.data = json.dumps(
+            output,
+            ensure_ascii=False
+        )
+
+        self.publisher.publish(
+            output_msg
+        )
+
+
+if __name__ == "__main__":
+
+    try:
+
+        StableObstacleTracker()
+
+        rospy.spin()
+
+    except rospy.ROSInterruptException:
+        pass
