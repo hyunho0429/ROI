@@ -12,10 +12,9 @@
   <arg name="lidar_yaw_deg" default="0.0" />
   <arg name="enable_control" default="false" />
   <arg name="rviz" default="true" />
-  <arg name="merge_status_topic" default="/perception/merge_gap/status" />
 
   <!-- Camera defaults are preserved from feature-camera: lane=1101, YOLO=1131. -->
-  <arg name="camera_stack_root" default="$(find camera_perception)/../../.." />
+  <arg name="camera_stack_root" default="$(env HOME)/morai_ws/src/ROI" />
   <!-- Camera UDP receivers use the same local bind address as LiDAR. -->
   <arg name="camera_ip" default="$(arg bind_ip)" />
   <arg name="enable_lane" default="true" />
@@ -38,7 +37,6 @@
     <arg name="lidar_yaw_deg" value="$(arg lidar_yaw_deg)" />
     <arg name="enable_control" value="$(arg enable_control)" />
     <arg name="rviz" value="$(arg rviz)" />
-    <arg name="merge_status_topic" value="$(arg merge_status_topic)" />
   </include>
 
   <include file="$(find camera_perception)/launch/camera_perception.launch">
