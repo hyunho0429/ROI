@@ -50,7 +50,7 @@
     <param name="vertical_support_radius_m" value="$(arg vertical_support_radius_m)" />
     <param name="vertical_support_min_height_m" value="$(arg vertical_support_min_height_m)" />
     <param name="fast_nearest_enabled" value="false" />
-    <param name="cluster_enabled" value="false" />
+    <param name="cluster_enabled" value="true" />
     <param name="merge_gap_enabled" value="false" />
   </node>
 </launch>
