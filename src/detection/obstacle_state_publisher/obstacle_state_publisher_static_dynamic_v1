@@ -1,0 +1,776 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+import rospy
+import json
+import math
+import tf2_ros
+
+from std_msgs.msg import String
+from tf.transformations import euler_from_quaternion
+
+
+class ObstacleStatePublisher:
+
+    def __init__(self):
+
+        rospy.init_node("obstacle_state_publisher_static_dynamic_v1")
+
+        # =========================================================
+        # Topics / Frames
+        # =========================================================
+
+        self.input_topic = rospy.get_param(
+            "~input_topic",
+            "/morai/lidar/obstacles"
+        )
+
+        self.static_topic = rospy.get_param(
+            "~static_topic",
+            "/detection/static_obstacles"
+        )
+
+        self.dynamic_topic = rospy.get_param(
+            "~dynamic_topic",
+            "/detection/dynamic_obstacles"
+        )
+
+        self.map_frame = rospy.get_param(
+            "~map_frame",
+            "map"
+        )
+
+        self.source_frame = rospy.get_param(
+            "~source_frame",
+            "base_link"
+        )
+
+        # =========================================================
+        # Tracking parameters
+        # =========================================================
+
+        # 같은 장애물이라고 볼 최대 거리
+        self.match_distance = rospy.get_param(
+            "~match_distance",
+            2.0
+        )
+
+        # track을 얼마나 오래 유지할지
+        self.track_timeout = rospy.get_param(
+            "~track_timeout",
+            2.0
+        )
+
+        self.min_dt = rospy.get_param(
+            "~min_dt",
+            0.03
+        )
+
+        # velocity LPF
+        self.velocity_alpha = rospy.get_param(
+            "~velocity_alpha",
+            0.4
+        )
+
+        # =========================================================
+        # Static / Dynamic classification
+        # =========================================================
+
+        # 이 속도보다 느리면 정지 후보
+        self.static_speed_threshold = rospy.get_param(
+            "~static_speed_threshold",
+            0.20
+        )
+
+        # 몇 초 동안 느려야 STATIC으로 확정할지
+        self.static_confirm_time = rospy.get_param(
+            "~static_confirm_time",
+            1.5
+        )
+
+        # 기존 static obstacle과 이 거리 이내면 같은 위치
+        self.static_merge_distance = rospy.get_param(
+            "~static_merge_distance",
+            0.5
+        )
+
+        # =========================================================
+        # TF
+        # =========================================================
+
+        self.tf_buffer = tf2_ros.Buffer()
+        self.tf_listener = tf2_ros.TransformListener(
+            self.tf_buffer
+        )
+
+        # =========================================================
+        # Tracking
+        # =========================================================
+
+        self.tracks = {}
+        self.next_id = 0
+
+        # 이미 등록된 정적 장애물 저장
+        self.static_map = {}
+
+        # =========================================================
+        # Publishers
+        # =========================================================
+
+        # static은 latch=True
+        # 마지막 static map을 ROS가 기억한다.
+        self.static_pub = rospy.Publisher(
+            self.static_topic,
+            String,
+            queue_size=1,
+            latch=True
+        )
+
+        # dynamic은 실시간
+        self.dynamic_pub = rospy.Publisher(
+            self.dynamic_topic,
+            String,
+            queue_size=10
+        )
+
+        self.subscriber = rospy.Subscriber(
+            self.input_topic,
+            String,
+            self.obstacle_callback,
+            queue_size=1
+        )
+
+        rospy.loginfo(
+            "[StaticDynamic V1] Started"
+        )
+
+        rospy.loginfo(
+            "[StaticDynamic V1] Input   : %s",
+            self.input_topic
+        )
+
+        rospy.loginfo(
+            "[StaticDynamic V1] Static  : %s",
+            self.static_topic
+        )
+
+        rospy.loginfo(
+            "[StaticDynamic V1] Dynamic : %s",
+            self.dynamic_topic
+        )
+
+    # =============================================================
+    # TF
+    # =============================================================
+
+    def get_transform(self):
+
+        try:
+
+            return self.tf_buffer.lookup_transform(
+                self.map_frame,
+                self.source_frame,
+                rospy.Time(0),
+                rospy.Duration(0.1)
+            )
+
+        except Exception as e:
+
+            rospy.logwarn_throttle(
+                2.0,
+                "[StaticDynamic V1] TF failed: %s",
+                str(e)
+            )
+
+            return None
+
+    @staticmethod
+    def quaternion_to_yaw(q):
+
+        quaternion = [
+            q.x,
+            q.y,
+            q.z,
+            q.w
+        ]
+
+        _, _, yaw = euler_from_quaternion(
+            quaternion
+        )
+
+        return yaw
+
+    def local_to_map(
+        self,
+        x_local,
+        y_local,
+        transform
+    ):
+
+        t = transform.transform.translation
+        q = transform.transform.rotation
+
+        vehicle_yaw = self.quaternion_to_yaw(q)
+
+        cos_yaw = math.cos(vehicle_yaw)
+        sin_yaw = math.sin(vehicle_yaw)
+
+        x_map = (
+            t.x
+            + cos_yaw * x_local
+            - sin_yaw * y_local
+        )
+
+        y_map = (
+            t.y
+            + sin_yaw * x_local
+            + cos_yaw * y_local
+        )
+
+        return x_map, y_map
+
+    # =============================================================
+    # Tracking
+    # =============================================================
+
+    def find_matching_track(
+        self,
+        x,
+        y,
+        used_ids
+    ):
+
+        best_id = None
+        best_distance = float("inf")
+
+        for track_id, track in self.tracks.items():
+
+            if track_id in used_ids:
+                continue
+
+            dx = x - track["x"]
+            dy = y - track["y"]
+
+            distance = math.hypot(dx, dy)
+
+            if (
+                distance < self.match_distance
+                and distance < best_distance
+            ):
+
+                best_id = track_id
+                best_distance = distance
+
+        return best_id
+
+    def create_track(
+        self,
+        x,
+        y,
+        timestamp
+    ):
+
+        track_id = self.next_id
+        self.next_id += 1
+
+        self.tracks[track_id] = {
+            "x": x,
+            "y": y,
+
+            "vx": 0.0,
+            "vy": 0.0,
+
+            "time": timestamp,
+
+            # 정지 상태가 시작된 시간
+            "stationary_since": timestamp,
+
+            # 아직 STATIC으로 확정되지 않음
+            "is_static": False
+        }
+
+        return track_id
+
+    def update_track(
+        self,
+        track_id,
+        x,
+        y,
+        timestamp
+    ):
+
+        previous = self.tracks[track_id]
+
+        dt = timestamp - previous["time"]
+
+        vx = previous["vx"]
+        vy = previous["vy"]
+
+        if dt >= self.min_dt:
+
+            raw_vx = (
+                x - previous["x"]
+            ) / dt
+
+            raw_vy = (
+                y - previous["y"]
+            ) / dt
+
+            alpha = self.velocity_alpha
+
+            vx = (
+                alpha * raw_vx
+                + (1.0 - alpha) * previous["vx"]
+            )
+
+            vy = (
+                alpha * raw_vy
+                + (1.0 - alpha) * previous["vy"]
+            )
+
+        speed = math.hypot(vx, vy)
+
+        stationary_since = previous["stationary_since"]
+
+        # ---------------------------------------------------------
+        # Static 후보 판단
+        # ---------------------------------------------------------
+
+        if speed <= self.static_speed_threshold:
+
+            # 이전까지 움직이고 있었다면
+            # stationary timer 시작
+            if stationary_since is None:
+                stationary_since = timestamp
+
+        else:
+
+            stationary_since = None
+
+        is_static = previous["is_static"]
+
+        # 일정 시간 동안 거의 움직이지 않으면 STATIC 확정
+        if (
+            not is_static
+            and stationary_since is not None
+            and timestamp - stationary_since
+                >= self.static_confirm_time
+        ):
+
+            is_static = True
+
+        self.tracks[track_id] = {
+            "x": x,
+            "y": y,
+
+            "vx": vx,
+            "vy": vy,
+
+            "time": timestamp,
+
+            "stationary_since": stationary_since,
+
+            "is_static": is_static
+        }
+
+        return vx, vy, speed, is_static
+
+    def remove_old_tracks(
+        self,
+        timestamp
+    ):
+
+        remove_ids = []
+
+        for track_id, track in self.tracks.items():
+
+            if (
+                timestamp - track["time"]
+                > self.track_timeout
+            ):
+
+                remove_ids.append(track_id)
+
+        for track_id in remove_ids:
+
+            del self.tracks[track_id]
+
+    # =============================================================
+    # Static map
+    # =============================================================
+
+    def find_existing_static(
+        self,
+        x,
+        y
+    ):
+
+        for static_id, obstacle in self.static_map.items():
+
+            dx = x - obstacle["center_x_map"]
+            dy = y - obstacle["center_y_map"]
+
+            distance = math.hypot(dx, dy)
+
+            if distance <= self.static_merge_distance:
+
+                return static_id
+
+        return None
+
+    def register_static_obstacle(
+        self,
+        obstacle
+    ):
+
+        existing_id = self.find_existing_static(
+            obstacle["center_x_map"],
+            obstacle["center_y_map"]
+        )
+
+        # 이미 이 위치에 등록되어 있으면
+        # 다시 추가하지 않는다.
+        if existing_id is not None:
+            return False
+
+        static_obstacle = dict(obstacle)
+
+        # 정적이므로 속도 0으로 확정
+        static_obstacle["velocity_x_map"] = 0.0
+        static_obstacle["velocity_y_map"] = 0.0
+
+        self.static_map[
+            obstacle["id"]
+        ] = static_obstacle
+
+        return True
+
+    def publish_static_map(
+        self,
+        timestamp
+    ):
+
+        static_obstacles = list(
+            self.static_map.values()
+        )
+
+        output = {
+            "timestamp": float(timestamp),
+
+            "obstacle_count":
+                len(static_obstacles),
+
+            "obstacles":
+                static_obstacles
+        }
+
+        msg = String()
+
+        msg.data = json.dumps(
+            output,
+            ensure_ascii=False
+        )
+
+        self.static_pub.publish(msg)
+
+    # =============================================================
+    # Main callback
+    # =============================================================
+
+    def obstacle_callback(
+        self,
+        msg
+    ):
+
+        timestamp = rospy.Time.now().to_sec()
+
+        # ---------------------------------------------------------
+        # Parse LiDAR JSON
+        # ---------------------------------------------------------
+
+        try:
+
+            obstacles_raw = json.loads(
+                msg.data
+            )
+
+        except Exception as e:
+
+            rospy.logwarn_throttle(
+                2.0,
+                "[StaticDynamic V1] JSON error: %s",
+                str(e)
+            )
+
+            return
+
+        if not isinstance(
+            obstacles_raw,
+            list
+        ):
+            return
+
+        # ---------------------------------------------------------
+        # TF
+        # ---------------------------------------------------------
+
+        transform = self.get_transform()
+
+        if transform is None:
+            return
+
+        self.remove_old_tracks(
+            timestamp
+        )
+
+        used_track_ids = set()
+
+        dynamic_obstacles = []
+
+        static_map_changed = False
+
+        # =========================================================
+        # Every LiDAR obstacle
+        # =========================================================
+
+        for obs in obstacles_raw:
+
+            # -----------------------------------------------------
+            # Centroid
+            # -----------------------------------------------------
+
+            centroid = obs.get(
+                "centroid",
+                [0.0, 0.0, 0.0]
+            )
+
+            if len(centroid) < 2:
+                continue
+
+            center_x_local = float(
+                centroid[0]
+            )
+
+            center_y_local = float(
+                centroid[1]
+            )
+
+            # -----------------------------------------------------
+            # Bounding box
+            # -----------------------------------------------------
+
+            bbox_min = obs.get(
+                "bbox_min",
+                [0.0, 0.0, 0.0]
+            )
+
+            bbox_max = obs.get(
+                "bbox_max",
+                [0.0, 0.0, 0.0]
+            )
+
+            if (
+                len(bbox_min) >= 2
+                and len(bbox_max) >= 2
+            ):
+
+                size_x = abs(
+                    float(bbox_max[0])
+                    - float(bbox_min[0])
+                )
+
+                size_y = abs(
+                    float(bbox_max[1])
+                    - float(bbox_min[1])
+                )
+
+                length = max(
+                    size_x,
+                    size_y
+                )
+
+                width = min(
+                    size_x,
+                    size_y
+                )
+
+            else:
+
+                length = 0.0
+                width = 0.0
+
+            # -----------------------------------------------------
+            # map coordinates
+            # -----------------------------------------------------
+
+            (
+                center_x_map,
+                center_y_map
+            ) = self.local_to_map(
+                center_x_local,
+                center_y_local,
+                transform
+            )
+
+            # -----------------------------------------------------
+            # Tracking ID
+            # -----------------------------------------------------
+
+            track_id = self.find_matching_track(
+                center_x_map,
+                center_y_map,
+                used_track_ids
+            )
+
+            if track_id is None:
+
+                track_id = self.create_track(
+                    center_x_map,
+                    center_y_map,
+                    timestamp
+                )
+
+                velocity_x_map = 0.0
+                velocity_y_map = 0.0
+
+                speed = 0.0
+                is_static = False
+
+            else:
+
+                (
+                    velocity_x_map,
+                    velocity_y_map,
+                    speed,
+                    is_static
+                ) = self.update_track(
+                    track_id,
+                    center_x_map,
+                    center_y_map,
+                    timestamp
+                )
+
+            used_track_ids.add(
+                track_id
+            )
+
+            # -----------------------------------------------------
+            # Common obstacle data
+            # -----------------------------------------------------
+
+            obstacle_state = {
+
+                "id":
+                    int(track_id),
+
+                "center_x_map":
+                    float(center_x_map),
+
+                "center_y_map":
+                    float(center_y_map),
+
+                # 아직 실제 obstacle yaw 계산 안 함
+                "yaw":
+                    0.0,
+
+                "length":
+                    float(length),
+
+                "width":
+                    float(width),
+
+                "velocity_x_map":
+                    float(velocity_x_map),
+
+                "velocity_y_map":
+                    float(velocity_y_map)
+            }
+
+            # =====================================================
+            # STATIC
+            # =====================================================
+
+            if is_static:
+
+                added = self.register_static_obstacle(
+                    obstacle_state
+                )
+
+                if added:
+
+                    static_map_changed = True
+
+                    rospy.loginfo(
+                        "[STATIC REGISTERED] "
+                        "id=%d x=%.2f y=%.2f",
+                        track_id,
+                        center_x_map,
+                        center_y_map
+                    )
+
+            # =====================================================
+            # DYNAMIC / NOT YET STATIC
+            # =====================================================
+
+            else:
+
+                dynamic_obstacles.append(
+                    obstacle_state
+                )
+
+        # =========================================================
+        # Static output
+        # =========================================================
+        #
+        # static map이 변경됐을 때만 publish
+        #
+        # latch=True이므로 뒤늦게 subscriber가 붙어도
+        # 마지막 static map을 받을 수 있음.
+        # =========================================================
+
+        if static_map_changed:
+
+            self.publish_static_map(
+                timestamp
+            )
+
+        # =========================================================
+        # Dynamic output
+        # =========================================================
+        #
+        # 매 callback마다 계속 publish
+        # =========================================================
+
+        dynamic_output = {
+
+            "timestamp":
+                float(timestamp),
+
+            "obstacle_count":
+                len(dynamic_obstacles),
+
+            "obstacles":
+                dynamic_obstacles
+        }
+
+        dynamic_msg = String()
+
+        dynamic_msg.data = json.dumps(
+            dynamic_output,
+            ensure_ascii=False
+        )
+
+        self.dynamic_pub.publish(
+            dynamic_msg
+        )
+
+
+if __name__ == "__main__":
+
+    try:
+
+        ObstacleStatePublisher()
+        rospy.spin()
+
+    except rospy.ROSInterruptException:
+        pass
