@@ -14,7 +14,6 @@ if PACKAGE_SRC not in sys.path:
 
 from morai_global_csv_recorder import MoraiGlobalCsvRecorder, status_to_sample
 from path_planning.morai_udp_ego_status import (
-    EgoVehicleStatusPacketError,
     parse_ego_vehicle_status,
 )
 from path_planning.morai_udp_competition_status import (
@@ -64,9 +63,10 @@ class MoraiUdpCompetitionStatusTest(unittest.TestCase):
         status = parse_ego_vehicle_status(make_packet(BASE_PACKET_SIZE))
         self.assertEqual(status.position_m, (10.0, 20.0, 3.0))
 
-    def test_ego_status_rejects_competition_extension(self):
-        with self.assertRaises(EgoVehicleStatusPacketError):
-            parse_ego_vehicle_status(make_packet(EXTENDED_PACKET_SIZE))
+    def test_ego_status_parses_same_extended_layout(self):
+        status = parse_ego_vehicle_status(make_packet(EXTENDED_PACKET_SIZE))
+        self.assertEqual(status.position_m, (10.0, 20.0, 3.0))
+        self.assertEqual(status.tire_lateral_force, (0.0, 1.0, 2.0, 3.0))
 
     def test_parses_observed_181_byte_competition_layout(self):
         status = parse_competition_vehicle_status(make_packet(BASE_PACKET_SIZE))

@@ -191,8 +191,8 @@ def run_udp_recorder(arguments):
                 if zero_position_packets == 3:
                     print(
                         "Ego Vehicle Status is reporting position (0, 0, 0). No zero "
-                        "position will be saved. Verify that this port is connected to "
-                        "Ego Vehicle Status, not Competition Vehicle Status.",
+                        "position will be saved. Verify that the selected status network "
+                        "actually provides vehicle position.",
                         file=sys.stderr,
                     )
                 continue

@@ -786,12 +786,13 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
 | `merge_available_topic` | `/perception/merge_gap/available` | 왼쪽 차선 끼어들기 가능 토픽 |
 | `merge_unavailable_topic` | `/perception/merge_gap/unavailable` | 왼쪽 차선 끼어들기 불가능 토픽 |
 
-통합 주행 브리지는 일반 EgoVehicleStatus UDP(기존 `909`)를 받지 않는다. 대회용
-`#MoraiInfo$` 상태 패킷만 `9081`에서 받고, 그중 ROS 주행 코드가 사용하는 차량
+통합 주행 브리지는 기존 일반 EgoVehicleStatus 포트 `909` 대신 Competition
+Vehicle Status를 `9081`에서 받는다. 두 상태의 `#MoraiInfo$` 패킷 구조는 같지만
+Competition 네트워크는 그중 일부 정보만 제공한다. ROS 주행 코드가 사용하는 차량
 위치·heading·속도·가속도와 accel/brake/steer 입력을 기존
 `/Ego_topic`(`morai_msgs/EgoVehicleStatus`) 형식으로 변환한다. 따라서 하위 ROS
 노드의 토픽 이름은 바뀌지 않는다. 181바이트 기본 패킷과 229바이트 확장 패킷을
-모두 지원하며, 일반 상태와 대회 상태를 같은 패킷으로 간주하지 않는다.
+모두 지원한다.
 
 커스텀 모델의 절대 경로를 지정하는 예:
 

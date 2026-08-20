@@ -30,8 +30,8 @@ ROS 연결이 불가능한 실험에서만 fallback으로 사용한다.
 - 경로 투영과 현재 링크 매칭
 - 다른 팀이 사용할 표준 pose와 공분산 출력
 
-Competition Vehicle Status는 일반 EgoVehicleStatus보다 제공 정보가 제한된 대회
-전용 wire message이다. 브리지는 차량 위치·heading·속도·가속도와
+Competition Vehicle Status는 일반 EgoVehicleStatus와 패킷 구조는 같지만 제공
+정보가 제한된 대회 네트워크이다. 브리지는 차량 위치·heading·속도·가속도와
 accel/brake/steer처럼 실제 패킷에 있는 필드만 `/Ego_topic`으로 호환 변환한다.
 이 상태는 정렬 검증 기준으로 기록하지만 EKF 측정 업데이트에 넣지 않는다.
 

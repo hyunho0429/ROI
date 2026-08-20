@@ -1,8 +1,9 @@
 """MORAI Competition Vehicle Status 수신과 Ego Ctrl Cmd 송신 프로토콜.
 
-차량 상태는 대회 전용 ``#MoraiInfo$`` 패킷 파서를 사용한다. 이 패킷은
-일반 EgoVehicleStatus와 필드가 일부 겹치지만 같은 wire message로 취급하지
-않는다. 제어 송신은 공식 24.R2 계열 EgoCtrlCmd 55바이트 레이아웃을 유지한다.
+차량 상태는 EgoVehicleStatus와 동일한 ``#MoraiInfo$`` 패킷 레이아웃을 사용한다.
+Competition 네트워크에서는 이 구조의 일부 정보만 유효하므로 ROS 호환 출력도
+실제 제공 필드만 사용한다. 제어 송신은 공식 24.R2 계열 EgoCtrlCmd 55바이트
+레이아웃을 유지한다.
 """
 
 from __future__ import annotations

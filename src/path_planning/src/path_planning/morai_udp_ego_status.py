@@ -1,7 +1,6 @@
-"""Parser entry point for the documented 181-byte MORAI Ego Vehicle Status."""
+"""Ego Vehicle Status entry point for the shared MORAI status layout."""
 
 from path_planning.morai_udp_competition_status import (
-    BASE_PACKET_SIZE,
     CompetitionStatusPacketError,
     CompetitionVehicleStatus,
     parse_competition_vehicle_status,
@@ -13,11 +12,5 @@ EgoVehicleStatusPacketError = CompetitionStatusPacketError
 
 
 def parse_ego_vehicle_status(packet):
-    """Parse only the documented 181-byte Ego Vehicle Status layout."""
-    if len(packet) != BASE_PACKET_SIZE:
-        raise EgoVehicleStatusPacketError(
-            "Ego Vehicle Status requires 181 bytes, received {} (header={!r})".format(
-                len(packet), packet[:15]
-            )
-        )
+    """Parse the shared 181-byte or extended 229-byte status layout."""
     return parse_competition_vehicle_status(packet)

@@ -33,8 +33,9 @@ CollisionData ──────────────────────
   `linear_acceleration` 의미와 단위를 사용한다.
 - `CollisionData`: UDP 각 object record의 공통 global offset을 메시지 레벨
   `global_offset_x/y/z`로 노출하고 실제 충돌 객체를 `collision_object`로 제공한다.
-- `EgoVehicleStatusExtended`와 Competition Vehicle Status는 필드가 겹치지만
-  동일 wire message가 아니다. 후자는 관측된 181/229-byte 전용 파서로 유지한다.
+- `EgoVehicleStatusExtended`와 Competition Vehicle Status는 동일한 패킷
+  레이아웃을 사용한다. Competition 네트워크에서는 일부 필드만 유효하며,
+  수신 포트 `9080 -> 9081`을 별도로 사용한다.
 - `Competition.msg`의 `start_signal/team_name/mission_success`는 Competition
   Vehicle Status와 다른 메시지이며, 허용 UDP 규격이 제공되지 않아 수신하지 않는다.
 
@@ -238,8 +239,8 @@ velocity, acceleration, accel, brake, front_steer`이다. 2026년 공식 예제�
 맞는다. 23.R1.0 문서에서 IMU는 전체 107 byte·데이터 80 byte이며, GPS는
 RMC/GGA NMEA 문장이므로 고정된 단일 패킷 크기를 제시하지 않는다. 115 byte
 IMU는 초/나노초 타임스탬프가 추가된 형식으로 함께 지원한다.
-`Competition Vehicle Status`는 공개 문서에 정의가 없어, 대회 환경에서
-관측한 181/229 byte 패킷만 엄격히 검사한다.
+`Competition Vehicle Status`는 Ego Vehicle Status와 같은 레이아웃을 사용하며,
+현재 수신기는 181/229 byte 패킷의 header, data length와 tail을 엄격히 검사한다.
 
 ### Competition Vehicle Status 확인
 

@@ -70,7 +70,7 @@ class EgoProtocolTest(unittest.TestCase):
         status = parse_competition_vehicle_status(packet)
         self.assertEqual(status.tire_lateral_force, (0.0, 1.0, 2.0, 3.0))
 
-    def test_rejects_public_ego_status_header(self):
+    def test_rejects_invalid_status_header(self):
         packet = bytearray(
             self.make_competition_status_packet(COMPETITION_STATUS_BASE_PACKET_SIZE)
         )
