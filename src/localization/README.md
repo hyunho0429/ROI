@@ -6,7 +6,8 @@
 
 - /gps: morai_msgs/GPSMessage
 - /Imu: sensor_msgs/Imu
-- /Ego_topic: morai_msgs/EgoVehicleStatus, 개발 검증 전용
+- Competition Vehicle Status UDP: MORAI Host/Source `9080` -> ROS Destination `9081`
+- /Ego_topic: 대회 상태에서 변환한 morai_msgs/EgoVehicleStatus, 개발 검증 전용
 
 ROS 네이티브 경로에서는 UDP NMEA GPS parser를 사용하지 않는다. UDP parser는
 ROS 연결이 불가능한 실험에서만 fallback으로 사용한다.
@@ -29,7 +30,10 @@ ROS 연결이 불가능한 실험에서만 fallback으로 사용한다.
 - 경로 투영과 현재 링크 매칭
 - 다른 팀이 사용할 표준 pose와 공분산 출력
 
-EgoVehicleStatus는 정렬 검증 기준으로 기록하지만 EKF 측정 업데이트에 넣지 않는다.
+Competition Vehicle Status는 일반 EgoVehicleStatus보다 제공 정보가 제한된 대회
+전용 wire message이다. 브리지는 차량 위치·heading·속도·가속도와
+accel/brake/steer처럼 실제 패킷에 있는 필드만 `/Ego_topic`으로 호환 변환한다.
+이 상태는 정렬 검증 기준으로 기록하지만 EKF 측정 업데이트에 넣지 않는다.
 
 ## 구현 순서
 

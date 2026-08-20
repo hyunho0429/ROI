@@ -685,6 +685,7 @@ IP를 그대로 사용한다. 프로그램은 LiDAR와 카메라 모두 동일�
 |---|---:|---|
 | GPS | `3001` | 기존 주행 스택 |
 | IMU | `4001` | 기존 주행 스택 |
+| Competition Vehicle Status | Host `9080` → Destination `9081` | 대회용 차량 상태, `/Ego_topic`으로 호환 변환 |
 | LiDAR | `2001` | RViz/tracking 입력 |
 | 차선 카메라 | `1101` | `LaneCandidates.py` |
 | YOLO 카메라 | `1131` | `YoloCamera_v2.py` |
@@ -769,6 +770,8 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
 | 인자 | 기본값 | 설명 |
 |---|---:|---|
 | `bind_ip` | `0.0.0.0` | LiDAR와 카메라의 공통 로컬 UDP bind 주소 |
+| `competition_status_host_port` | `9080` | MORAI Competition Status 송신(Host/Source) 포트 |
+| `competition_status_port` | `9081` | ROS PC Competition Status 수신(Destination) 포트 |
 | `morai_host_ip` | `192.168.0.151` | Ego Ctrl Cmd를 보낼 MORAI PC 주소 |
 | `enable_control` | `false` | 차량 제어 UDP 송신 여부 |
 | `target_speed_mps` | `2.0` | Pure Pursuit 목표 속도 |
@@ -782,6 +785,13 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
 | `yolo_confidence` | `0.4` | YOLO confidence 임계값 |
 | `merge_available_topic` | `/perception/merge_gap/available` | 왼쪽 차선 끼어들기 가능 토픽 |
 | `merge_unavailable_topic` | `/perception/merge_gap/unavailable` | 왼쪽 차선 끼어들기 불가능 토픽 |
+
+통합 주행 브리지는 일반 EgoVehicleStatus UDP(기존 `909`)를 받지 않는다. 대회용
+`#MoraiInfo$` 상태 패킷만 `9081`에서 받고, 그중 ROS 주행 코드가 사용하는 차량
+위치·heading·속도·가속도와 accel/brake/steer 입력을 기존
+`/Ego_topic`(`morai_msgs/EgoVehicleStatus`) 형식으로 변환한다. 따라서 하위 ROS
+노드의 토픽 이름은 바뀌지 않는다. 181바이트 기본 패킷과 229바이트 확장 패킷을
+모두 지원하며, 일반 상태와 대회 상태를 같은 패킷으로 간주하지 않는다.
 
 커스텀 모델의 절대 경로를 지정하는 예:
 

@@ -4,7 +4,9 @@
   <arg name="bind_ip" default="0.0.0.0" />
   <arg name="gps_port" default="3001" />
   <arg name="imu_port" default="4001" />
-  <arg name="ego_status_port" default="909" />
+  <arg name="competition_status_host_port" default="9080" />
+  <arg name="competition_status_port" default="9081" />
+  <arg name="ego_status_port" default="$(arg competition_status_port)" />
   <arg name="lidar_host_port" default="2000" />
   <arg name="lidar_port" default="2001" />
   <arg name="morai_host_ip" default="192.168.0.151" />
@@ -33,6 +35,7 @@
     <arg name="bind_ip" value="$(arg bind_ip)" />
     <arg name="gps_port" value="$(arg gps_port)" />
     <arg name="imu_port" value="$(arg imu_port)" />
+    <arg name="competition_status_host_port" value="$(arg competition_status_host_port)" />
     <arg name="ego_status_port" value="$(arg ego_status_port)" />
     <arg name="morai_host_ip" value="$(arg morai_host_ip)" />
     <arg name="control_remote_port" value="$(arg control_remote_port)" />

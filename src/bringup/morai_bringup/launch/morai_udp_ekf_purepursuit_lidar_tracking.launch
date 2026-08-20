@@ -2,6 +2,8 @@
   <arg name="workspace_path" default="$(env HOME)/morai_ws" />
   <arg name="path_file" default="$(find morai_bringup)/../../../data/routes/2026_molit_comp_global_path.txt" />
   <arg name="bind_ip" default="0.0.0.0" />
+  <arg name="competition_status_host_port" default="9080" />
+  <arg name="competition_status_port" default="9081" />
   <arg name="morai_host_ip" default="192.168.0.151" />
   <arg name="control_remote_port" default="9093" />
   <arg name="target_speed_mps" default="2.0" />
@@ -17,6 +19,8 @@
     <arg name="workspace_path" value="$(arg workspace_path)" />
     <arg name="path_file" value="$(arg path_file)" />
     <arg name="bind_ip" value="$(arg bind_ip)" />
+    <arg name="competition_status_host_port" value="$(arg competition_status_host_port)" />
+    <arg name="competition_status_port" value="$(arg competition_status_port)" />
     <arg name="morai_host_ip" value="$(arg morai_host_ip)" />
     <arg name="control_remote_port" value="$(arg control_remote_port)" />
     <arg name="target_speed_mps" value="$(arg target_speed_mps)" />

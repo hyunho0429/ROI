@@ -4,12 +4,15 @@ project(morai_udp_drive_bridge)
 find_package(catkin REQUIRED COMPONENTS
   geometry_msgs
   morai_msgs
+  path_planning
   rospy
 )
 
 catkin_python_setup()
 
-catkin_package()
+catkin_package(
+  CATKIN_DEPENDS geometry_msgs morai_msgs path_planning rospy
+)
 
 catkin_install_python(PROGRAMS
   scripts/morai_udp_drive_bridge_node.py

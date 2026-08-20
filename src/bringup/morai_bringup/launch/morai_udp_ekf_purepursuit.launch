@@ -1,11 +1,14 @@
 <launch>
-  <!-- GPS·IMU·EgoStatus UDP + MGeo EKF + Pure Pursuit 실제 통합 런치 -->
+  <!-- GPS·IMU·Competition Status UDP + MGeo EKF + Pure Pursuit 실제 통합 런치 -->
   <arg name="workspace_path" default="$(env HOME)/morai_ws" />
   <arg name="path_file" default="$(find morai_bringup)/../../../data/routes/2026_molit_comp_global_path.txt" />
   <arg name="bind_ip" default="0.0.0.0" />
   <arg name="gps_port" default="3001" />
   <arg name="imu_port" default="4001" />
-  <arg name="ego_status_port" default="909" />
+  <arg name="competition_status_host_port" default="9080" />
+  <arg name="competition_status_port" default="9081" />
+  <!-- 기존 launch 호출 호환용 이름. 실제 의미는 Competition Status Destination Port. -->
+  <arg name="ego_status_port" default="$(arg competition_status_port)" />
   <arg name="morai_host_ip" default="192.168.0.151" />
   <arg name="control_remote_port" default="9093" />
   <arg name="control_source_port" default="9094" />
@@ -24,9 +27,10 @@
     <arg name="imu_use_packet_time" value="false" />
   </include>
 
-  <!-- 2. MORAI EgoVehicleStatus 수신 + CtrlCmd UDP 송신 -->
+  <!-- 2. MORAI Competition Vehicle Status 수신 + ROS /Ego_topic 호환 출력 -->
   <include file="$(find morai_udp_drive_bridge)/launch/morai_udp_drive_bridge.launch">
     <arg name="status_bind_ip" value="$(arg bind_ip)" />
+    <arg name="status_host_port" value="$(arg competition_status_host_port)" />
     <arg name="status_port" value="$(arg ego_status_port)" />
     <arg name="status_topic" value="/Ego_topic" />
     <arg name="status_frame_id" value="map" />
