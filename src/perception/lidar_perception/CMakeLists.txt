@@ -11,6 +11,8 @@ find_package(catkin REQUIRED COMPONENTS
   visualization_msgs
 )
 
+catkin_python_setup()
+
 add_message_files(
   FILES
   LidarObstacle.msg
@@ -22,7 +24,6 @@ generate_messages(
   std_msgs
 )
 
-catkin_python_setup()
 catkin_package(
   CATKIN_DEPENDS geometry_msgs message_runtime nav_msgs rospy sensor_msgs std_msgs visualization_msgs
 )
