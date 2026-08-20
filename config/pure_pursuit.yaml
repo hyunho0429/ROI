@@ -9,7 +9,7 @@ path_file: data/routes/2026_molit_comp_global_path.txt
 
 # 2025_Hyundai_ioniq5: 뒤 차축 중앙-앞 차축 중앙 거리
 wheelbase_m: 3.0
-target_speed_mps: 2.0
+target_speed_mps: 6.0
 lookahead_min_m: 4.0
 lookahead_gain: 0.35
 goal_tolerance_m: 1.5

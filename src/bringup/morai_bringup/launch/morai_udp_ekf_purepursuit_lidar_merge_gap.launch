@@ -16,7 +16,7 @@
   <arg name="lidar_x_m" default="0.0" />
   <arg name="lidar_y_m" default="0.0" />
   <arg name="lidar_yaw_deg" default="0.0" />
-  <arg name="target_speed_mps" default="2.0" />
+  <arg name="target_speed_mps" default="6.0" />
   <arg name="enable_control" default="false" />
   <arg name="rviz" default="true" />
 

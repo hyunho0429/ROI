@@ -47,7 +47,7 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
 ```bash
 roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
   enable_control:=true \
-  target_speed_mps:=2.0
+  target_speed_mps:=6.0
 ```
 
 ## 주요 launch 인자

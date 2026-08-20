@@ -766,7 +766,7 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
 ```bash
 roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
   enable_control:=true \
-  target_speed_mps:=2.0
+  target_speed_mps:=6.0
 ```
 
 ### 주요 launch 인자
@@ -778,7 +778,7 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
 | `competition_status_port` | `9081` | ROS PC Competition Status 수신(Destination) 포트 |
 | `morai_host_ip` | `192.168.0.151` | Ego Ctrl Cmd를 보낼 MORAI PC 주소 |
 | `enable_control` | `false` | 차량 제어 UDP 송신 여부 |
-| `target_speed_mps` | `2.0` | Pure Pursuit 목표 속도 |
+| `target_speed_mps` | `6.0` | Pure Pursuit 목표 속도 (`21.6 km/h`) |
 | `rviz` | `true` | LiDAR RViz 실행 여부 |
 | `enable_lane` | `true` | 차선 인식 프로세스 실행 여부 |
 | `lane_port` | `1101` | 차선 카메라 UDP 수신 포트 |

@@ -28,7 +28,7 @@ class PurePursuitNode:
 
         path_file = rospy.get_param("~path_file")
         self.points = load_mgeo_path(path_file)
-        self.target_speed = float(rospy.get_param("~target_speed_mps", 2.0))
+        self.target_speed = float(rospy.get_param("~target_speed_mps", 6.0))
         if self.target_speed < 0.0:
             raise ValueError("target_speed_mps must be zero or positive")
         self.max_steering = float(

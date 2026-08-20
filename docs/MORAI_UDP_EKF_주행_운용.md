@@ -106,7 +106,7 @@ rosrun tf tf_echo map base_link
 roslaunch morai_bringup morai_udp_ekf_purepursuit.launch \
   morai_host_ip:=192.168.0.151 \
   control_remote_port:=9093 \
-  target_speed_mps:=2.0 \
+  target_speed_mps:=6.0 \
   wheelbase_m:=3.0 \
   enable_control:=true
 ```

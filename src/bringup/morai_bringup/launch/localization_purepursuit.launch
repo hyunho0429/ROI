@@ -7,7 +7,7 @@
   <arg name="imu_port" default="4001" />
   <arg name="enable_control" default="false" />
   <arg name="wheelbase_m" default="3.0" />
-  <arg name="target_speed_mps" default="2.0" />
+  <arg name="target_speed_mps" default="6.0" />
 
   <!-- 1. MORAI UDP -> /gps, /Imu -->
   <include file="$(find morai_udp_bridge)/launch/morai_udp_bridge.launch">
