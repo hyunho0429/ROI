@@ -59,6 +59,7 @@ except ImportError:
 from lidar_perception.morai_udp_lidar import (
     LidarPacketError,
     parse_lidar_intensity_packet,
+    should_publish_cloud,
 )
 from lidar_perception.morai_udp_gps import GpsPacketError
 from lidar_perception.morai_udp_imu import ImuPacketError
@@ -1054,13 +1055,16 @@ def main():
 
             current_azimuth = lidar_packet.points[0].azimuth_deg
 
-            wrapped = (
-                prev_azimuth is not None
-                and prev_azimuth > 350.0
-                and current_azimuth < 10.0
+            publish_cloud = should_publish_cloud(
+                prev_azimuth,
+                current_azimuth,
+                len(packet_batches),
+                now - cloud_started_at,
+                params["packets_per_cloud"],
+                params["max_cloud_age_s"],
             )
 
-            if wrapped and packet_batches:
+            if publish_cloud:
                 if params["deskew_enabled"]:
                     synchronized_batches = [
                         (

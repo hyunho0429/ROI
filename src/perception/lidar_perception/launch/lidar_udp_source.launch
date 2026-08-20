@@ -18,6 +18,13 @@
   <arg name="vertical_support_radius_m" default="0.65" />
   <arg name="vertical_support_min_height_m" default="0.05" />
 
+  <!-- The decoded cloud is already in ego-local axes. Register its frame so
+       RViz Fixed Frame=morai_lidar does not remain in Global Status: Error. -->
+  <node pkg="tf"
+        type="static_transform_publisher"
+        name="base_link_to_morai_lidar"
+        args="0 0 0 0 0 0 base_link $(arg frame_id) 100" />
+
   <node pkg="lidar_perception"
         type="morai_lidar_udp_source.py"
         name="morai_lidar_udp_source"

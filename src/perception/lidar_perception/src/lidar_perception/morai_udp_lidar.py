@@ -156,6 +156,36 @@ def _azimuth_delta_deg(current, next_value):
     return delta
 
 
+def should_publish_cloud(
+    previous_azimuth_deg,
+    current_azimuth_deg,
+    buffered_packet_count,
+    cloud_age_s,
+    packets_per_cloud,
+    max_cloud_age_s,
+):
+    """Return whether buffered packets should be emitted as a new cloud.
+
+    Detect the 360 -> 0 boundary using a large negative jump instead of a
+    narrow angle window. Packet-count and age limits keep RViz updating even
+    when packet loss skips the boundary or the stream uses unusual azimuths.
+    """
+
+    if int(buffered_packet_count) <= 0:
+        return False
+
+    wrapped = (
+        previous_azimuth_deg is not None
+        and float(previous_azimuth_deg) - float(current_azimuth_deg) > 180.0
+    )
+    packet_limit_reached = int(buffered_packet_count) >= int(packets_per_cloud)
+    age_limit_reached = (
+        float(max_cloud_age_s) > 0.0
+        and float(cloud_age_s) >= float(max_cloud_age_s)
+    )
+    return wrapped or packet_limit_reached or age_limit_reached
+
+
 def _point_from_polar(distance_m, azimuth_deg, vertical_angle_deg):
     azimuth_rad = math.radians(azimuth_deg)
     vertical_rad = math.radians(vertical_angle_deg)
