@@ -266,8 +266,6 @@ roslaunch path_planning morai_lidar_rviz.launch
 `display_rolling_clouds=1`, `display_history_s=0.0`으로 설정되어 있다. 방위각의
 360도 경계뿐 아니라 기본 15개 패킷 누적 또는 0.05초 경과 시에도 새 PointCloud를
 발행하므로 패킷 유실로 경계를 건너뛰더라도 RViz 화면이 첫 스캔에 멈추지 않는다.
-또한 `base_link -> morai_lidar` 정적 TF를 함께 실행하여 RViz의
-`Global Status: Error (Unknown frame morai_lidar)` 상태를 방지한다.
 LiDAR node와 RViz는 함께 실행된다.
 
 현재 LiDAR 단독 개발용 기본값은 `deskew_pose_source:=sensor_udp`이다. 따라서
