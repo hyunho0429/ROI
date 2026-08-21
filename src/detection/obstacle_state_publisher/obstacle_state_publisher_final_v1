@@ -1,0 +1,1616 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+import json
+import math
+import statistics
+from collections import deque
+
+import rospy
+import tf2_ros
+
+from std_msgs.msg import String
+from tf.transformations import euler_from_quaternion
+
+# V5.1에서 검증한 tracker 재사용
+from obstacle_state_publisher_tracking_kalman_v5_1 import (
+    KalmanHungarianTrackerV51,
+)
+
+
+class FinalObstacleStatePublisherV1:
+
+    def __init__(self):
+
+        rospy.init_node(
+            "obstacle_state_publisher_final_v1"
+        )
+
+        # ============================================================
+        # Topics
+        # ============================================================
+
+        self.input_topic = rospy.get_param(
+            "~input_topic",
+            "/morai/lidar/obstacles"
+        )
+
+        self.output_topic = rospy.get_param(
+            "~output_topic",
+            "/detection/obstacle_states"
+        )
+
+        self.static_topic = rospy.get_param(
+            "~static_topic",
+            "/detection/static_obstacles"
+        )
+
+        self.dynamic_topic = rospy.get_param(
+            "~dynamic_topic",
+            "/detection/dynamic_obstacles"
+        )
+
+        # ============================================================
+        # Frames
+        # ============================================================
+
+        self.map_frame = rospy.get_param(
+            "~map_frame",
+            "map"
+        )
+
+        self.source_frame = rospy.get_param(
+            "~source_frame",
+            "base_link"
+        )
+
+        # ============================================================
+        # V5.1 Tracking Parameters
+        # ============================================================
+
+        self.max_missed = rospy.get_param(
+            "~max_missed",
+            6
+        )
+
+        self.min_hits = rospy.get_param(
+            "~min_hits",
+            3
+        )
+
+        self.process_accel_std_mps2 = rospy.get_param(
+            "~process_accel_std_mps2",
+            4.0
+        )
+
+        self.measurement_noise_m = rospy.get_param(
+            "~measurement_noise_m",
+            0.35
+        )
+
+        self.mahalanobis_gate_sq = rospy.get_param(
+            "~mahalanobis_gate_sq",
+            9.21
+        )
+
+        self.rescue_mahalanobis_gate_sq = rospy.get_param(
+            "~rescue_mahalanobis_gate_sq",
+            16.0
+        )
+
+        self.ownership_mahalanobis_gate_sq = rospy.get_param(
+            "~ownership_mahalanobis_gate_sq",
+            25.0
+        )
+
+        self.position_weight = rospy.get_param(
+            "~position_weight",
+            1.0
+        )
+
+        self.velocity_weight = rospy.get_param(
+            "~velocity_weight",
+            0.15
+        )
+
+        self.bbox_weight = rospy.get_param(
+            "~bbox_weight",
+            0.10
+        )
+
+        self.new_track_confirm_frames = rospy.get_param(
+            "~new_track_confirm_frames",
+            3
+        )
+
+        self.pending_match_distance_m = rospy.get_param(
+            "~pending_match_distance_m",
+            1.0
+        )
+
+        self.pending_timeout_sec = rospy.get_param(
+            "~pending_timeout_sec",
+            1.5
+        )
+
+        self.pending_existing_track_distance_m = rospy.get_param(
+            "~pending_existing_track_distance_m",
+            1.5
+        )
+
+        self.direction_min_speed_mps = rospy.get_param(
+            "~direction_min_speed_mps",
+            0.30
+        )
+
+        self.direction_cosine_threshold = rospy.get_param(
+            "~direction_cosine_threshold",
+            0.70
+        )
+
+        # ============================================================
+        # Velocity output smoothing
+        # ============================================================
+
+        self.velocity_alpha = rospy.get_param(
+            "~velocity_alpha",
+            0.40
+        )
+
+        self.max_output_accel_mps2 = rospy.get_param(
+            "~max_output_accel_mps2",
+            4.0
+        )
+
+        self.max_output_speed_mps = rospy.get_param(
+            "~max_output_speed_mps",
+            12.0
+        )
+
+        self.velocity_states = {}
+
+        # ============================================================
+        # BBox smoothing
+        # ============================================================
+
+        self.bbox_history_size = rospy.get_param(
+            "~bbox_history_size",
+            5
+        )
+
+        self.bbox_alpha = rospy.get_param(
+            "~bbox_alpha",
+            0.30
+        )
+
+        self.bbox_max_relative_jump = rospy.get_param(
+            "~bbox_max_relative_jump",
+            0.40
+        )
+
+        self.bbox_histories = {}
+        self.filtered_bbox = {}
+
+        # ============================================================
+        # Motion State
+        # ============================================================
+
+        self.moving_enter_speed = rospy.get_param(
+            "~moving_enter_speed",
+            0.35
+        )
+
+        self.moving_exit_speed = rospy.get_param(
+            "~moving_exit_speed",
+            0.15
+        )
+
+        self.static_confirm_sec = rospy.get_param(
+            "~static_confirm_sec",
+            2.0
+        )
+
+        self.stopped_confirm_sec = rospy.get_param(
+            "~stopped_confirm_sec",
+            1.0
+        )
+
+        self.motion_timeout_sec = rospy.get_param(
+            "~motion_timeout_sec",
+            5.0
+        )
+
+        self.motion_tracks = {}
+
+        # ============================================================
+        # Yaw
+        # ============================================================
+
+        self.yaw_min_speed_mps = rospy.get_param(
+            "~yaw_min_speed_mps",
+            0.30
+        )
+
+        self.yaw_alpha = rospy.get_param(
+            "~yaw_alpha",
+            0.35
+        )
+
+        self.yaw_timeout_sec = rospy.get_param(
+            "~yaw_timeout_sec",
+            5.0
+        )
+
+        self.yaw_tracks = {}
+
+        # ============================================================
+        # V5.1 Tracker
+        # ============================================================
+
+        self.tracker = KalmanHungarianTrackerV51(
+
+            max_missed=self.max_missed,
+
+            min_hits=self.min_hits,
+
+            process_accel_std_mps2=
+                self.process_accel_std_mps2,
+
+            measurement_noise_m=
+                self.measurement_noise_m,
+
+            mahalanobis_gate_sq=
+                self.mahalanobis_gate_sq,
+
+            rescue_mahalanobis_gate_sq=
+                self.rescue_mahalanobis_gate_sq,
+
+            ownership_mahalanobis_gate_sq=
+                self.ownership_mahalanobis_gate_sq,
+
+            position_weight=
+                self.position_weight,
+
+            velocity_weight=
+                self.velocity_weight,
+
+            bbox_weight=
+                self.bbox_weight,
+
+            new_track_confirm_frames=
+                self.new_track_confirm_frames,
+
+            pending_match_distance_m=
+                self.pending_match_distance_m,
+
+            pending_timeout_sec=
+                self.pending_timeout_sec,
+
+            pending_existing_track_distance_m=
+                self.pending_existing_track_distance_m,
+
+            direction_min_speed_mps=
+                self.direction_min_speed_mps,
+
+            direction_cosine_threshold=
+                self.direction_cosine_threshold,
+        )
+
+        # ============================================================
+        # TF
+        # ============================================================
+
+        self.tf_buffer = tf2_ros.Buffer()
+
+        self.tf_listener = tf2_ros.TransformListener(
+            self.tf_buffer
+        )
+
+        # ============================================================
+        # ROS
+        # ============================================================
+
+        self.publisher = rospy.Publisher(
+            self.output_topic,
+            String,
+            queue_size=10
+        )
+
+        self.static_publisher = rospy.Publisher(
+            self.static_topic,
+            String,
+            queue_size=10
+        )
+
+        self.dynamic_publisher = rospy.Publisher(
+            self.dynamic_topic,
+            String,
+            queue_size=10
+        )
+
+        self.subscriber = rospy.Subscriber(
+            self.input_topic,
+            String,
+            self.callback,
+            queue_size=1
+        )
+
+        # ============================================================
+        # Startup Log
+        # ============================================================
+
+        rospy.loginfo(
+            "[FinalObject V1] Started"
+        )
+
+        rospy.loginfo(
+            "[FinalObject V1] Input   : %s",
+            self.input_topic
+        )
+
+        rospy.loginfo(
+            "[FinalObject V1] Output  : %s",
+            self.output_topic
+        )
+
+        rospy.loginfo(
+            "[FinalObject V1] Static  : %s",
+            self.static_topic
+        )
+
+        rospy.loginfo(
+            "[FinalObject V1] Dynamic : %s",
+            self.dynamic_topic
+        )
+
+        rospy.loginfo(
+            "[FinalObject V1] Frame   : %s -> %s",
+            self.source_frame,
+            self.map_frame
+        )
+
+        rospy.loginfo(
+            "[FinalObject V1] Tracking weights %.2f / %.2f / %.2f",
+            self.position_weight,
+            self.velocity_weight,
+            self.bbox_weight
+        )
+
+        rospy.loginfo(
+            "[FinalObject V1] new_track_confirm=%d",
+            self.new_track_confirm_frames
+        )
+
+        rospy.loginfo(
+            "[FinalObject V1] Motion enter=%.2f exit=%.2f",
+            self.moving_enter_speed,
+            self.moving_exit_speed
+        )
+
+        rospy.loginfo(
+            "[FinalObject V1] Yaw min speed=%.2f alpha=%.2f",
+            self.yaw_min_speed_mps,
+            self.yaw_alpha
+        )
+
+    # ================================================================
+    # TF
+    # ================================================================
+
+    def get_transform(self):
+
+        try:
+
+            return self.tf_buffer.lookup_transform(
+                self.map_frame,
+                self.source_frame,
+                rospy.Time(0),
+                rospy.Duration(0.1)
+            )
+
+        except Exception as e:
+
+            rospy.logwarn_throttle(
+                2.0,
+                "[FinalObject V1] TF failed: %s",
+                str(e)
+            )
+
+            return None
+
+    @staticmethod
+    def quaternion_to_yaw(q):
+
+        quaternion = [
+            q.x,
+            q.y,
+            q.z,
+            q.w
+        ]
+
+        _, _, yaw = euler_from_quaternion(
+            quaternion
+        )
+
+        return yaw
+
+    def local_to_map(
+        self,
+        local_x,
+        local_y,
+        transform
+    ):
+
+        translation = (
+            transform.transform.translation
+        )
+
+        rotation = (
+            transform.transform.rotation
+        )
+
+        vehicle_yaw = self.quaternion_to_yaw(
+            rotation
+        )
+
+        cos_yaw = math.cos(
+            vehicle_yaw
+        )
+
+        sin_yaw = math.sin(
+            vehicle_yaw
+        )
+
+        map_x = (
+            translation.x
+            + cos_yaw * local_x
+            - sin_yaw * local_y
+        )
+
+        map_y = (
+            translation.y
+            + sin_yaw * local_x
+            + cos_yaw * local_y
+        )
+
+        return (
+            map_x,
+            map_y
+        )
+
+    # ================================================================
+    # Vector limit
+    # ================================================================
+
+    @staticmethod
+    def limit_vector(
+        x,
+        y,
+        maximum
+    ):
+
+        magnitude = math.hypot(
+            x,
+            y
+        )
+
+        if (
+            magnitude <= maximum
+            or magnitude < 1.0e-9
+        ):
+
+            return (
+                x,
+                y
+            )
+
+        scale = (
+            maximum
+            / magnitude
+        )
+
+        return (
+            x * scale,
+            y * scale
+        )
+
+    # ================================================================
+    # Velocity smoothing
+    # ================================================================
+
+    def stabilize_velocity(
+        self,
+        track_id,
+        raw_vx,
+        raw_vy,
+        timestamp
+    ):
+
+        raw_vx, raw_vy = self.limit_vector(
+            raw_vx,
+            raw_vy,
+            self.max_output_speed_mps
+        )
+
+        if track_id not in self.velocity_states:
+
+            self.velocity_states[
+                track_id
+            ] = {
+                "vx": raw_vx,
+                "vy": raw_vy,
+                "timestamp": timestamp
+            }
+
+            return (
+                raw_vx,
+                raw_vy
+            )
+
+        previous = self.velocity_states[
+            track_id
+        ]
+
+        dt = (
+            timestamp
+            - previous["timestamp"]
+        )
+
+        dt = max(
+            0.05,
+            min(
+                dt,
+                1.0
+            )
+        )
+
+        dvx = (
+            raw_vx
+            - previous["vx"]
+        )
+
+        dvy = (
+            raw_vy
+            - previous["vy"]
+        )
+
+        max_delta_v = (
+            self.max_output_accel_mps2
+            * dt
+        )
+
+        dvx, dvy = self.limit_vector(
+            dvx,
+            dvy,
+            max_delta_v
+        )
+
+        gated_vx = (
+            previous["vx"]
+            + dvx
+        )
+
+        gated_vy = (
+            previous["vy"]
+            + dvy
+        )
+
+        alpha = (
+            self.velocity_alpha
+        )
+
+        filtered_vx = (
+            alpha * gated_vx
+            + (1.0 - alpha)
+            * previous["vx"]
+        )
+
+        filtered_vy = (
+            alpha * gated_vy
+            + (1.0 - alpha)
+            * previous["vy"]
+        )
+
+        self.velocity_states[
+            track_id
+        ] = {
+            "vx": filtered_vx,
+            "vy": filtered_vy,
+            "timestamp": timestamp
+        }
+
+        return (
+            filtered_vx,
+            filtered_vy
+        )
+
+    # ================================================================
+    # BBox smoothing
+    # ================================================================
+
+    def stabilize_bbox(
+        self,
+        track_id,
+        raw_length,
+        raw_width
+    ):
+
+        if track_id not in self.bbox_histories:
+
+            self.bbox_histories[
+                track_id
+            ] = {
+
+                "length":
+                    deque(
+                        maxlen=self.bbox_history_size
+                    ),
+
+                "width":
+                    deque(
+                        maxlen=self.bbox_history_size
+                    )
+            }
+
+        history = (
+            self.bbox_histories[
+                track_id
+            ]
+        )
+
+        history["length"].append(
+            raw_length
+        )
+
+        history["width"].append(
+            raw_width
+        )
+
+        median_length = statistics.median(
+            history["length"]
+        )
+
+        median_width = statistics.median(
+            history["width"]
+        )
+
+        if track_id not in self.filtered_bbox:
+
+            self.filtered_bbox[
+                track_id
+            ] = {
+
+                "length":
+                    median_length,
+
+                "width":
+                    median_width
+            }
+
+            return (
+                median_length,
+                median_width
+            )
+
+        previous = (
+            self.filtered_bbox[
+                track_id
+            ]
+        )
+
+        def limit_change(
+            old,
+            new
+        ):
+
+            if old <= 1.0e-6:
+                return new
+
+            ratio = (
+                self.bbox_max_relative_jump
+            )
+
+            minimum = (
+                old
+                * (1.0 - ratio)
+            )
+
+            maximum = (
+                old
+                * (1.0 + ratio)
+            )
+
+            return max(
+                minimum,
+                min(
+                    new,
+                    maximum
+                )
+            )
+
+        limited_length = limit_change(
+            previous["length"],
+            median_length
+        )
+
+        limited_width = limit_change(
+            previous["width"],
+            median_width
+        )
+
+        alpha = (
+            self.bbox_alpha
+        )
+
+        filtered_length = (
+            alpha * limited_length
+            + (1.0 - alpha)
+            * previous["length"]
+        )
+
+        filtered_width = (
+            alpha * limited_width
+            + (1.0 - alpha)
+            * previous["width"]
+        )
+
+        self.filtered_bbox[
+            track_id
+        ] = {
+
+            "length":
+                filtered_length,
+
+            "width":
+                filtered_width
+        }
+
+        return (
+            filtered_length,
+            filtered_width
+        )
+
+    # ================================================================
+    # Motion State
+    # ================================================================
+
+    def update_motion_state(
+        self,
+        track_id,
+        speed,
+        timestamp
+    ):
+
+        if track_id not in self.motion_tracks:
+
+            self.motion_tracks[
+                track_id
+            ] = {
+
+                "state":
+                    "UNKNOWN",
+
+                "ever_moved":
+                    False,
+
+                "first_seen":
+                    timestamp,
+
+                "last_seen":
+                    timestamp,
+
+                "low_speed_since":
+                    timestamp
+            }
+
+        track = self.motion_tracks[
+            track_id
+        ]
+
+        track["last_seen"] = timestamp
+
+        current_state = track[
+            "state"
+        ]
+
+        # ------------------------------------------------------------
+        # MOVING
+        # ------------------------------------------------------------
+
+        if speed >= self.moving_enter_speed:
+
+            track["state"] = "MOVING"
+
+            track["ever_moved"] = True
+
+            track["low_speed_since"] = None
+
+            return "MOVING"
+
+        # ------------------------------------------------------------
+        # Hysteresis
+        # ------------------------------------------------------------
+
+        if (
+            current_state == "MOVING"
+            and speed > self.moving_exit_speed
+        ):
+
+            track["low_speed_since"] = None
+
+            return "MOVING"
+
+        # ------------------------------------------------------------
+        # Low speed
+        # ------------------------------------------------------------
+
+        if speed <= self.moving_exit_speed:
+
+            if track["low_speed_since"] is None:
+
+                track["low_speed_since"] = timestamp
+
+            low_duration = (
+                timestamp
+                - track["low_speed_since"]
+            )
+
+            # 움직였던 객체
+            if track["ever_moved"]:
+
+                if (
+                    low_duration
+                    >= self.stopped_confirm_sec
+                ):
+
+                    track["state"] = "STOPPED"
+
+                    return "STOPPED"
+
+                return track["state"]
+
+            # 처음부터 계속 정지
+            static_duration = (
+                timestamp
+                - track["first_seen"]
+            )
+
+            if (
+                static_duration
+                >= self.static_confirm_sec
+            ):
+
+                track["state"] = "STATIC"
+
+                return "STATIC"
+
+            return "UNKNOWN"
+
+        return track["state"]
+
+    # ================================================================
+    # Yaw
+    # ================================================================
+
+    @staticmethod
+    def normalize_angle(angle):
+
+        while angle > math.pi:
+            angle -= 2.0 * math.pi
+
+        while angle < -math.pi:
+            angle += 2.0 * math.pi
+
+        return angle
+
+    def smooth_yaw(
+        self,
+        previous_yaw,
+        new_yaw
+    ):
+
+        previous_x = math.cos(
+            previous_yaw
+        )
+
+        previous_y = math.sin(
+            previous_yaw
+        )
+
+        new_x = math.cos(
+            new_yaw
+        )
+
+        new_y = math.sin(
+            new_yaw
+        )
+
+        alpha = (
+            self.yaw_alpha
+        )
+
+        filtered_x = (
+            (1.0 - alpha)
+            * previous_x
+
+            + alpha
+            * new_x
+        )
+
+        filtered_y = (
+            (1.0 - alpha)
+            * previous_y
+
+            + alpha
+            * new_y
+        )
+
+        if (
+            math.hypot(
+                filtered_x,
+                filtered_y
+            )
+            < 1.0e-6
+        ):
+
+            return previous_yaw
+
+        return math.atan2(
+            filtered_y,
+            filtered_x
+        )
+
+    def update_yaw(
+        self,
+        track_id,
+        vx,
+        vy,
+        timestamp
+    ):
+
+        speed = math.hypot(
+            vx,
+            vy
+        )
+
+        if track_id not in self.yaw_tracks:
+
+            self.yaw_tracks[
+                track_id
+            ] = {
+
+                "yaw":
+                    0.0,
+
+                "valid":
+                    False,
+
+                "last_seen":
+                    timestamp
+            }
+
+        state = self.yaw_tracks[
+            track_id
+        ]
+
+        state["last_seen"] = timestamp
+
+        # ------------------------------------------------------------
+        # 충분히 이동하는 경우
+        # ------------------------------------------------------------
+
+        if speed >= self.yaw_min_speed_mps:
+
+            raw_yaw = math.atan2(
+                vy,
+                vx
+            )
+
+            raw_yaw = self.normalize_angle(
+                raw_yaw
+            )
+
+            if not state["valid"]:
+
+                filtered_yaw = raw_yaw
+
+                state["valid"] = True
+
+            else:
+
+                filtered_yaw = self.smooth_yaw(
+                    state["yaw"],
+                    raw_yaw
+                )
+
+            state["yaw"] = filtered_yaw
+
+            return (
+                filtered_yaw,
+                True,
+                "VELOCITY"
+            )
+
+        # ------------------------------------------------------------
+        # 이전에 움직였던 객체
+        # ------------------------------------------------------------
+
+        if state["valid"]:
+
+            return (
+                state["yaw"],
+                True,
+                "HOLD"
+            )
+
+        # ------------------------------------------------------------
+        # 한번도 움직이지 않음
+        # ------------------------------------------------------------
+
+        return (
+            0.0,
+            False,
+            "UNKNOWN"
+        )
+
+    # ================================================================
+    # Cleanup
+    # ================================================================
+
+    def cleanup(
+        self,
+        timestamp,
+        active_ids
+    ):
+
+        # Velocity / bbox
+        for dictionary in [
+
+            self.velocity_states,
+            self.bbox_histories,
+            self.filtered_bbox
+
+        ]:
+
+            for track_id in list(
+                dictionary.keys()
+            ):
+
+                if track_id not in active_ids:
+
+                    del dictionary[
+                        track_id
+                    ]
+
+        # Motion
+        for track_id in list(
+            self.motion_tracks.keys()
+        ):
+
+            if (
+                timestamp
+                - self.motion_tracks[
+                    track_id
+                ]["last_seen"]
+                > self.motion_timeout_sec
+            ):
+
+                del self.motion_tracks[
+                    track_id
+                ]
+
+        # Yaw
+        for track_id in list(
+            self.yaw_tracks.keys()
+        ):
+
+            if (
+                timestamp
+                - self.yaw_tracks[
+                    track_id
+                ]["last_seen"]
+                > self.yaw_timeout_sec
+            ):
+
+                del self.yaw_tracks[
+                    track_id
+                ]
+
+    # ================================================================
+    # Publish helper
+    # ================================================================
+
+    @staticmethod
+    def publish_json(
+        publisher,
+        timestamp,
+        obstacles
+    ):
+
+        output = {
+
+            "timestamp":
+                float(
+                    timestamp
+                ),
+
+            "obstacle_count":
+                len(
+                    obstacles
+                ),
+
+            "obstacles":
+                obstacles
+        }
+
+        msg = String()
+
+        msg.data = json.dumps(
+            output,
+            ensure_ascii=False
+        )
+
+        publisher.publish(
+            msg
+        )
+
+    # ================================================================
+    # Callback
+    # ================================================================
+
+    def callback(
+        self,
+        msg
+    ):
+
+        timestamp = (
+            rospy.Time.now().to_sec()
+        )
+
+        try:
+
+            raw_obstacles = json.loads(
+                msg.data
+            )
+
+        except Exception as e:
+
+            rospy.logwarn_throttle(
+                2.0,
+                "[FinalObject V1] JSON error: %s",
+                str(e)
+            )
+
+            return
+
+        if not isinstance(
+            raw_obstacles,
+            list
+        ):
+
+            return
+
+        transform = (
+            self.get_transform()
+        )
+
+        if transform is None:
+
+            return
+
+        # ============================================================
+        # LiDAR -> map detections
+        # ============================================================
+
+        detections = []
+
+        for obs in raw_obstacles:
+
+            centroid = obs.get(
+                "centroid",
+                [0.0, 0.0, 0.0]
+            )
+
+            if len(centroid) < 2:
+
+                continue
+
+            local_x = float(
+                centroid[0]
+            )
+
+            local_y = float(
+                centroid[1]
+            )
+
+            bbox_min = obs.get(
+                "bbox_min",
+                [0.0, 0.0, 0.0]
+            )
+
+            bbox_max = obs.get(
+                "bbox_max",
+                [0.0, 0.0, 0.0]
+            )
+
+            if (
+                len(bbox_min) >= 2
+                and len(bbox_max) >= 2
+            ):
+
+                size_x = abs(
+                    float(
+                        bbox_max[0]
+                    )
+                    - float(
+                        bbox_min[0]
+                    )
+                )
+
+                size_y = abs(
+                    float(
+                        bbox_max[1]
+                    )
+                    - float(
+                        bbox_min[1]
+                    )
+                )
+
+                length = max(
+                    size_x,
+                    size_y
+                )
+
+                width = min(
+                    size_x,
+                    size_y
+                )
+
+            else:
+
+                length = 0.0
+                width = 0.0
+
+            map_x, map_y = self.local_to_map(
+                local_x,
+                local_y,
+                transform
+            )
+
+            detections.append(
+                {
+
+                    "center_x_m":
+                        float(
+                            map_x
+                        ),
+
+                    "center_y_m":
+                        float(
+                            map_y
+                        ),
+
+                    "length":
+                        float(
+                            length
+                        ),
+
+                    "width":
+                        float(
+                            width
+                        )
+                }
+            )
+
+        # ============================================================
+        # V5.1 Tracking
+        # ============================================================
+
+        tracks = self.tracker.update(
+            detections,
+            timestamp
+        )
+
+        final_obstacles = []
+
+        static_obstacles = []
+        dynamic_obstacles = []
+
+        active_ids = set()
+
+        debug = []
+
+        # ============================================================
+        # Final Object
+        # ============================================================
+
+        for track in tracks:
+
+            track_id = int(
+                track["track_id"]
+            )
+
+            active_ids.add(
+                track_id
+            )
+
+            # prediction-only track은 외부 publish 안 함
+            if int(
+                track["misses"]
+            ) > 0:
+
+                continue
+
+            if not bool(
+                track["confirmed"]
+            ):
+
+                continue
+
+            # --------------------------------------------------------
+            # Velocity
+            # --------------------------------------------------------
+
+            raw_vx = float(
+                track[
+                    "velocity_x_mps"
+                ]
+            )
+
+            raw_vy = float(
+                track[
+                    "velocity_y_mps"
+                ]
+            )
+
+            vx, vy = self.stabilize_velocity(
+                track_id,
+                raw_vx,
+                raw_vy,
+                timestamp
+            )
+
+            speed = math.hypot(
+                vx,
+                vy
+            )
+
+            # --------------------------------------------------------
+            # BBox
+            # --------------------------------------------------------
+
+            length, width = self.stabilize_bbox(
+
+                track_id,
+
+                float(
+                    track.get(
+                        "length",
+                        0.0
+                    )
+                ),
+
+                float(
+                    track.get(
+                        "width",
+                        0.0
+                    )
+                )
+            )
+
+            # --------------------------------------------------------
+            # Motion
+            # --------------------------------------------------------
+
+            motion_state = (
+                self.update_motion_state(
+                    track_id,
+                    speed,
+                    timestamp
+                )
+            )
+
+            # --------------------------------------------------------
+            # Yaw
+            # --------------------------------------------------------
+
+            (
+                yaw,
+                yaw_valid,
+                yaw_source
+            ) = self.update_yaw(
+                track_id,
+                vx,
+                vy,
+                timestamp
+            )
+
+            # --------------------------------------------------------
+            # Final object
+            # --------------------------------------------------------
+
+            obstacle = {
+
+                "id":
+                    track_id,
+
+                "center_x_map":
+                    float(
+                        track[
+                            "center_x_m"
+                        ]
+                    ),
+
+                "center_y_map":
+                    float(
+                        track[
+                            "center_y_m"
+                        ]
+                    ),
+
+                "yaw":
+                    float(
+                        yaw
+                    ),
+
+                "yaw_deg":
+                    float(
+                        math.degrees(
+                            yaw
+                        )
+                    ),
+
+                "yaw_valid":
+                    bool(
+                        yaw_valid
+                    ),
+
+                "yaw_source":
+                    yaw_source,
+
+                "length":
+                    float(
+                        length
+                    ),
+
+                "width":
+                    float(
+                        width
+                    ),
+
+                "velocity_x_map":
+                    float(
+                        vx
+                    ),
+
+                "velocity_y_map":
+                    float(
+                        vy
+                    ),
+
+                "speed_mps":
+                    float(
+                        speed
+                    ),
+
+                "motion_state":
+                    motion_state
+            }
+
+            final_obstacles.append(
+                obstacle
+            )
+
+            # --------------------------------------------------------
+            # Static / Dynamic topics
+            # --------------------------------------------------------
+
+            if motion_state in (
+                "STATIC",
+                "STOPPED"
+            ):
+
+                static_obstacles.append(
+                    obstacle
+                )
+
+            elif motion_state == "MOVING":
+
+                dynamic_obstacles.append(
+                    obstacle
+                )
+
+            debug.append(
+                "{}:{}:{:.2f}m/s:{:.1f}deg".format(
+                    track_id,
+                    motion_state,
+                    speed,
+                    math.degrees(
+                        yaw
+                    )
+                )
+            )
+
+        # ============================================================
+        # Cleanup
+        # ============================================================
+
+        self.cleanup(
+            timestamp,
+            active_ids
+        )
+
+        # ============================================================
+        # Publish
+        # ============================================================
+
+        self.publish_json(
+            self.publisher,
+            timestamp,
+            final_obstacles
+        )
+
+        self.publish_json(
+            self.static_publisher,
+            timestamp,
+            static_obstacles
+        )
+
+        self.publish_json(
+            self.dynamic_publisher,
+            timestamp,
+            dynamic_obstacles
+        )
+
+        # ============================================================
+        # Debug
+        # ============================================================
+
+        rospy.loginfo_throttle(
+            1.0,
+
+            (
+                "[FinalObject V1] "
+                "det=%d "
+                "tracks=%d "
+                "out=%d "
+                "pending=%d "
+                "promoted=%s "
+                "| %s"
+            ),
+
+            len(
+                detections
+            ),
+
+            len(
+                tracks
+            ),
+
+            len(
+                final_obstacles
+            ),
+
+            self.tracker.last_pending_count,
+
+            str(
+                self.tracker.last_promoted_ids
+            ),
+
+            " | ".join(
+                debug
+            )
+        )
+
+
+if __name__ == "__main__":
+
+    try:
+
+        FinalObstacleStatePublisherV1()
+
+        rospy.spin()
+
+    except rospy.ROSInterruptException:
+
+        pass
