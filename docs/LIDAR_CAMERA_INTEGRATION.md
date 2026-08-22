@@ -62,6 +62,8 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
 | `base_model_path` | `yolov8n.pt` | 기본 YOLO 모델 |
 | `custom_model_path` | `null.pt` | 커스텀 신호등/장애물 모델 |
 | `yolo_confidence` | `0.4` | YOLO confidence 임계값 |
+| `yolo_inference_size` | `416` | YOLO 추론 입력 크기(작을수록 빠르지만 소형 객체 정확도 감소) |
+| `camera_display_fps` | `0.0` | `0`은 MORAI 수신 프레임율로 즉시 표시 |
 | `enable_highway_gate` | `true` | YOLO 기반 고속도로 환경 게이트 |
 | `require_dashed_lane` | `false` | 점선 인식 구현 후 `true`로 전환 |
 | `car_detection_hold_s` | `2.0` | YOLO car 조건 유지시간 |
@@ -78,6 +80,11 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
 ```
 
 커스텀 모델이 없으면 경고를 출력하고 COCO 기본 YOLO 탐지만 계속한다.
+
+YOLO 수신/표시와 모델 추론은 서로 다른 스레드에서 동작한다. 화면은 추론을
+기다리지 않고 최신 UDP 프레임을 보여 주며, 검출 박스와 Bool 토픽은 가장
+최근에 완료된 추론 결과로 갱신된다. 화면 상단에 `LIVE FPS`, `YOLO FPS`,
+`infer ms`, `result age` 가 표시된다.
 
 ## 고속도로 환경 기반 끼어들기 활성화
 

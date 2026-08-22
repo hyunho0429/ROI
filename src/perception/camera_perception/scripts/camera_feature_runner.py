@@ -21,6 +21,8 @@ def main():
     parser.add_argument("--base-model", default="yolov8n.pt")
     parser.add_argument("--custom-model", default="null.pt")
     parser.add_argument("--confidence", type=float, default=0.4)
+    parser.add_argument("--inference-size", type=int, default=416)
+    parser.add_argument("--display-fps", type=float, default=0.0)
     parser.add_argument(
         "--car-detected-topic", default="/perception/camera/car_detected"
     )
@@ -42,6 +44,8 @@ def main():
             "--base-model", args.base_model,
             "--custom-model", args.custom_model,
             "--confidence", str(args.confidence),
+            "--inference-size", str(args.inference_size),
+            "--display-fps", str(args.display_fps),
             "--car-detected-topic", args.car_detected_topic,
             "--person-detected-topic", args.person_detected_topic,
         ]

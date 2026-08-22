@@ -1,6 +1,7 @@
 import ctypes
 import argparse
 import os
+import threading
 
 # X11 멀티스레드 충돌 방지 설정
 try:
@@ -38,6 +39,10 @@ CAR_DETECTED_TOPIC = os.environ.get(
 PERSON_DETECTED_TOPIC = os.environ.get(
     "MORAI_YOLO_PERSON_TOPIC", "/perception/camera/person_detected"
 )
+INFERENCE_SIZE = int(os.environ.get("MORAI_YOLO_INFERENCE_SIZE", "416"))
+# 0 means that the MORAI source rate controls the display.  Adding a 33 ms GUI
+# wait to a receiver that already waits for a 30 Hz frame would halve the rate.
+DISPLAY_FPS = float(os.environ.get("MORAI_YOLO_DISPLAY_FPS", "0.0"))
 
 def _resolve_model_path(model_path):
     """상대 모델 경로는 기존처럼 Sensor 디렉터리를 기준으로 해석한다."""
@@ -50,8 +55,14 @@ def _resolve_model_path(model_path):
 def main(ip=IP, port=PORT, base_model_path=BASE_MODEL_PATH,
          custom_model_path=CUSTOM_MODEL_PATH, confidence=0.4,
          car_detected_topic=CAR_DETECTED_TOPIC,
-         person_detected_topic=PERSON_DETECTED_TOPIC):
-    """Cam 4 전용 UDP 수신 및 투트랙 검출 메인 함수"""
+         person_detected_topic=PERSON_DETECTED_TOPIC,
+         inference_size=INFERENCE_SIZE, display_fps=DISPLAY_FPS):
+    """Cam 4 UDP receive, asynchronous YOLO inference, and live display.
+
+    Camera receive/display must not wait for model inference.  The inference
+    worker always replaces its pending input with the newest frame, so a slow
+    CPU lowers detection FPS without building seconds of stale video.
+    """
     # argparse/help와 ROS launch 구조 검증은 모델 설정 파일 접근 없이 가능하게 한다.
     import rospy
     from std_msgs.msg import Bool
@@ -65,14 +76,18 @@ def main(ip=IP, port=PORT, base_model_path=BASE_MODEL_PATH,
         person_detected_topic, Bool, queue_size=1
     )
     detection_state = {"car": False, "person": False}
+    detection_state_lock = threading.Lock()
+
+    def publish_detection_state(_event=None):
+        with detection_state_lock:
+            car = detection_state["car"]
+            person = detection_state["person"]
+        car_detected_publisher.publish(Bool(data=car))
+        person_detected_publisher.publish(Bool(data=person))
+
     detection_heartbeat_timer = rospy.Timer(
         rospy.Duration(0.1),
-        lambda _event: (
-            car_detected_publisher.publish(Bool(data=detection_state["car"])),
-            person_detected_publisher.publish(
-                Bool(data=detection_state["person"])
-            ),
-        ),
+        publish_detection_state,
     )
 
     print(f"[{CAM_NAME}] YOLOv8 모델 로딩 중...")
@@ -89,6 +104,146 @@ def main(ip=IP, port=PORT, base_model_path=BASE_MODEL_PATH,
 
     cam_data = LatestCameraReceiver(ip, port)
     last_frame_sequence = 0
+
+    pending_condition = threading.Condition()
+    pending_frame = {"sequence": 0, "image": None}
+    result_lock = threading.Lock()
+    latest_result = {
+        "sequence": 0,
+        "detections": (),
+        "inference_ms": 0.0,
+        "completed_at": 0.0,
+        "fps": 0.0,
+    }
+    stop_worker = threading.Event()
+
+    def collect_detections(result, model, color, image_height, is_custom=False):
+        detections = []
+        boxes = result.boxes if result.boxes is not None else ()
+        for box in boxes:
+            cls_id = int(box.cls[0])
+            score = float(box.conf[0])
+            label = str(model.names[cls_id])
+            coords = box.xyxy[0].detach().cpu().tolist()
+            if len(coords) != 4:
+                continue
+            x1, y1, x2, y2 = coords
+
+            # Preserve the original soft ROI for custom traffic-light labels.
+            y_center = (y1 + y2) * 0.5
+            if is_custom and any(
+                name in label for name in ("Red", "Green", "Yellow")
+            ) and y_center > image_height * 0.6:
+                continue
+
+            detections.append((x1, y1, x2, y2, label, score, color))
+        return detections
+
+    def inference_worker():
+        last_inferred_sequence = 0
+        smoothed_fps = 0.0
+        while not stop_worker.is_set() and not rospy.is_shutdown():
+            with pending_condition:
+                pending_condition.wait_for(
+                    lambda: stop_worker.is_set()
+                    or pending_frame["sequence"] > last_inferred_sequence,
+                    timeout=0.1,
+                )
+                if stop_worker.is_set():
+                    return
+                sequence = pending_frame["sequence"]
+                image = pending_frame["image"]
+
+            if image is None or sequence <= last_inferred_sequence:
+                continue
+            last_inferred_sequence = sequence
+            started_at = time.monotonic()
+
+            try:
+                base_results = base_model.predict(
+                    source=image,
+                    imgsz=inference_size,
+                    conf=confidence,
+                    verbose=False,
+                )
+                base_boxes = (
+                    base_results[0].boxes
+                    if base_results[0].boxes is not None
+                    else ()
+                )
+                detected_labels = {
+                    str(base_model.names[int(box.cls[0])]).strip().lower()
+                    for box in base_boxes
+                }
+                detections = collect_detections(
+                    base_results[0], base_model, (0, 255, 0), image.shape[0]
+                )
+
+                if custom_model is not None:
+                    custom_results = custom_model.predict(
+                        source=image,
+                        imgsz=inference_size,
+                        conf=confidence,
+                        verbose=False,
+                    )
+                    custom_detections = collect_detections(
+                        custom_results[0],
+                        custom_model,
+                        (255, 180, 0),
+                        image.shape[0],
+                        is_custom=True,
+                    )
+                    detections.extend(custom_detections)
+                    if custom_detections:
+                        labels = ", ".join(sorted({d[4] for d in custom_detections}))
+                        rospy.loginfo_throttle(
+                            1.0, "%s custom detections: %s", CAM_NAME, labels
+                        )
+
+                car_detected = "car" in detected_labels
+                person_detected = "person" in detected_labels
+                with detection_state_lock:
+                    detection_state["car"] = car_detected
+                    detection_state["person"] = person_detected
+                publish_detection_state()
+
+                if car_detected:
+                    rospy.loginfo_throttle(
+                        1.0,
+                        "YOLO car detected; highway camera condition is true",
+                    )
+                if person_detected:
+                    rospy.logwarn_throttle(
+                        1.0,
+                        "YOLO person detected; pedestrian fusion camera condition is true",
+                    )
+
+                elapsed = max(time.monotonic() - started_at, 1e-6)
+                instant_fps = 1.0 / elapsed
+                smoothed_fps = (
+                    instant_fps
+                    if smoothed_fps <= 0.0
+                    else 0.8 * smoothed_fps + 0.2 * instant_fps
+                )
+                with result_lock:
+                    latest_result.update(
+                        sequence=sequence,
+                        detections=tuple(detections),
+                        inference_ms=elapsed * 1000.0,
+                        completed_at=time.monotonic(),
+                        fps=smoothed_fps,
+                    )
+            except Exception as error:
+                rospy.logerr_throttle(1.0, "YOLO inference error: %s", error)
+
+    worker = threading.Thread(
+        target=inference_worker,
+        name="morai-yolo-inference",
+        daemon=True,
+    )
+    worker.start()
+    last_display_at = 0.0
+    smoothed_live_fps = 0.0
     
     print(f"[{CAM_NAME}] MORAI UDP 카메라 연결 시도 중... ({ip}:{port})")
 
@@ -107,61 +262,81 @@ def main(ip=IP, port=PORT, base_model_path=BASE_MODEL_PATH,
             if image is None or image.size == 0:
                 continue
 
-            img_h, img_w, _ = image.shape
+            # Replace the pending inference job instead of queueing this frame.
+            with pending_condition:
+                pending_frame["sequence"] = frame.sequence
+                pending_frame["image"] = image
+                pending_condition.notify()
 
-            # 💡 2. [트랙 1] 기본 사물 탐지 (사람, 차, 표지판 등)
-            base_results = base_model.predict(source=image, conf=confidence, verbose=False)
-            detected_labels = {
-                str(base_model.names[int(box.cls[0])]).strip().lower()
-                for box in (
-                    base_results[0].boxes
-                    if base_results[0].boxes is not None
-                    else ()
+            now = time.monotonic()
+            if (
+                display_fps > 0.0
+                and last_display_at > 0.0
+                and now - last_display_at < 1.0 / display_fps
+            ):
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    break
+                continue
+            if last_display_at > 0.0:
+                instant_live_fps = 1.0 / max(now - last_display_at, 1e-6)
+                smoothed_live_fps = (
+                    instant_live_fps
+                    if smoothed_live_fps <= 0.0
+                    else 0.9 * smoothed_live_fps + 0.1 * instant_live_fps
                 )
-            }
-            car_detected = "car" in detected_labels
-            person_detected = "person" in detected_labels
-            detection_state["car"] = car_detected
-            detection_state["person"] = person_detected
-            car_detected_publisher.publish(Bool(data=car_detected))
-            person_detected_publisher.publish(Bool(data=person_detected))
-            if car_detected:
-                rospy.loginfo_throttle(
-                    1.0, "YOLO car detected; highway camera condition is true"
+            last_display_at = now
+
+            # Draw the latest inference result over the current live frame.
+            # Boxes can update more slowly than video, but video never waits for
+            # YOLO and therefore remains suitable for real-time monitoring.
+            with result_lock:
+                shown_result = dict(latest_result)
+            display_frame = image.copy()
+            for x1, y1, x2, y2, label, score, color in shown_result["detections"]:
+                p1 = (max(0, int(x1)), max(0, int(y1)))
+                p2 = (
+                    min(display_frame.shape[1] - 1, int(x2)),
+                    min(display_frame.shape[0] - 1, int(y2)),
                 )
-            if person_detected:
-                rospy.logwarn_throttle(
-                    1.0, "YOLO person detected; pedestrian fusion camera condition is true"
+                cv2.rectangle(display_frame, p1, p2, color, 2)
+                cv2.putText(
+                    display_frame,
+                    f"{label} {score:.2f}",
+                    (p1[0], max(18, p1[1] - 5)),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    color,
+                    2,
                 )
-            # 기본 탐지 결과를 원본 이미지에 1차로 시각화
-            annotated_frame = base_results[0].plot()
 
-            # 💡 3. [트랙 2] 커스텀 탐지 (신호등, 모라이 장애물)
-            custom_results = None
-            if custom_model is not None:
-                custom_results = custom_model.predict(
-                    source=image, conf=confidence, verbose=False)
-                # 커스텀 탐지 결과를 기존 1차 시각화 프레임 위에 중첩한다.
-                annotated_frame = custom_results[0].plot(img=annotated_frame)
-
-            # 💡 4. 터미널 로그 출력 및 좌표 필터링 (소프트 ROI)
-            for box in custom_results[0].boxes if custom_results is not None else ():
-                cls_id = int(box.cls[0])
-                conf = float(box.conf[0])
-                label = custom_model.names[cls_id]
-                
-                # Y축 중심 좌표 계산 (box.xywh -> [x_center, y_center, width, height])
-                y_center = float(box.xywh[0][1])
-
-                # [소프트 ROI 로직 예시]
-                # 신호등 라벨인데 화면 하단(60% 초과 지점)에서 탐지된 경우, 바닥 불빛/오탐지로 보고 무시
-                if ("Red" in label or "Green" in label or "Yellow" in label) and y_center > (img_h * 0.6):
-                    continue
-
-                print(f"[{CAM_NAME}] 감지: {label} ({conf*100:.1f}%)")
-
-            # 💡 5. 통합 시각화 화면 출력
-            cv2.imshow(f"MORAI {CAM_NAME} Traffic & Object Monitor", annotated_frame)
+            result_age_ms = (
+                (time.monotonic() - shown_result["completed_at"]) * 1000.0
+                if shown_result["completed_at"] > 0.0
+                else 0.0
+            )
+            status = (
+                f"LIVE {smoothed_live_fps:.1f} FPS | "
+                f"YOLO {shown_result['fps']:.1f} FPS | "
+                f"infer {shown_result['inference_ms']:.0f} ms | "
+                f"result age {result_age_ms:.0f} ms"
+            )
+            cv2.rectangle(
+                display_frame,
+                (0, 0),
+                (display_frame.shape[1], 30),
+                (0, 0, 0),
+                -1,
+            )
+            cv2.putText(
+                display_frame,
+                status,
+                (8, 21),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.55,
+                (255, 255, 255),
+                1,
+            )
+            cv2.imshow(f"MORAI {CAM_NAME} Traffic & Object Monitor", display_frame)
 
             # 'q' 키를 누르면 모니터링 종료
             if cv2.waitKey(1) & 0xFF == ord('q'):
@@ -171,9 +346,14 @@ def main(ip=IP, port=PORT, base_model_path=BASE_MODEL_PATH,
             print(f"[{CAM_NAME}] Error: {e}")
             time.sleep(0.01)
 
+    stop_worker.set()
+    with pending_condition:
+        pending_condition.notify_all()
+    worker.join(timeout=1.0)
     try:
-        detection_state["car"] = False
-        detection_state["person"] = False
+        with detection_state_lock:
+            detection_state["car"] = False
+            detection_state["person"] = False
         car_detected_publisher.publish(Bool(data=False))
         person_detected_publisher.publish(Bool(data=False))
     except rospy.ROSException:
@@ -191,6 +371,14 @@ if __name__ == "__main__":
     parser.add_argument("--confidence", type=float, default=0.4)
     parser.add_argument("--car-detected-topic", default=CAR_DETECTED_TOPIC)
     parser.add_argument("--person-detected-topic", default=PERSON_DETECTED_TOPIC)
+    parser.add_argument("--inference-size", type=int, default=INFERENCE_SIZE)
+    parser.add_argument(
+        "--display-fps",
+        type=float,
+        default=DISPLAY_FPS,
+        help="maximum live display FPS; 0 follows the MORAI source rate",
+    )
     args = parser.parse_args()
     main(args.cam_ip, args.cam_port, args.base_model, args.custom_model,
-         args.confidence, args.car_detected_topic, args.person_detected_topic)
+         args.confidence, args.car_detected_topic, args.person_detected_topic,
+         args.inference_size, args.display_fps)

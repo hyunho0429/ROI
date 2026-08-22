@@ -28,6 +28,8 @@
   <arg name="base_model_path" default="yolov8n.pt" />
   <arg name="custom_model_path" default="null.pt" />
   <arg name="yolo_confidence" default="0.4" />
+  <arg name="yolo_inference_size" default="416" />
+  <arg name="camera_display_fps" default="0.0" />
   <arg name="car_detected_topic" default="/perception/camera/car_detected" />
   <arg name="person_detected_topic" default="/perception/camera/person_detected" />
   <arg name="dashed_lane_topic" default="/perception/camera/dashed_lane_detected" />
@@ -74,6 +76,8 @@
     <arg name="base_model_path" value="$(arg base_model_path)" />
     <arg name="custom_model_path" value="$(arg custom_model_path)" />
     <arg name="yolo_confidence" value="$(arg yolo_confidence)" />
+    <arg name="yolo_inference_size" value="$(arg yolo_inference_size)" />
+    <arg name="camera_display_fps" value="$(arg camera_display_fps)" />
     <arg name="car_detected_topic" value="$(arg car_detected_topic)" />
     <arg name="person_detected_topic" value="$(arg person_detected_topic)" />
     <arg name="dashed_lane_topic" value="$(arg dashed_lane_topic)" />

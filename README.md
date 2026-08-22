@@ -794,6 +794,8 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
 | `base_model_path` | `yolov8n.pt` | 기본 YOLO 모델 경로/이름 |
 | `custom_model_path` | `null.pt` | 커스텀 YOLO 모델 경로/이름 |
 | `yolo_confidence` | `0.4` | YOLO confidence 임계값 |
+| `yolo_inference_size` | `416` | YOLO 추론 입력 크기 |
+| `camera_display_fps` | `0.0` | `0`은 MORAI 카메라 수신 속도를 그대로 사용 |
 | `enable_highway_gate` | `true` | 카메라 기반 고속도로 환경 게이트 실행 |
 | `require_dashed_lane` | `false` | `true`이면 car와 점선이 모두 탐지되어야 활성화 |
 | `car_detection_hold_s` | `2.0` | 일시적인 YOLO 누락 시 car 조건 유지시간 |
@@ -853,6 +855,18 @@ roslaunch camera_perception camera_perception.launch enable_yolo:=false
 
 - `Sensor/null.pt` 또는 `custom_model_path`가 실제 파일을 가리키는지 확인한다.
 - 모델의 class 이름과 학습 데이터가 현재 후처리 조건과 맞는지 확인한다.
+
+#### YOLO 화면이 느리거나 끊겨 보임
+
+- YOLO 수신/화면과 추론은 비동기로 실행되며 오래된 프레임을 큐에 쌓지 않는다.
+- 화면 상단의 `LIVE FPS`는 실제 화면 갱신률, `YOLO FPS`는 객체 검출 갱신률이다.
+- CPU가 느리면 `yolo_inference_size:=320`으로 줄여서 실행한다. 1.5m 근거리
+  보행자 검출은 유지되는지 반드시 MORAI에서 확인한다.
+
+```bash
+roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
+  enable_lane:=false yolo_inference_size:=320 camera_display_fps:=0
+```
 
 #### 화면은 정상인데 차량이 움직이지 않음
 
