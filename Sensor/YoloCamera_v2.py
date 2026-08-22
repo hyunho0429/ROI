@@ -43,6 +43,7 @@ INFERENCE_SIZE = int(os.environ.get("MORAI_YOLO_INFERENCE_SIZE", "416"))
 # 0 means that the MORAI source rate controls the display.  Adding a 33 ms GUI
 # wait to a receiver that already waits for a 30 Hz frame would halve the rate.
 DISPLAY_FPS = float(os.environ.get("MORAI_YOLO_DISPLAY_FPS", "0.0"))
+CPU_THREADS = int(os.environ.get("MORAI_YOLO_CPU_THREADS", "0"))
 
 def _resolve_model_path(model_path):
     """상대 모델 경로는 기존처럼 Sensor 디렉터리를 기준으로 해석한다."""
@@ -56,7 +57,8 @@ def main(ip=IP, port=PORT, base_model_path=BASE_MODEL_PATH,
          custom_model_path=CUSTOM_MODEL_PATH, confidence=0.4,
          car_detected_topic=CAR_DETECTED_TOPIC,
          person_detected_topic=PERSON_DETECTED_TOPIC,
-         inference_size=INFERENCE_SIZE, display_fps=DISPLAY_FPS):
+         inference_size=INFERENCE_SIZE, display_fps=DISPLAY_FPS,
+         cpu_threads=CPU_THREADS):
     """Cam 4 UDP receive, asynchronous YOLO inference, and live display.
 
     Camera receive/display must not wait for model inference.  The inference
@@ -67,6 +69,29 @@ def main(ip=IP, port=PORT, base_model_path=BASE_MODEL_PATH,
     import rospy
     from std_msgs.msg import Bool
     from ultralytics import YOLO
+
+    # PyTorch otherwise tends to occupy every vCPU in a small VirtualBox VM,
+    # starving the UDP/decode/GUI thread as soon as the first inference starts.
+    import torch
+    selected_cpu_threads = None
+    if not torch.cuda.is_available():
+        available = max(1, os.cpu_count() or 1)
+        selected_cpu_threads = (
+            max(1, int(cpu_threads))
+            if int(cpu_threads) > 0
+            else max(1, min(2, available - 1))
+        )
+        torch.set_num_threads(selected_cpu_threads)
+        try:
+            torch.set_num_interop_threads(1)
+        except RuntimeError:
+            # It can only be set before inter-op work begins. Inference still
+            # respects set_num_threads when another library initialized it.
+            pass
+        print(
+            f"[{CAM_NAME}] CPU inference threads={selected_cpu_threads} "
+            f"(available={available})"
+        )
 
     rospy.init_node("yolo_camera", anonymous=False)
     car_detected_publisher = rospy.Publisher(
@@ -244,6 +269,8 @@ def main(ip=IP, port=PORT, base_model_path=BASE_MODEL_PATH,
     worker.start()
     last_display_at = 0.0
     smoothed_live_fps = 0.0
+    last_live_image = None
+    last_live_frame_at = None
     
     print(f"[{CAM_NAME}] MORAI UDP 카메라 연결 시도 중... ({ip}:{port})")
 
@@ -251,6 +278,49 @@ def main(ip=IP, port=PORT, base_model_path=BASE_MODEL_PATH,
         try:
             frame = cam_data.wait_for_latest(last_frame_sequence, timeout=0.1)
             if frame is None:
+                # Even with no UDP frame, pump GUI events so the window does
+                # not become frozen/unresponsive. Show an explicit watchdog
+                # warning instead of silently leaving the last image onscreen.
+                now = time.monotonic()
+                stale_for = (
+                    now - last_live_frame_at
+                    if last_live_frame_at is not None
+                    else float("inf")
+                )
+                if stale_for > 0.5:
+                    health = cam_data.health_snapshot()
+                    rospy.logwarn_throttle(
+                        1.0,
+                        "No complete camera frame for %.2fs; receiver=%s",
+                        stale_for,
+                        health,
+                    )
+                    waiting = (
+                        last_live_image.copy()
+                        if last_live_image is not None
+                        else np.zeros((480, 640, 3), dtype=np.uint8)
+                    )
+                    cv2.rectangle(
+                        waiting,
+                        (0, 0),
+                        (waiting.shape[1], 38),
+                        (0, 0, 180),
+                        -1,
+                    )
+                    cv2.putText(
+                        waiting,
+                        "NO NEW CAMERA FRAME - check MORAI UDP",
+                        (8, 26),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.62,
+                        (255, 255, 255),
+                        2,
+                    )
+                    cv2.imshow(
+                        f"MORAI {CAM_NAME} Traffic & Object Monitor", waiting
+                    )
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    break
                 continue
             last_frame_sequence = frame.sequence
 
@@ -261,6 +331,8 @@ def main(ip=IP, port=PORT, base_model_path=BASE_MODEL_PATH,
             image = cv2.imdecode(image_np, cv2.IMREAD_COLOR)
             if image is None or image.size == 0:
                 continue
+            last_live_image = image
+            last_live_frame_at = time.monotonic()
 
             # Replace the pending inference job instead of queueing this frame.
             with pending_condition:
@@ -378,7 +450,13 @@ if __name__ == "__main__":
         default=DISPLAY_FPS,
         help="maximum live display FPS; 0 follows the MORAI source rate",
     )
+    parser.add_argument(
+        "--cpu-threads",
+        type=int,
+        default=CPU_THREADS,
+        help="PyTorch CPU threads; 0 reserves at least one vCPU for camera/GUI",
+    )
     args = parser.parse_args()
     main(args.cam_ip, args.cam_port, args.base_model, args.custom_model,
          args.confidence, args.car_detected_topic, args.person_detected_topic,
-         args.inference_size, args.display_fps)
+         args.inference_size, args.display_fps, args.cpu_threads)

@@ -11,6 +11,8 @@
   <arg name="yolo_inference_size" default="416" />
   <!-- 0: MORAI camera source rate; no extra GUI wait is inserted. -->
   <arg name="camera_display_fps" default="0.0" />
+  <!-- 0: automatically reserve at least one VM CPU for UDP/decode/GUI. -->
+  <arg name="yolo_cpu_threads" default="0" />
   <arg name="car_detected_topic" default="/perception/camera/car_detected" />
   <arg name="person_detected_topic" default="/perception/camera/person_detected" />
   <arg name="dashed_lane_topic" default="/perception/camera/dashed_lane_detected" />
@@ -39,7 +41,7 @@
         name="yolo_camera"
         output="screen"
         respawn="false"
-        args="--mode yolo --camera-stack-root $(arg camera_stack_root) --cam-ip $(arg camera_ip) --cam-port $(arg yolo_port) --base-model $(arg base_model_path) --custom-model $(arg custom_model_path) --confidence $(arg yolo_confidence) --inference-size $(arg yolo_inference_size) --display-fps $(arg camera_display_fps) --car-detected-topic $(arg car_detected_topic) --person-detected-topic $(arg person_detected_topic)" />
+        args="--mode yolo --camera-stack-root $(arg camera_stack_root) --cam-ip $(arg camera_ip) --cam-port $(arg yolo_port) --base-model $(arg base_model_path) --custom-model $(arg custom_model_path) --confidence $(arg yolo_confidence) --inference-size $(arg yolo_inference_size) --display-fps $(arg camera_display_fps) --cpu-threads $(arg yolo_cpu_threads) --car-detected-topic $(arg car_detected_topic) --person-detected-topic $(arg person_detected_topic)" />
 
   <node if="$(arg enable_highway_gate)"
         pkg="camera_perception"

@@ -11,6 +11,7 @@ from dataclasses import dataclass
 import ctypes
 import socket
 import threading
+import time
 
 from lib.define.Camera import Camera
 
@@ -34,12 +35,17 @@ class LatestCameraReceiver:
         self._sequence = 0
         self._closed = False
         self._condition = threading.Condition()
+        self._last_packet_at = None
+        self._last_frame_at = None
+        self._last_error = None
+        self._error_count = 0
 
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.socket.setsockopt(
             socket.SOL_SOCKET, socket.SO_RCVBUF, int(receive_buffer_bytes)
         )
+        self.socket.settimeout(0.2)
         try:
             self.socket.bind((ip, int(port)))
         except Exception:
@@ -61,6 +67,8 @@ class LatestCameraReceiver:
         while not self._closed:
             try:
                 raw_data, _ = self.socket.recvfrom(self._packet_size)
+            except socket.timeout:
+                continue
             except OSError:
                 if self._closed:
                     return
@@ -69,13 +77,29 @@ class LatestCameraReceiver:
             if not raw_data:
                 continue
 
-            ctypes.memmove(
-                ctypes.addressof(self._packet), raw_data, len(raw_data)
-            )
+            now = time.monotonic()
+            # A long packet gap means any partial JPEG from before the gap is
+            # no longer trustworthy. Drop it instead of joining two frames.
+            if (
+                self._last_packet_at is not None
+                and now - self._last_packet_at > 0.5
+            ):
+                self._packet.buffer = b""
+            self._last_packet_at = now
 
             try:
+                ctypes.memmove(
+                    ctypes.addressof(self._packet), raw_data, len(raw_data)
+                )
                 self._packet.parsing()
-            except (AttributeError, UnicodeDecodeError, ValueError):
+                # Prevent unbounded growth if end-of-image packets are lost.
+                if len(self._packet.buffer) > 8 * 1024 * 1024:
+                    self._packet.buffer = b""
+                    raise ValueError("camera JPEG assembly exceeded 8 MiB")
+            except Exception as error:
+                with self._condition:
+                    self._last_error = repr(error)
+                    self._error_count += 1
                 continue
 
             # Only a MOR packet ending in EI completes a JPEG frame. BOX and
@@ -91,6 +115,7 @@ class LatestCameraReceiver:
 
             with self._condition:
                 self._sequence += 1
+                self._last_frame_at = time.monotonic()
                 self._latest_frame = CameraFrame(
                     sequence=self._sequence,
                     sec=int(self._packet.image.sec),
@@ -117,6 +142,28 @@ class LatestCameraReceiver:
             if self._latest_frame.sequence <= after_sequence:
                 return None
             return self._latest_frame
+
+    def health_snapshot(self):
+        """Return receiver liveness and packet/frame ages for diagnostics."""
+
+        now = time.monotonic()
+        with self._condition:
+            return {
+                "thread_alive": self._thread.is_alive(),
+                "sequence": self._sequence,
+                "packet_age_s": (
+                    now - self._last_packet_at
+                    if self._last_packet_at is not None
+                    else None
+                ),
+                "frame_age_s": (
+                    now - self._last_frame_at
+                    if self._last_frame_at is not None
+                    else None
+                ),
+                "error_count": self._error_count,
+                "last_error": self._last_error,
+            }
 
     def close(self):
         condition = getattr(self, "_condition", None)

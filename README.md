@@ -796,6 +796,7 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
 | `yolo_confidence` | `0.4` | YOLO confidence 임계값 |
 | `yolo_inference_size` | `416` | YOLO 추론 입력 크기 |
 | `camera_display_fps` | `0.0` | `0`은 MORAI 카메라 수신 속도를 그대로 사용 |
+| `yolo_cpu_threads` | `0` | VM CPU 수에 맞게 GUI용 코어를 남기도록 자동 설정 |
 | `enable_highway_gate` | `true` | 카메라 기반 고속도로 환경 게이트 실행 |
 | `require_dashed_lane` | `false` | `true`이면 car와 점선이 모두 탐지되어야 활성화 |
 | `car_detection_hold_s` | `2.0` | 일시적인 YOLO 누락 시 car 조건 유지시간 |
@@ -859,14 +860,21 @@ roslaunch camera_perception camera_perception.launch enable_yolo:=false
 #### YOLO 화면이 느리거나 끊겨 보임
 
 - YOLO 수신/화면과 추론은 비동기로 실행되며 오래된 프레임을 큐에 쌓지 않는다.
+- `yolo_cpu_threads=0`은 VirtualBox의 모든 vCPU를 YOLO가 점유하지 않도록 추론
+  스레드 수를 자동 제한한다. 필요하면 `yolo_cpu_threads:=1`로 고정한다.
 - 화면 상단의 `LIVE FPS`는 실제 화면 갱신률, `YOLO FPS`는 객체 검출 갱신률이다.
 - CPU가 느리면 `yolo_inference_size:=320`으로 줄여서 실행한다. 보행자
   검출 정확도가 유지되는지 반드시 MORAI에서 확인한다.
 
 ```bash
 roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
-  enable_lane:=false yolo_inference_size:=320 camera_display_fps:=0
+  enable_lane:=false yolo_inference_size:=320 camera_display_fps:=0 \
+  yolo_cpu_threads:=1
 ```
+
+수신 프레임이 0.5초 이상 끊기면 화면에
+`NO NEW CAMERA FRAME - check MORAI UDP`가 표시된다. 이 경우는 YOLO 추론이
+아니라 MORAI 카메라 Destination IP/Port 또는 UDP 패킷 수신을 확인한다.
 
 #### 화면은 정상인데 차량이 움직이지 않음
 
