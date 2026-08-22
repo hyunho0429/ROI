@@ -536,8 +536,26 @@ def detect_bonnet(source, model_path, samples=30):
 # ======================================================================
 # 녹화본별 정합 보정. 지도와 시뮬레이터 도색 사이에 남는 오차를 여기서 흡수한다.
 # 원인이 확정되지 않았으므로 값을 하드코딩하지 않고 측정해서 넣는다 (--lat-offset,
-# --yaw-offset). lap1_full 실측: 편차(m) = +0.278 - 0.0158 x 거리 로, 상수항은
-# 가로 위치 오차, 기울기는 yaw 오차 -0.91도 에 해당했다.
+# --yaw-offset). lap1_full 실측(연구실, 자세 반영): 편차 = +0.278 - 0.0158*거리,
+# 상수항은 가로 위치 오차, 기울기는 yaw 오차 -0.91도 에 해당했다고 기록돼 있었다.
+#
+# 그 수치를 코드가 반영하지 않고 있었다 (LAT/YAW 둘 다 0.0 방치) — 차선이 가까운
+# 쪽은 맞고 멀어질수록 옆으로 벌어지는 증상과 부합하는 패턴이라, drive6 로 같은
+# 종류의 회귀를 다시 돌려 부호부터 확인해 보려 했다 (황색 중앙선 실측 픽셀 vs
+# 라벨 픽셀, 여러 행/거리). 기준(0,0) 회귀는 dx = -0.213 + 0.0071*거리 로 나왔고,
+# 작은 폭에서는 LAT/YAW 를 음수로 넣을수록 줄어드는 것처럼 보였다.
+#
+# **그런데 그 부호로 실제 값(LAT=-0.21, YAW=-0.4)을 넣고 재측정하니 기울기가
+# 0.0071 → 0.0223 으로 오히려 3배 나빠졌다.** 작은 폭 2점만으로 부호를 판정한
+# 게 잘못이었다 — 폭을 넓혀 보니(-1.0, -2.0) 절편이 선형으로 안 가고 +0.19 부근
+# 에서 그대로 멈췄다(포화). 이건 물리적 신호가 아니라 **측정 스크립트의 매칭
+# 로직이 큰 이동에서 엉뚱한 성분에 붙는 아티팩트**로 보인다. 그래서 0.0 으로
+# 되돌렸다 — 확신 없는 보정값을 넣느니 미보정 상태가 낫다.
+#
+# 다음에 이 값을 넣으려면: (1) 매칭을 더 엄격하게(예: 같은 레코드 idx 로 추적)
+# 고친 측정 스크립트로, (2) 넓은 폭에서도 선형으로 반응하는지 반드시 확인하고,
+# (3) lap1_full 처럼 자세(pitch/roll)가 있는 실제 녹화에서 재보정할 것. drive6
+# 는 자세 필드가 없어 yaw-only 경로만 검증할 수 있다.
 LAT_OFFSET_M = 0.0      # +면 라벨을 좌측(+y)으로 민다
 YAW_OFFSET_DEG = 0.0    # 자차 yaw 에 더한다
 
@@ -675,12 +693,21 @@ def render_frame_labels(cam, boundaries, links, row, fallback_z, crosswalks=(),
         hw = b["width"] / 2.0
         off = b["lat_offset"]                       # 겹선이면 좌우로 밀어 그린다
 
-        # 점선은 지도의 dash_interval 로 칸을 나눠 그린 다음(정확한 위상은
-        # 못 믿어도 — 레코드마다 최대 21% 어긋난다 — 대략의 on/off 구조는
-        # 준다), 실제 화면에서 도색처럼 안 보이는 픽셀만 지운다.
+        # **버그였다**: use_paint_trim 이 True 여도 아래서 keep 을
+        # _dash_keep(map 위상)으로 걸어 리본 자체를 지도 위상만큼만 만들고
+        # 있었다. docstring 은 "리본을 통으로 그린 다음 지운다"고 했지만
+        # 실제로는 map 위상으로 이미 잘린 리본에 _paint_mask 가 추가로 더
+        # 지우기만 했다 — map 위상이 최대 21% 어긋난다는 걸 알고도 그 잘못된
+        # 창(window) 안에서만 실제 도색을 찾았으니, 간격·길이·위치가 다 map
+        # 위상을 따라 틀어졌다. 실제 화면이 있으면 map 위상은 아예 안 쓴다 —
+        # 리본을 통으로 만들고 _paint_mask 로만 on/off 를 정한다.
         use_paint_trim = b["broken"] and frame is not None
-        keep = _dash_keep(b["s"], b["dash_on"], b["dash_off"]) if b["broken"] \
-            else np.ones(len(ego), dtype=bool)
+        if not b["broken"]:
+            keep = np.ones(len(ego), dtype=bool)
+        elif use_paint_trim:
+            keep = np.ones(len(ego), dtype=bool)          # 통으로 그려 실제 도색만 남긴다
+        else:
+            keep = _dash_keep(b["s"], b["dash_on"], b["dash_off"])  # 이미지 없을 때만 map 위상
 
         left = ego[:, :3].copy()
         right = ego[:, :3].copy()
@@ -834,6 +861,7 @@ def read_frames(source, indices):
 
 
 def main():
+    global LAT_OFFSET_M, YAW_OFFSET_DEG, EGO_PITCH_SIGN, EGO_ROLL_SIGN
     ap = argparse.ArgumentParser(
         description="HD맵을 카메라에 투영해 차선 종류 라벨을 만든다 "
                     "(지금은 초점거리 확정을 위한 오버레이 검증 단계)")
@@ -856,13 +884,22 @@ def main():
                          "흡수한다. 녹화본마다 측정해서 넣는다")
     ap.add_argument("--yaw-offset", type=float, default=0.0,
                     help="자차 yaw 에 더하는 보정 (도). 편차가 거리에 비례해 변할 때 쓴다")
+    ap.add_argument("--pitch-sign", type=float, default=EGO_PITCH_SIGN, choices=[1.0, -1.0],
+                    help="자차 pitch 부호. MORAI 관례가 문서로 확정되지 않아 오버레이로 "
+                         "고른다 — 차선이 도로에서 뜨거나 박히는 것처럼 보이면 반대로 "
+                         "바꿔서 다시 렌더링해 비교한다 (예: --pitch-sign -1)")
+    ap.add_argument("--roll-sign", type=float, default=EGO_ROLL_SIGN, choices=[1.0, -1.0],
+                    help="자차 roll 부호. 위와 같은 이유로 확정되지 않았다")
     args = ap.parse_args()
 
-    global LAT_OFFSET_M, YAW_OFFSET_DEG
     LAT_OFFSET_M = args.lat_offset
     YAW_OFFSET_DEG = args.yaw_offset
+    EGO_PITCH_SIGN = args.pitch_sign
+    EGO_ROLL_SIGN = args.roll_sign
     if args.lat_offset or args.yaw_offset:
         print(f"정합 보정: 가로 {args.lat_offset:+.3f} m, yaw {args.yaw_offset:+.3f} 도")
+    print(f"자세 부호: pitch {EGO_PITCH_SIGN:+.0f}, roll {EGO_ROLL_SIGN:+.0f}  "
+          f"(도로에서 차선이 뜨거나 박혀 보이면 --pitch-sign/--roll-sign 을 반대로)")
 
     meta = load_meta(os.path.join(args.recording, "meta.jsonl"))
     source = find_frame_source(args.recording)
