@@ -68,6 +68,12 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch enable_con
 | `person_clear_confirmation_s` | `0.5` | person 미검출 후 재출발 확정 시간 |
 | `enable_control` | `true` | 차량 제어 UDP 송신 |
 
+YOLO 검출 화면의 `BASE` 단계는 기본 모델의 car/person 결과를 우선 표시한다.
+`null.pt`가 존재하면 같은 프레임의 커스텀 검출을 마친 뒤 `BASE+CUSTOM`으로
+후속 갱신한다. 따라서 커스텀 모델 기능과 프레임-박스 매칭을 유지하면서 기본
+객체 검출이 두 번째 추론을 기다리는 지연을 줄인다. 화면의 `latency`는 카메라
+프레임 수신부터 해당 결과 준비까지의 시간이다.
+
 커스텀 모델은 저장소에 포함되지 않는다. `Sensor/null.pt`에 복사하거나 절대 경로로
 지정한다.
 

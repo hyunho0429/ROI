@@ -862,6 +862,9 @@ roslaunch camera_perception camera_perception.launch enable_yolo:=false
 - `yolo_cpu_threads=0`은 VirtualBox의 모든 vCPU를 YOLO가 점유하지 않도록 추론
   스레드 수를 자동 제한한다. 필요하면 `yolo_cpu_threads:=1`로 고정한다.
 - 화면 상단의 `LIVE FPS`는 실제 화면 갱신률, `YOLO FPS`는 객체 검출 갱신률이다.
+- `latency`는 해당 검출 프레임이 수신된 뒤 화면 결과가 준비될 때까지의 시간이다.
+  커스텀 모델이 있으면 기본 `BASE` 결과를 먼저 표시하고 같은 프레임의
+  `BASE+CUSTOM` 결과를 후속 반영하여 car/person 판단이 두 번째 모델을 기다리지 않는다.
 - CPU가 느리면 `yolo_inference_size:=320`으로 줄여서 실행한다. 보행자
   검출 정확도가 유지되는지 반드시 MORAI에서 확인한다.
 

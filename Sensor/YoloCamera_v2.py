@@ -131,13 +131,16 @@ def main(ip=IP, port=PORT, base_model_path=BASE_MODEL_PATH,
     last_frame_sequence = 0
 
     pending_condition = threading.Condition()
-    pending_frame = {"sequence": 0, "image": None}
+    pending_frame = {"sequence": 0, "image": None, "received_at": 0.0}
     result_lock = threading.Lock()
     latest_result = {
+        "revision": 0,
         "sequence": 0,
         "source_image": None,
         "detections": (),
+        "stage": "WAITING",
         "inference_ms": 0.0,
+        "latency_ms": 0.0,
         "completed_at": 0.0,
         "fps": 0.0,
     }
@@ -168,6 +171,7 @@ def main(ip=IP, port=PORT, base_model_path=BASE_MODEL_PATH,
     def inference_worker():
         last_inferred_sequence = 0
         smoothed_fps = 0.0
+        last_base_completed_at = 0.0
         while not stop_worker.is_set() and not rospy.is_shutdown():
             with pending_condition:
                 pending_condition.wait_for(
@@ -179,6 +183,7 @@ def main(ip=IP, port=PORT, base_model_path=BASE_MODEL_PATH,
                     return
                 sequence = pending_frame["sequence"]
                 image = pending_frame["image"]
+                received_at = pending_frame["received_at"]
 
             if image is None or sequence <= last_inferred_sequence:
                 continue
@@ -201,30 +206,44 @@ def main(ip=IP, port=PORT, base_model_path=BASE_MODEL_PATH,
                     str(base_model.names[int(box.cls[0])]).strip().lower()
                     for box in base_boxes
                 }
-                detections = collect_detections(
+                base_detections = collect_detections(
                     base_results[0], base_model, (0, 255, 0), image.shape[0]
                 )
 
-                if custom_model is not None:
-                    custom_results = custom_model.predict(
-                        source=image,
-                        imgsz=inference_size,
-                        conf=confidence,
-                        verbose=False,
+                # Publish and display the COCO car/person result immediately.
+                # When null.pt exists, waiting for its second inference here
+                # nearly doubles the age of the frame shown in the YOLO window.
+                base_completed_at = time.monotonic()
+                base_elapsed = max(base_completed_at - started_at, 1e-6)
+                base_interval = (
+                    base_completed_at - last_base_completed_at
+                    if last_base_completed_at > 0.0
+                    else base_elapsed
+                )
+                instant_fps = 1.0 / max(base_interval, 1e-6)
+                smoothed_fps = (
+                    instant_fps
+                    if smoothed_fps <= 0.0
+                    else 0.8 * smoothed_fps + 0.2 * instant_fps
+                )
+                last_base_completed_at = base_completed_at
+
+                with result_lock:
+                    latest_result.update(
+                        revision=latest_result["revision"] + 1,
+                        sequence=sequence,
+                        # The receiver and GUI never mutate this decoded image.
+                        # Avoid one full-frame copy on the latency-critical path.
+                        source_image=image,
+                        detections=tuple(base_detections),
+                        stage="BASE",
+                        inference_ms=base_elapsed * 1000.0,
+                        latency_ms=max(
+                            base_completed_at - received_at, 0.0
+                        ) * 1000.0,
+                        completed_at=base_completed_at,
+                        fps=smoothed_fps,
                     )
-                    custom_detections = collect_detections(
-                        custom_results[0],
-                        custom_model,
-                        (255, 180, 0),
-                        image.shape[0],
-                        is_custom=True,
-                    )
-                    detections.extend(custom_detections)
-                    if custom_detections:
-                        labels = ", ".join(sorted({d[4] for d in custom_detections}))
-                        rospy.loginfo_throttle(
-                            1.0, "%s custom detections: %s", CAM_NAME, labels
-                        )
 
                 car_detected = "car" in detected_labels
                 person_detected = "person" in detected_labels
@@ -244,25 +263,49 @@ def main(ip=IP, port=PORT, base_model_path=BASE_MODEL_PATH,
                         "YOLO person detected; pedestrian fusion camera condition is true",
                     )
 
-                elapsed = max(time.monotonic() - started_at, 1e-6)
-                instant_fps = 1.0 / elapsed
-                smoothed_fps = (
-                    instant_fps
-                    if smoothed_fps <= 0.0
-                    else 0.8 * smoothed_fps + 0.2 * instant_fps
-                )
-                with result_lock:
-                    latest_result.update(
-                        sequence=sequence,
-                        # Keep the exact frame used by this inference. Drawing
-                        # these boxes on any newer live frame causes spatial
-                        # mismatch whenever the ego vehicle/object moves.
-                        source_image=image.copy(),
-                        detections=tuple(detections),
-                        inference_ms=elapsed * 1000.0,
-                        completed_at=time.monotonic(),
-                        fps=smoothed_fps,
+                if custom_model is not None:
+                    custom_results = custom_model.predict(
+                        source=image,
+                        imgsz=inference_size,
+                        conf=confidence,
+                        verbose=False,
                     )
+                    custom_detections = collect_detections(
+                        custom_results[0],
+                        custom_model,
+                        (255, 180, 0),
+                        image.shape[0],
+                        is_custom=True,
+                    )
+                    if custom_detections:
+                        labels = ", ".join(sorted({d[4] for d in custom_detections}))
+                        rospy.loginfo_throttle(
+                            1.0, "%s custom detections: %s", CAM_NAME, labels
+                        )
+
+                    # Preserve the custom detector, but apply it as a second
+                    # revision of the exact same frame. The base result has
+                    # already reached the display and ROS topics above.
+                    custom_completed_at = time.monotonic()
+                    with result_lock:
+                        latest_result.update(
+                            revision=latest_result["revision"] + 1,
+                            sequence=sequence,
+                            source_image=image,
+                            detections=tuple(
+                                base_detections + custom_detections
+                            ),
+                            stage="BASE+CUSTOM",
+                            inference_ms=max(
+                                custom_completed_at - started_at, 0.0
+                            ) * 1000.0,
+                            latency_ms=max(
+                                custom_completed_at - received_at, 0.0
+                            ) * 1000.0,
+                            completed_at=custom_completed_at,
+                            fps=smoothed_fps,
+                        )
+
             except Exception as error:
                 rospy.logerr_throttle(1.0, "YOLO inference error: %s", error)
 
@@ -276,7 +319,7 @@ def main(ip=IP, port=PORT, base_model_path=BASE_MODEL_PATH,
     smoothed_live_fps = 0.0
     last_live_image = None
     last_live_frame_at = None
-    last_detection_display_sequence = 0
+    last_detection_display_revision = 0
     live_window = f"MORAI {CAM_NAME} Live Preview"
     detection_window = f"MORAI {CAM_NAME} YOLO Detection (Frame Matched)"
     
@@ -346,6 +389,7 @@ def main(ip=IP, port=PORT, base_model_path=BASE_MODEL_PATH,
             with pending_condition:
                 pending_frame["sequence"] = frame.sequence
                 pending_frame["image"] = image
+                pending_frame["received_at"] = last_live_frame_at
                 pending_condition.notify()
 
             now = time.monotonic()
@@ -380,7 +424,8 @@ def main(ip=IP, port=PORT, base_model_path=BASE_MODEL_PATH,
                 f"LIVE {smoothed_live_fps:.1f} FPS | "
                 f"YOLO {shown_result['fps']:.1f} FPS | "
                 f"infer {shown_result['inference_ms']:.0f} ms | "
-                f"result age {result_age_ms:.0f} ms"
+                f"latency {shown_result['latency_ms']:.0f} ms | "
+                f"age {result_age_ms:.0f} ms"
             )
             cv2.rectangle(
                 display_frame,
@@ -400,13 +445,15 @@ def main(ip=IP, port=PORT, base_model_path=BASE_MODEL_PATH,
             )
             cv2.imshow(live_window, display_frame)
 
-            # Update the detection window only when a new inference completes,
-            # and always draw on the exact frame retained with that result.
+            # A BASE revision is displayed as soon as the primary detector
+            # finishes. If configured, BASE+CUSTOM follows on the same exact
+            # frame without delaying car/person output behind the second model.
+            result_revision = int(shown_result["revision"])
             result_sequence = int(shown_result["sequence"])
             matched_source = shown_result["source_image"]
             if (
                 matched_source is not None
-                and result_sequence > last_detection_display_sequence
+                and result_revision > last_detection_display_revision
             ):
                 matched_frame = matched_source.copy()
                 for x1, y1, x2, y2, label, score, color in shown_result["detections"]:
@@ -426,9 +473,10 @@ def main(ip=IP, port=PORT, base_model_path=BASE_MODEL_PATH,
                         2,
                     )
                 detection_status = (
-                    f"MATCHED FRAME {result_sequence} | "
+                    f"{shown_result['stage']} FRAME {result_sequence} | "
                     f"YOLO {shown_result['fps']:.1f} FPS | "
-                    f"infer {shown_result['inference_ms']:.0f} ms"
+                    f"infer {shown_result['inference_ms']:.0f} ms | "
+                    f"latency {shown_result['latency_ms']:.0f} ms"
                 )
                 cv2.rectangle(
                     matched_frame,
@@ -447,7 +495,7 @@ def main(ip=IP, port=PORT, base_model_path=BASE_MODEL_PATH,
                     1,
                 )
                 cv2.imshow(detection_window, matched_frame)
-                last_detection_display_sequence = result_sequence
+                last_detection_display_revision = result_revision
 
             # 'q' 키를 누르면 모니터링 종료
             if cv2.waitKey(1) & 0xFF == ord('q'):
