@@ -22,6 +22,9 @@ RViz 시각화에 사용한다.
 | LiDAR 상대좌표 Tracking 결과 | `/morai/lidar/tracking/results` | `std_msgs/String` (JSON 배열) |
 | Tracking 시각화 | `/morai/lidar/tracking/markers` | `visualization_msgs/MarkerArray` |
 | map 좌표 Tracking 결과 | `/perception/lidar/tracked_obstacles_map` | `lidar_perception/LidarObstacleArray` |
+| 전체 객체 상태 | `/detection/obstacle_states` | `std_msgs/String` (JSON) |
+| 정적·정지 객체 | `/detection/static_obstacles` | `std_msgs/String` (JSON) |
+| 동적 객체 | `/detection/dynamic_obstacles` | `std_msgs/String` (JSON) |
 | 끼어들기 공간 판단 | `/morai/lidar/merge_gap/results` | `std_msgs/String` (JSON) |
 | 끼어들기 공간 시각화 | `/morai/lidar/merge_gap/markers` | `visualization_msgs/MarkerArray` |
 
@@ -83,6 +86,20 @@ float64 velocity_y_map
 계산한다. 움직이는 장애물은 속도 방향으로 yaw의 앞뒤를 결정한다. 정지하거나
 매우 느린 장애물은 LiDAR 형상만으로 앞뒤를 구분할 수 없어 yaw에 180도 모호성이
 있지만, 충돌 검사에 사용하는 사각형의 점유 영역은 동일하다.
+
+## 주행팀용 객체 상태
+
+`lidar_tracking.launch`는 UDP 노드의 중복 클러스터링을 끄고, 위 map Tracking
+결과를 `lidar_tracked_obstacle_state_node.py`에 전달한다. 새 노드는 다시
+Euclidean, Bounding Box, Kalman, Hungarian을 실행하지 않고 기존 ID별 결과에
+속도·크기 안정화와 운동 상태만 추가한다.
+
+세 토픽의 JSON은 `timestamp`, `obstacle_count`, `obstacles`를 공통으로 갖고,
+각 객체는 `id`, `center_x_map`, `center_y_map`, `length`, `width`,
+`velocity_x_map`, `velocity_y_map`, `speed_mps`, `motion_state`, `yaw`,
+`yaw_deg`, `yaw_valid`, `yaw_source`를 포함한다. `STATIC`과 `STOPPED`는
+정적 토픽, `MOVING`은 동적 토픽에 포함되며 `UNKNOWN`은 전체 토픽에만
+포함된다.
 
 map Tracking은 LiDAR 군집을 PointCloud timestamp의
 `/localization/odometry`로 map에 변환한 다음 별도 Kalman+Hungarian filter에

@@ -17,6 +17,9 @@
   <arg name="vertical_support_enabled" default="true" />
   <arg name="vertical_support_radius_m" default="0.65" />
   <arg name="vertical_support_min_height_m" default="0.05" />
+  <!-- Standalone compatibility default. Algorithm pipelines may disable this
+       because their Euclidean/tracking node already clusters live_points. -->
+  <arg name="cluster_enabled" default="true" />
 
   <node pkg="lidar_perception"
         type="morai_lidar_udp_source.py"
@@ -50,7 +53,7 @@
     <param name="vertical_support_radius_m" value="$(arg vertical_support_radius_m)" />
     <param name="vertical_support_min_height_m" value="$(arg vertical_support_min_height_m)" />
     <param name="fast_nearest_enabled" value="false" />
-    <param name="cluster_enabled" value="true" />
+    <param name="cluster_enabled" value="$(arg cluster_enabled)" />
     <param name="merge_gap_enabled" value="false" />
   </node>
 </launch>
