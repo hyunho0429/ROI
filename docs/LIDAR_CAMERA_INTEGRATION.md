@@ -83,9 +83,10 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
 커스텀 모델이 없으면 경고를 출력하고 COCO 기본 YOLO 탐지만 계속한다.
 
 YOLO 수신/표시와 모델 추론은 서로 다른 스레드에서 동작한다. 화면은 추론을
-기다리지 않고 최신 UDP 프레임을 보여 주며, 검출 박스와 Bool 토픽은 가장
-최근에 완료된 추론 결과로 갱신된다. 화면 상단에 `LIVE FPS`, `YOLO FPS`,
-`infer ms`, `result age` 가 표시된다.
+기다리지 않고 `Live Preview`에 최신 UDP 프레임을 보여 준다. 검출 박스는
+좌표를 계산한 정확히 같은 프레임을 보관해 `YOLO Detection (Frame Matched)`
+창에 그린다. Bool 토픽도 이 frame-matched 추론 결과로 갱신된다.
+화면 상단에 `LIVE FPS`, `YOLO FPS`, `infer ms`, `result age`가 표시된다.
 새 UDP 프레임이 0.5초 이상 없으면 창의 이벤트 처리는 계속하면서
 `NO NEW CAMERA FRAME` watchdog 문구와 수신 상태를 로그로 표시한다.
 

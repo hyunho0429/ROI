@@ -135,6 +135,7 @@ def main(ip=IP, port=PORT, base_model_path=BASE_MODEL_PATH,
     result_lock = threading.Lock()
     latest_result = {
         "sequence": 0,
+        "source_image": None,
         "detections": (),
         "inference_ms": 0.0,
         "completed_at": 0.0,
@@ -253,6 +254,10 @@ def main(ip=IP, port=PORT, base_model_path=BASE_MODEL_PATH,
                 with result_lock:
                     latest_result.update(
                         sequence=sequence,
+                        # Keep the exact frame used by this inference. Drawing
+                        # these boxes on any newer live frame causes spatial
+                        # mismatch whenever the ego vehicle/object moves.
+                        source_image=image.copy(),
                         detections=tuple(detections),
                         inference_ms=elapsed * 1000.0,
                         completed_at=time.monotonic(),
@@ -271,6 +276,9 @@ def main(ip=IP, port=PORT, base_model_path=BASE_MODEL_PATH,
     smoothed_live_fps = 0.0
     last_live_image = None
     last_live_frame_at = None
+    last_detection_display_sequence = 0
+    live_window = f"MORAI {CAM_NAME} Live Preview"
+    detection_window = f"MORAI {CAM_NAME} YOLO Detection (Frame Matched)"
     
     print(f"[{CAM_NAME}] MORAI UDP 카메라 연결 시도 중... ({ip}:{port})")
 
@@ -317,7 +325,7 @@ def main(ip=IP, port=PORT, base_model_path=BASE_MODEL_PATH,
                         2,
                     )
                     cv2.imshow(
-                        f"MORAI {CAM_NAME} Traffic & Object Monitor", waiting
+                        live_window, waiting
                     )
                 if cv2.waitKey(1) & 0xFF == ord('q'):
                     break
@@ -358,29 +366,11 @@ def main(ip=IP, port=PORT, base_model_path=BASE_MODEL_PATH,
                 )
             last_display_at = now
 
-            # Draw the latest inference result over the current live frame.
-            # Boxes can update more slowly than video, but video never waits for
-            # YOLO and therefore remains suitable for real-time monitoring.
+            # The live preview intentionally has no boxes. A box is only valid
+            # for the exact source frame used by its YOLO inference.
             with result_lock:
                 shown_result = dict(latest_result)
             display_frame = image.copy()
-            for x1, y1, x2, y2, label, score, color in shown_result["detections"]:
-                p1 = (max(0, int(x1)), max(0, int(y1)))
-                p2 = (
-                    min(display_frame.shape[1] - 1, int(x2)),
-                    min(display_frame.shape[0] - 1, int(y2)),
-                )
-                cv2.rectangle(display_frame, p1, p2, color, 2)
-                cv2.putText(
-                    display_frame,
-                    f"{label} {score:.2f}",
-                    (p1[0], max(18, p1[1] - 5)),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.5,
-                    color,
-                    2,
-                )
-
             result_age_ms = (
                 (time.monotonic() - shown_result["completed_at"]) * 1000.0
                 if shown_result["completed_at"] > 0.0
@@ -408,7 +398,56 @@ def main(ip=IP, port=PORT, base_model_path=BASE_MODEL_PATH,
                 (255, 255, 255),
                 1,
             )
-            cv2.imshow(f"MORAI {CAM_NAME} Traffic & Object Monitor", display_frame)
+            cv2.imshow(live_window, display_frame)
+
+            # Update the detection window only when a new inference completes,
+            # and always draw on the exact frame retained with that result.
+            result_sequence = int(shown_result["sequence"])
+            matched_source = shown_result["source_image"]
+            if (
+                matched_source is not None
+                and result_sequence > last_detection_display_sequence
+            ):
+                matched_frame = matched_source.copy()
+                for x1, y1, x2, y2, label, score, color in shown_result["detections"]:
+                    p1 = (max(0, int(x1)), max(0, int(y1)))
+                    p2 = (
+                        min(matched_frame.shape[1] - 1, int(x2)),
+                        min(matched_frame.shape[0] - 1, int(y2)),
+                    )
+                    cv2.rectangle(matched_frame, p1, p2, color, 2)
+                    cv2.putText(
+                        matched_frame,
+                        f"{label} {score:.2f}",
+                        (p1[0], max(18, p1[1] - 5)),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5,
+                        color,
+                        2,
+                    )
+                detection_status = (
+                    f"MATCHED FRAME {result_sequence} | "
+                    f"YOLO {shown_result['fps']:.1f} FPS | "
+                    f"infer {shown_result['inference_ms']:.0f} ms"
+                )
+                cv2.rectangle(
+                    matched_frame,
+                    (0, 0),
+                    (matched_frame.shape[1], 30),
+                    (0, 0, 0),
+                    -1,
+                )
+                cv2.putText(
+                    matched_frame,
+                    detection_status,
+                    (8, 21),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.55,
+                    (255, 255, 255),
+                    1,
+                )
+                cv2.imshow(detection_window, matched_frame)
+                last_detection_display_sequence = result_sequence
 
             # 'q' 키를 누르면 모니터링 종료
             if cv2.waitKey(1) & 0xFF == ord('q'):

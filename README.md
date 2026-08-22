@@ -876,6 +876,14 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
 `NO NEW CAMERA FRAME - check MORAI UDP`가 표시된다. 이 경우는 YOLO 추론이
 아니라 MORAI 카메라 Destination IP/Port 또는 UDP 패킷 수신을 확인한다.
 
+#### YOLO bounding box가 객체에서 밀려 보임
+
+- `Live Preview`는 실시간 수신 화면이며 box를 그리지 않는다.
+- `YOLO Detection (Frame Matched)`는 YOLO가 실제로 추론한 동일 프레임에만
+  box를 그린다. box 위치는 이 창에서 확인한다.
+- 두 창의 시각이 다른 것은 YOLO 추론 지연을 숨기지 않고 표시하는 정상
+  동작이다. 검출 토픽도 frame-matched 추론 결과로 갱신된다.
+
 #### 화면은 정상인데 차량이 움직이지 않음
 
 - 기본값은 `enable_control=false`이다. 안전 확인 후 `true`로 지정한다.
