@@ -629,7 +629,7 @@ roslaunch path_planning kcity_2025_dijkstra.launch \
 - 전방 카메라 영상의 ONNX 차선 segmentation 및 차선 후보 추적
 - YOLOv8 기본 객체 탐지
 - 커스텀 모델이 있을 때 신호등과 MORAI 장애물 탐지 결과 중첩
-- YOLO person과 LiDAR 동적 객체를 결합한 보행자 정지 및 안전 해제 후 재출발
+- YOLO person 단독 인식 기반 보행자 즉시 정지 및 재출발
 - LiDAR/RViz, 차선 인식, YOLO 화면을 하나의 `roslaunch`로 실행
 
 차선과 YOLO는 각각 독립 프로세스로 실행된다. 한 카메라 프로세스에 문제가 생겨도
@@ -799,8 +799,8 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
 | `enable_highway_gate` | `true` | 카메라 기반 고속도로 환경 게이트 실행 |
 | `require_dashed_lane` | `false` | `true`이면 car와 점선이 모두 탐지되어야 활성화 |
 | `car_detection_hold_s` | `2.0` | 일시적인 YOLO 누락 시 car 조건 유지시간 |
-| `enable_pedestrian_crossing` | `true` | 보행자 카메라/LiDAR 융합 및 제어 정지 요청 |
-| `pedestrian_detection_distance_m` | `1.5` | 보행자 LiDAR bounding box 근접 거리 |
+| `enable_pedestrian_crossing` | `true` | YOLO person 기반 정지·재출발 제어 |
+| `person_clear_confirmation_s` | `0.5` | person 미검출 후 재출발까지 연속 확인 시간 |
 | `merge_available_topic` | `/perception/merge_gap/available` | 왼쪽 차선 끼어들기 가능 토픽 |
 | `merge_unavailable_topic` | `/perception/merge_gap/unavailable` | 왼쪽 차선 끼어들기 불가능 토픽 |
 
@@ -860,8 +860,8 @@ roslaunch camera_perception camera_perception.launch enable_yolo:=false
 
 - YOLO 수신/화면과 추론은 비동기로 실행되며 오래된 프레임을 큐에 쌓지 않는다.
 - 화면 상단의 `LIVE FPS`는 실제 화면 갱신률, `YOLO FPS`는 객체 검출 갱신률이다.
-- CPU가 느리면 `yolo_inference_size:=320`으로 줄여서 실행한다. 1.5m 근거리
-  보행자 검출은 유지되는지 반드시 MORAI에서 확인한다.
+- CPU가 느리면 `yolo_inference_size:=320`으로 줄여서 실행한다. 보행자
+  검출 정확도가 유지되는지 반드시 MORAI에서 확인한다.
 
 ```bash
 roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
@@ -899,11 +899,11 @@ rostopic echo /perception/pedestrian_crossing/resume_allowed
 rostopic echo /perception/pedestrian_crossing/status
 ```
 
-YOLO `person`과 전방·측면 1.5m 이내의 사람 크기 동적 LiDAR 객체가 함께 확인되면
-`stop_required=true`가 되고, 실제 제어가 활성화된 경우 Pure Pursuit가
-`velocity=0`, `brake=1`을 발행한다. 정지 이후 카메라 person과 전체 LiDAR
-근접 cluster가 모두 사라진 상태가 1초간 유지되면 `resume_allowed=true`가 되고
-기존 전역 경로 추종으로 복귀한다. 자세한 조건은
+YOLO에서 `person=true`가 발행되면 LiDAR 거리 조건 없이 즉시
+`stop_required=true`가 된다. 실제 제어가 활성화된 경우 Pure Pursuit가
+`velocity=0`, `brake=1`을 발행한다. 카메라에서 person이 0.5초간 연속
+미검출되면 `resume_allowed=true`, `stop_required=false`가 되고 기존 전역
+경로 추종으로 복귀한다. 자세한 조건은
 [`docs/PEDESTRIAN_CROSSING.md`](docs/PEDESTRIAN_CROSSING.md)를 참고한다.
 
 더 자세한 센서별 설명과 개별 실행법은

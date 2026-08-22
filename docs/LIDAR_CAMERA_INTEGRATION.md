@@ -67,8 +67,8 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
 | `enable_highway_gate` | `true` | YOLO 기반 고속도로 환경 게이트 |
 | `require_dashed_lane` | `false` | 점선 인식 구현 후 `true`로 전환 |
 | `car_detection_hold_s` | `2.0` | YOLO car 조건 유지시간 |
-| `enable_pedestrian_crossing` | `true` | YOLO person과 LiDAR 동적 객체 융합 |
-| `pedestrian_detection_distance_m` | `1.5` | 보행자 근접 LiDAR 거리 |
+| `enable_pedestrian_crossing` | `true` | YOLO person 기반 정지·재출발 |
+| `person_clear_confirmation_s` | `0.5` | person 미검출 후 재출발 확정 시간 |
 | `enable_control` | `false` | 차량 제어 UDP 송신 |
 
 커스텀 모델은 저장소에 포함되지 않는다. `Sensor/null.pt`에 복사하거나 절대 경로로
@@ -105,10 +105,10 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
 
 ## 보행자 횡단 정지
 
-YOLO `person`과 전방·측면의 가까운 동적 LiDAR 객체가 함께 확인되면
-`/perception/pedestrian_crossing/stop_required=true`가 발행된다. Pure Pursuit는
-이를 최우선 정지 조건으로 사용한다. 카메라 person과 전체 근접 LiDAR cluster가
-모두 사라진 뒤에는 `/perception/pedestrian_crossing/resume_allowed=true`가 되고
+YOLO `person=true`가 확인되면 LiDAR 조건 없이
+`/perception/pedestrian_crossing/stop_required=true`가 즉시 발행된다. Pure Pursuit는
+이를 최우선 정지 조건으로 사용한다. 카메라에서 person이 0.5초간
+연속 미검출되면 `/perception/pedestrian_crossing/resume_allowed=true`가 되고
 기존 전역 경로를 다시 추종한다. 세부 토픽과 시간 조건은
 [`PEDESTRIAN_CROSSING.md`](PEDESTRIAN_CROSSING.md)를 참고한다.
 
