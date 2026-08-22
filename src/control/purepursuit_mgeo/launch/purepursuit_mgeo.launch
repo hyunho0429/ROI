@@ -4,6 +4,7 @@
   <arg name="enable_control" default="false" />
   <arg name="wheelbase_m" default="3.0" />
   <arg name="target_speed_mps" default="6.0" />
+  <arg name="pedestrian_stop_topic" default="/perception/pedestrian_crossing/stop_required" />
 
   <node pkg="purepursuit_mgeo"
         type="purepursuit_mgeo_node.py"
@@ -15,6 +16,7 @@
     <param name="lookahead_topic" value="/control/lookahead_point" />
     <param name="wheelbase_m" value="$(arg wheelbase_m)" />
     <param name="target_speed_mps" value="$(arg target_speed_mps)" />
+    <param name="pedestrian_stop_topic" value="$(arg pedestrian_stop_topic)" />
     <param name="lookahead_min_m" value="4.0" />
     <param name="lookahead_gain" value="0.35" />
     <param name="goal_tolerance_m" value="1.5" />

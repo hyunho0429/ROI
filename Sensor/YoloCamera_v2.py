@@ -35,6 +35,9 @@ CUSTOM_MODEL_PATH = os.environ.get("MORAI_YOLO_CUSTOM_MODEL", "null.pt")
 CAR_DETECTED_TOPIC = os.environ.get(
     "MORAI_YOLO_CAR_TOPIC", "/perception/camera/car_detected"
 )
+PERSON_DETECTED_TOPIC = os.environ.get(
+    "MORAI_YOLO_PERSON_TOPIC", "/perception/camera/person_detected"
+)
 
 def _resolve_model_path(model_path):
     """상대 모델 경로는 기존처럼 Sensor 디렉터리를 기준으로 해석한다."""
@@ -46,7 +49,8 @@ def _resolve_model_path(model_path):
 
 def main(ip=IP, port=PORT, base_model_path=BASE_MODEL_PATH,
          custom_model_path=CUSTOM_MODEL_PATH, confidence=0.4,
-         car_detected_topic=CAR_DETECTED_TOPIC):
+         car_detected_topic=CAR_DETECTED_TOPIC,
+         person_detected_topic=PERSON_DETECTED_TOPIC):
     """Cam 4 전용 UDP 수신 및 투트랙 검출 메인 함수"""
     # argparse/help와 ROS launch 구조 검증은 모델 설정 파일 접근 없이 가능하게 한다.
     import rospy
@@ -57,11 +61,17 @@ def main(ip=IP, port=PORT, base_model_path=BASE_MODEL_PATH,
     car_detected_publisher = rospy.Publisher(
         car_detected_topic, Bool, queue_size=1
     )
-    car_detection_state = {"detected": False}
-    car_heartbeat_timer = rospy.Timer(
+    person_detected_publisher = rospy.Publisher(
+        person_detected_topic, Bool, queue_size=1
+    )
+    detection_state = {"car": False, "person": False}
+    detection_heartbeat_timer = rospy.Timer(
         rospy.Duration(0.1),
-        lambda _event: car_detected_publisher.publish(
-            Bool(data=car_detection_state["detected"])
+        lambda _event: (
+            car_detected_publisher.publish(Bool(data=detection_state["car"])),
+            person_detected_publisher.publish(
+                Bool(data=detection_state["person"])
+            ),
         ),
     )
 
@@ -101,19 +111,27 @@ def main(ip=IP, port=PORT, base_model_path=BASE_MODEL_PATH,
 
             # 💡 2. [트랙 1] 기본 사물 탐지 (사람, 차, 표지판 등)
             base_results = base_model.predict(source=image, conf=confidence, verbose=False)
-            car_detected = any(
-                str(base_model.names[int(box.cls[0])]).strip().lower() == "car"
+            detected_labels = {
+                str(base_model.names[int(box.cls[0])]).strip().lower()
                 for box in (
                     base_results[0].boxes
                     if base_results[0].boxes is not None
                     else ()
                 )
-            )
-            car_detection_state["detected"] = car_detected
+            }
+            car_detected = "car" in detected_labels
+            person_detected = "person" in detected_labels
+            detection_state["car"] = car_detected
+            detection_state["person"] = person_detected
             car_detected_publisher.publish(Bool(data=car_detected))
+            person_detected_publisher.publish(Bool(data=person_detected))
             if car_detected:
                 rospy.loginfo_throttle(
                     1.0, "YOLO car detected; highway camera condition is true"
+                )
+            if person_detected:
+                rospy.logwarn_throttle(
+                    1.0, "YOLO person detected; pedestrian fusion camera condition is true"
                 )
             # 기본 탐지 결과를 원본 이미지에 1차로 시각화
             annotated_frame = base_results[0].plot()
@@ -154,11 +172,13 @@ def main(ip=IP, port=PORT, base_model_path=BASE_MODEL_PATH,
             time.sleep(0.01)
 
     try:
-        car_detection_state["detected"] = False
+        detection_state["car"] = False
+        detection_state["person"] = False
         car_detected_publisher.publish(Bool(data=False))
+        person_detected_publisher.publish(Bool(data=False))
     except rospy.ROSException:
         pass
-    car_heartbeat_timer.shutdown()
+    detection_heartbeat_timer.shutdown()
     cam_data.close()
     cv2.destroyAllWindows()
 
@@ -170,6 +190,7 @@ if __name__ == "__main__":
     parser.add_argument("--custom-model", default=CUSTOM_MODEL_PATH)
     parser.add_argument("--confidence", type=float, default=0.4)
     parser.add_argument("--car-detected-topic", default=CAR_DETECTED_TOPIC)
+    parser.add_argument("--person-detected-topic", default=PERSON_DETECTED_TOPIC)
     args = parser.parse_args()
     main(args.cam_ip, args.cam_port, args.base_model, args.custom_model,
-         args.confidence, args.car_detected_topic)
+         args.confidence, args.car_detected_topic, args.person_detected_topic)

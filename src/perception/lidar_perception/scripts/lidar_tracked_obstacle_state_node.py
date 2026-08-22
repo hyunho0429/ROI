@@ -320,9 +320,12 @@ class TrackedObstacleStatePublisher:
                 "yaw_source": yaw_source,
             }
             all_obstacles.append(obstacle)
-            if motion_state in ("STATIC", "STOPPED"):
+            if motion_state == "STATIC":
                 static_obstacles.append(obstacle)
-            elif motion_state == "MOVING":
+            else:
+                # UNKNOWN is a conservative dynamic candidate until enough
+                # history exists. STOPPED remains dynamic because an actor
+                # such as a pedestrian may pause and move again.
                 dynamic_obstacles.append(obstacle)
 
         self._cleanup(timestamp)

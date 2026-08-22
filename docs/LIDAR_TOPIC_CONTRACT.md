@@ -97,9 +97,10 @@ Euclidean, Bounding Box, Kalman, Hungarian을 실행하지 않고 기존 ID별 �
 세 토픽의 JSON은 `timestamp`, `obstacle_count`, `obstacles`를 공통으로 갖고,
 각 객체는 `id`, `center_x_map`, `center_y_map`, `length`, `width`,
 `velocity_x_map`, `velocity_y_map`, `speed_mps`, `motion_state`, `yaw`,
-`yaw_deg`, `yaw_valid`, `yaw_source`를 포함한다. `STATIC`과 `STOPPED`는
-정적 토픽, `MOVING`은 동적 토픽에 포함되며 `UNKNOWN`은 전체 토픽에만
-포함된다.
+`yaw_deg`, `yaw_valid`, `yaw_source`를 포함한다. 이력상 계속 정지한 것이 확정된
+`STATIC`만 정적 토픽에 포함된다. `UNKNOWN`, `MOVING`, `STOPPED`는 동적
+후보 토픽에 포함된다. 특히 한 번 움직였던 보행자가 잠시 멈춘 `STOPPED` 상태를
+정적으로 바꾸지 않아 횡단보도 정지 판단이 성급하게 해제되지 않도록 한다.
 
 map Tracking은 LiDAR 군집을 PointCloud timestamp의
 `/localization/odometry`로 map에 변환한 다음 별도 Kalman+Hungarian filter에

@@ -629,6 +629,7 @@ roslaunch path_planning kcity_2025_dijkstra.launch \
 - 전방 카메라 영상의 ONNX 차선 segmentation 및 차선 후보 추적
 - YOLOv8 기본 객체 탐지
 - 커스텀 모델이 있을 때 신호등과 MORAI 장애물 탐지 결과 중첩
+- YOLO person과 LiDAR 동적 객체를 결합한 보행자 정지 및 안전 해제 후 재출발
 - LiDAR/RViz, 차선 인식, YOLO 화면을 하나의 `roslaunch`로 실행
 
 차선과 YOLO는 각각 독립 프로세스로 실행된다. 한 카메라 프로세스에 문제가 생겨도
@@ -660,8 +661,9 @@ ROI/
 │   │   ├── launch/camera_perception.launch
 │   │   └── scripts/
 │   │       ├── camera_feature_runner.py
-│   │       └── highway_environment_gate_node.py
-│   │                               # YOLO car/점선 조건을 결합하는 고속도로 게이트
+│   │       ├── highway_environment_gate_node.py
+│   │       └── pedestrian_crossing_fusion_node.py
+│   │                               # 고속도로 게이트와 보행자 카메라/LiDAR 융합
 │   ├── path_planning/              # UDP 주행, 경로 추종 및 LiDAR 연동
 │   ├── localization/               # GPS/IMU/EKF 위치 추정
 │   └── control/                    # Pure Pursuit 관련 패키지
@@ -678,8 +680,10 @@ morai_udp_ekf_purepursuit_lidar_camera.launch
 └── camera_perception.launch
     ├── lane_camera  → Sensor/LaneCandidates.py
     ├── yolo_camera  → Sensor/YoloCamera_v2.py
-    └── highway_environment_gate
-         car_detected AND (점선 조건, 현재 비활성) → merge-gap 활성화
+    ├── highway_environment_gate
+    │    car_detected AND (점선 조건, 현재 비활성) → merge-gap 활성화
+    └── pedestrian_crossing_fusion
+         person_detected AND 가까운 동적 LiDAR 객체 → 정지/재출발
 ```
 
 ### 센서 및 모델 준비
@@ -793,6 +797,8 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
 | `enable_highway_gate` | `true` | 카메라 기반 고속도로 환경 게이트 실행 |
 | `require_dashed_lane` | `false` | `true`이면 car와 점선이 모두 탐지되어야 활성화 |
 | `car_detection_hold_s` | `2.0` | 일시적인 YOLO 누락 시 car 조건 유지시간 |
+| `enable_pedestrian_crossing` | `true` | 보행자 카메라/LiDAR 융합 및 제어 정지 요청 |
+| `pedestrian_detection_distance_m` | `1.5` | 보행자 LiDAR bounding box 근접 거리 |
 | `merge_available_topic` | `/perception/merge_gap/available` | 왼쪽 차선 끼어들기 가능 토픽 |
 | `merge_unavailable_topic` | `/perception/merge_gap/unavailable` | 왼쪽 차선 끼어들기 불가능 토픽 |
 
@@ -869,6 +875,22 @@ YOLO가 COCO `car`를 탐지해 `/perception/camera/highway_environment=true`가
 `available=false`, `unavailable=true`를 발행한 뒤 판단 출력을 중단한다. 점선 인식은
 아직 미구현이므로 `require_dashed_lane=false`가 기본이며, 구현 후 이 값을 `true`로
 바꾸면 `car AND dashed_lane` 조건으로 전환된다. 기존 주행 제어에는 연결하지 않는다.
+
+### 보행자 정지 및 재출발
+
+```bash
+rostopic echo /perception/camera/person_detected
+rostopic echo /perception/pedestrian_crossing/stop_required
+rostopic echo /perception/pedestrian_crossing/resume_allowed
+rostopic echo /perception/pedestrian_crossing/status
+```
+
+YOLO `person`과 전방·측면 1.5m 이내의 사람 크기 동적 LiDAR 객체가 함께 확인되면
+`stop_required=true`가 되고, 실제 제어가 활성화된 경우 Pure Pursuit가
+`velocity=0`, `brake=1`을 발행한다. 정지 이후 카메라 person과 전체 LiDAR
+근접 cluster가 모두 사라진 상태가 1초간 유지되면 `resume_allowed=true`가 되고
+기존 전역 경로 추종으로 복귀한다. 자세한 조건은
+[`docs/PEDESTRIAN_CROSSING.md`](docs/PEDESTRIAN_CROSSING.md)를 참고한다.
 
 더 자세한 센서별 설명과 개별 실행법은
 [`docs/LIDAR_CAMERA_INTEGRATION.md`](docs/LIDAR_CAMERA_INTEGRATION.md)를 참고한다.

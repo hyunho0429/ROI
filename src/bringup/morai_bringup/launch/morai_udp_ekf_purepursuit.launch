@@ -15,6 +15,7 @@
   <arg name="enable_control" default="false" />
   <arg name="wheelbase_m" default="3.0" />
   <arg name="target_speed_mps" default="6.0" />
+  <arg name="pedestrian_stop_topic" default="/perception/pedestrian_crossing/stop_required" />
 
   <!-- 1. MORAI GPS·IMU UDP -> /gps, /Imu -->
   <include file="$(find morai_udp_bridge)/launch/morai_udp_bridge.launch">
@@ -67,5 +68,6 @@
     <arg name="enable_control" value="$(arg enable_control)" />
     <arg name="wheelbase_m" value="$(arg wheelbase_m)" />
     <arg name="target_speed_mps" value="$(arg target_speed_mps)" />
+    <arg name="pedestrian_stop_topic" value="$(arg pedestrian_stop_topic)" />
   </include>
 </launch>

@@ -24,6 +24,9 @@ def main():
     parser.add_argument(
         "--car-detected-topic", default="/perception/camera/car_detected"
     )
+    parser.add_argument(
+        "--person-detected-topic", default="/perception/camera/person_detected"
+    )
     args, _ = parser.parse_known_args()
 
     stack_root = Path(args.camera_stack_root).expanduser().resolve()
@@ -40,6 +43,7 @@ def main():
             "--custom-model", args.custom_model,
             "--confidence", str(args.confidence),
             "--car-detected-topic", args.car_detected_topic,
+            "--person-detected-topic", args.person_detected_topic,
         ]
 
     if not target.is_file():

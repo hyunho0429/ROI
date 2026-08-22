@@ -25,6 +25,7 @@
   <arg name="merge_unavailable_topic" default="/perception/merge_gap/unavailable" />
   <arg name="merge_highway_gate_required" default="false" />
   <arg name="highway_gate_topic" default="/perception/camera/highway_environment" />
+  <arg name="pedestrian_stop_topic" default="/perception/pedestrian_crossing/stop_required" />
 
   <include file="$(find morai_bringup)/launch/morai_udp_ekf_purepursuit.launch">
     <arg name="workspace_path" value="$(arg workspace_path)" />
@@ -40,6 +41,7 @@
     <arg name="wheelbase_m" value="$(arg wheelbase_m)" />
     <arg name="target_speed_mps" value="$(arg target_speed_mps)" />
     <arg name="enable_control" value="$(arg enable_control)" />
+    <arg name="pedestrian_stop_topic" value="$(arg pedestrian_stop_topic)" />
   </include>
 
   <include file="$(find lidar_perception)/launch/$(arg lidar_launch)">
