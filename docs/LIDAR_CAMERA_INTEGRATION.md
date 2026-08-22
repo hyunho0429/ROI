@@ -62,6 +62,9 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
 | `base_model_path` | `yolov8n.pt` | 기본 YOLO 모델 |
 | `custom_model_path` | `null.pt` | 커스텀 신호등/장애물 모델 |
 | `yolo_confidence` | `0.4` | YOLO confidence 임계값 |
+| `enable_highway_gate` | `true` | YOLO 기반 고속도로 환경 게이트 |
+| `require_dashed_lane` | `false` | 점선 인식 구현 후 `true`로 전환 |
+| `car_detection_hold_s` | `2.0` | YOLO car 조건 유지시간 |
 | `enable_control` | `false` | 차량 제어 UDP 송신 |
 
 커스텀 모델은 저장소에 포함되지 않는다. `Sensor/null.pt`에 복사하거나 절대 경로로
@@ -73,6 +76,23 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
 ```
 
 커스텀 모델이 없으면 경고를 출력하고 COCO 기본 YOLO 탐지만 계속한다.
+
+## 고속도로 환경 기반 끼어들기 활성화
+
+통합 launch에서는 기본 YOLO의 COCO `car` 탐지 결과를
+`/perception/camera/car_detected`(`std_msgs/Bool`)로 발행한다. 별도 게이트 노드가
+이를 2초간 유지해 `/perception/camera/highway_environment`를 10 Hz로 발행한다.
+이 값이 `true`인 동안에만 왼쪽 끼어들기 판단, 관련 Bool 결과와 RViz 선이
+활성화된다.
+
+점선 인식 토픽 `/perception/camera/dashed_lane_detected`는 향후 연결을 위해 미리
+정의되어 있지만 현재 발행 노드는 없다. 점선 인식 구현 후 다음 인자를 사용하면
+고속도로 게이트가 `car AND dashed_lane`으로 동작한다.
+
+```bash
+roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
+  require_dashed_lane:=true
+```
 
 ## 개별 확인
 

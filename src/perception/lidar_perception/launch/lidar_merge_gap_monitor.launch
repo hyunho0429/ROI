@@ -10,6 +10,9 @@
   <arg name="confirmation_scans" default="3" />
   <arg name="available_topic" default="/perception/merge_gap/available" />
   <arg name="unavailable_topic" default="/perception/merge_gap/unavailable" />
+  <arg name="highway_gate_required" default="false" />
+  <arg name="highway_gate_topic" default="/perception/camera/highway_environment" />
+  <arg name="highway_gate_timeout_s" default="0.5" />
 
   <node pkg="lidar_perception"
         type="lidar_merge_gap_node.py"
@@ -20,6 +23,9 @@
     <param name="marker_topic" value="/morai/lidar/merge_gap/markers" />
     <param name="available_topic" value="$(arg available_topic)" />
     <param name="unavailable_topic" value="$(arg unavailable_topic)" />
+    <param name="highway_gate_required" value="$(arg highway_gate_required)" />
+    <param name="highway_gate_topic" value="$(arg highway_gate_topic)" />
+    <param name="highway_gate_timeout_s" value="$(arg highway_gate_timeout_s)" />
     <param name="vehicle_length_m" value="$(arg vehicle_length_m)" />
     <param name="vehicle_width_m" value="$(arg vehicle_width_m)" />
     <param name="vehicle_height_m" value="$(arg vehicle_height_m)" />

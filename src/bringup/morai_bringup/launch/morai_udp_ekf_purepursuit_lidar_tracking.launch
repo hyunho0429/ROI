@@ -14,6 +14,8 @@
   <arg name="rviz" default="true" />
   <arg name="merge_available_topic" default="/perception/merge_gap/available" />
   <arg name="merge_unavailable_topic" default="/perception/merge_gap/unavailable" />
+  <arg name="merge_highway_gate_required" default="false" />
+  <arg name="highway_gate_topic" default="/perception/camera/highway_environment" />
   <include file="$(find morai_bringup)/launch/morai_udp_ekf_purepursuit_lidar_common.launch">
     <arg name="lidar_launch" value="lidar_tracking.launch" />
     <arg name="workspace_path" value="$(arg workspace_path)" />
@@ -31,5 +33,7 @@
     <arg name="rviz" value="$(arg rviz)" />
     <arg name="merge_available_topic" value="$(arg merge_available_topic)" />
     <arg name="merge_unavailable_topic" value="$(arg merge_unavailable_topic)" />
+    <arg name="merge_highway_gate_required" value="$(arg merge_highway_gate_required)" />
+    <arg name="highway_gate_topic" value="$(arg highway_gate_topic)" />
   </include>
 </launch>

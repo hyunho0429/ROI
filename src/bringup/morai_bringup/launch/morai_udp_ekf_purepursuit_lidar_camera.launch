@@ -28,6 +28,14 @@
   <arg name="base_model_path" default="yolov8n.pt" />
   <arg name="custom_model_path" default="null.pt" />
   <arg name="yolo_confidence" default="0.4" />
+  <arg name="car_detected_topic" default="/perception/camera/car_detected" />
+  <arg name="dashed_lane_topic" default="/perception/camera/dashed_lane_detected" />
+  <arg name="highway_environment_topic" default="/perception/camera/highway_environment" />
+  <arg name="enable_highway_gate" default="$(arg enable_yolo)" />
+  <arg name="merge_highway_gate_required" default="$(arg enable_highway_gate)" />
+  <!-- 현재 false: car만 사용. 점선 인식 구현 후 true로 변경. -->
+  <arg name="require_dashed_lane" default="false" />
+  <arg name="car_detection_hold_s" default="2.0" />
 
   <include file="$(find morai_bringup)/launch/morai_udp_ekf_purepursuit_lidar_tracking.launch">
     <arg name="workspace_path" value="$(arg workspace_path)" />
@@ -45,6 +53,8 @@
     <arg name="rviz" value="$(arg rviz)" />
     <arg name="merge_available_topic" value="$(arg merge_available_topic)" />
     <arg name="merge_unavailable_topic" value="$(arg merge_unavailable_topic)" />
+    <arg name="merge_highway_gate_required" value="$(arg merge_highway_gate_required)" />
+    <arg name="highway_gate_topic" value="$(arg highway_environment_topic)" />
   </include>
 
   <include file="$(find camera_perception)/launch/camera_perception.launch">
@@ -57,5 +67,11 @@
     <arg name="base_model_path" value="$(arg base_model_path)" />
     <arg name="custom_model_path" value="$(arg custom_model_path)" />
     <arg name="yolo_confidence" value="$(arg yolo_confidence)" />
+    <arg name="car_detected_topic" value="$(arg car_detected_topic)" />
+    <arg name="dashed_lane_topic" value="$(arg dashed_lane_topic)" />
+    <arg name="highway_environment_topic" value="$(arg highway_environment_topic)" />
+    <arg name="enable_highway_gate" value="$(arg enable_highway_gate)" />
+    <arg name="require_dashed_lane" value="$(arg require_dashed_lane)" />
+    <arg name="car_detection_hold_s" value="$(arg car_detection_hold_s)" />
   </include>
 </launch>

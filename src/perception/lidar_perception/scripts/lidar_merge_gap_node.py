@@ -47,6 +47,15 @@ class MergeGapNode:
         self.unavailable_topic = _param(
             "unavailable_topic", "/perception/merge_gap/unavailable"
         )
+        self.highway_gate_required = bool(
+            _param("highway_gate_required", False)
+        )
+        self.highway_gate_topic = _param(
+            "highway_gate_topic", "/perception/camera/highway_environment"
+        )
+        self.highway_gate_timeout_s = float(
+            _param("highway_gate_timeout_s", 0.5)
+        )
         self.frame_id = _param("frame_id", "morai_lidar")
         self.vehicle_length_m = float(_param("vehicle_length_m", 4.635))
         self.vehicle_width_m = float(_param("vehicle_width_m", 1.892))
@@ -68,9 +77,14 @@ class MergeGapNode:
         confirmation_scans = int(_param("confirmation_scans", 3))
         if self.stale_timeout_s <= 0.0:
             raise ValueError("stale_timeout_s must be positive")
+        if self.highway_gate_timeout_s <= 0.0:
+            raise ValueError("highway_gate_timeout_s must be positive")
         self.confirmation = MergeGapTracker(confirmation_scans)
         self.last_input_at = None
         self.stale_published = False
+        self.highway_gate_value = not self.highway_gate_required
+        self.last_highway_gate_at = None
+        self.outputs_active = False
 
         self.result_publisher = rospy.Publisher(
             self.result_topic, String, queue_size=1
@@ -90,6 +104,14 @@ class MergeGapNode:
             self._tracking_callback,
             queue_size=1,
         )
+        self.highway_gate_subscriber = None
+        if self.highway_gate_required:
+            self.highway_gate_subscriber = rospy.Subscriber(
+                self.highway_gate_topic,
+                Bool,
+                self._highway_gate_callback,
+                queue_size=1,
+            )
         self.stale_timer = rospy.Timer(
             rospy.Duration(min(0.2, 0.5 * self.stale_timeout_s)),
             self._stale_callback,
@@ -112,11 +134,14 @@ class MergeGapNode:
         )
         rospy.logwarn(
             "LEFT merge state outputs: available=%s unavailable=%s "
-            "source=lidar_gap_only",
+            "highway_gate_required=%s gate_topic=%s",
             self.available_topic,
             self.unavailable_topic,
+            self.highway_gate_required,
+            self.highway_gate_topic,
         )
-        self._publish_binary_states()
+        if not self.highway_gate_required:
+            self._publish_binary_states()
 
     def _publish_binary_states(self, assessments=None):
         left_available = bool(
@@ -125,14 +150,56 @@ class MergeGapNode:
         )
         available = Bool(data=left_available)
         unavailable = Bool(data=not left_available)
-        # Future YOLO vehicle and dashed-lane conditions should be applied
-        # before publishing this final left-lane binary state.
         self.available_publisher.publish(available)
         self.unavailable_publisher.publish(unavailable)
+
+    def _highway_gate_active(self):
+        if not self.highway_gate_required:
+            return True
+        if not self.highway_gate_value or self.last_highway_gate_at is None:
+            return False
+        return (
+            time.monotonic() - self.last_highway_gate_at
+            <= self.highway_gate_timeout_s
+        )
+
+    def _highway_gate_callback(self, message):
+        was_active = self._highway_gate_active()
+        self.highway_gate_value = bool(message.data)
+        self.last_highway_gate_at = time.monotonic()
+        is_active = self._highway_gate_active()
+
+        if is_active and not was_active:
+            self.confirmation = MergeGapTracker(
+                self.confirmation.confirmation_scans
+            )
+            self.stale_published = False
+            rospy.logwarn(
+                "Highway environment detected: LEFT merge-gap perception enabled"
+            )
+        elif was_active and not is_active:
+            self._deactivate_outputs("highway_environment_inactive")
+            rospy.logwarn(
+                "Highway environment lost: LEFT merge-gap perception disabled"
+            )
+
+    def _deactivate_outputs(self, reason):
+        if not self.outputs_active:
+            return
+        self.confirmation = MergeGapTracker(
+            self.confirmation.confirmation_scans
+        )
+        # Clear a previously published AVAILABLE state once for safety, then
+        # remain silent until the highway gate becomes active again.
+        self._publish_invalid(reason)
+        self.outputs_active = False
 
     def _tracking_callback(self, message):
         self.last_input_at = time.monotonic()
         self.stale_published = False
+        if not self._highway_gate_active():
+            self._deactivate_outputs("highway_environment_inactive")
+            return
         try:
             tracks = json.loads(message.data)
             if not isinstance(tracks, list):
@@ -153,6 +220,7 @@ class MergeGapNode:
         except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
             rospy.logwarn_throttle(1.0, "Invalid LiDAR tracking result: %s", error)
             self._publish_invalid("invalid_tracking_result")
+            self.outputs_active = True
             return
 
         assessments, became_available, became_unavailable = self.confirmation.update(
@@ -163,11 +231,14 @@ class MergeGapNode:
             "algorithm": "euclidean_bbox_kalman_hungarian_dynamic_gap",
             "left": assessments["left"],
         }
+        if self.highway_gate_required:
+            payload["highway_environment"] = True
         self.result_publisher.publish(
             String(data=json.dumps(_json_safe(payload), ensure_ascii=False))
         )
         self._publish_binary_states(assessments)
         self.marker_publisher.publish(self._markers(assessments))
+        self.outputs_active = True
 
         left_text = format_tracked_merge_gap_status(assessments["left"])
         # WARN level is intentional: ROS terminals render this periodic status in
@@ -202,6 +273,15 @@ class MergeGapNode:
             )
 
     def _stale_callback(self, _event):
+        if not self._highway_gate_active():
+            self._deactivate_outputs("highway_environment_inactive_or_stale")
+            if self.highway_gate_required:
+                rospy.loginfo_throttle(
+                    2.0,
+                    "Merge-gap perception is idle until %s is true",
+                    self.highway_gate_topic,
+                )
+            return
         if self.last_input_at is None:
             rospy.logwarn_throttle(
                 2.0, "Merge-gap node is waiting for %s", self.input_topic

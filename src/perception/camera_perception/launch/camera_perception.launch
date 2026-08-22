@@ -8,6 +8,13 @@
   <arg name="base_model_path" default="yolov8n.pt" />
   <arg name="custom_model_path" default="null.pt" />
   <arg name="yolo_confidence" default="0.4" />
+  <arg name="car_detected_topic" default="/perception/camera/car_detected" />
+  <arg name="dashed_lane_topic" default="/perception/camera/dashed_lane_detected" />
+  <arg name="highway_environment_topic" default="/perception/camera/highway_environment" />
+  <arg name="enable_highway_gate" default="$(arg enable_yolo)" />
+  <!-- 점선 인식이 구현되면 true로 바꾸면 car AND dashed 조건이 된다. -->
+  <arg name="require_dashed_lane" default="false" />
+  <arg name="car_detection_hold_s" default="2.0" />
 
   <node if="$(arg enable_lane)"
         pkg="camera_perception"
@@ -23,5 +30,19 @@
         name="yolo_camera"
         output="screen"
         respawn="false"
-        args="--mode yolo --camera-stack-root $(arg camera_stack_root) --cam-ip $(arg camera_ip) --cam-port $(arg yolo_port) --base-model $(arg base_model_path) --custom-model $(arg custom_model_path) --confidence $(arg yolo_confidence)" />
+        args="--mode yolo --camera-stack-root $(arg camera_stack_root) --cam-ip $(arg camera_ip) --cam-port $(arg yolo_port) --base-model $(arg base_model_path) --custom-model $(arg custom_model_path) --confidence $(arg yolo_confidence) --car-detected-topic $(arg car_detected_topic)" />
+
+  <node if="$(arg enable_highway_gate)"
+        pkg="camera_perception"
+        type="highway_environment_gate_node.py"
+        name="highway_environment_gate"
+        output="screen">
+    <param name="car_detected_topic" value="$(arg car_detected_topic)" />
+    <param name="dashed_lane_topic" value="$(arg dashed_lane_topic)" />
+    <param name="output_topic" value="$(arg highway_environment_topic)" />
+    <param name="require_dashed_lane" value="$(arg require_dashed_lane)" />
+    <param name="car_hold_s" value="$(arg car_detection_hold_s)" />
+    <param name="dashed_lane_hold_s" value="2.0" />
+    <param name="publish_rate_hz" value="10.0" />
+  </node>
 </launch>

@@ -21,6 +21,9 @@ def main():
     parser.add_argument("--base-model", default="yolov8n.pt")
     parser.add_argument("--custom-model", default="null.pt")
     parser.add_argument("--confidence", type=float, default=0.4)
+    parser.add_argument(
+        "--car-detected-topic", default="/perception/camera/car_detected"
+    )
     args, _ = parser.parse_known_args()
 
     stack_root = Path(args.camera_stack_root).expanduser().resolve()
@@ -36,6 +39,7 @@ def main():
             "--base-model", args.base_model,
             "--custom-model", args.custom_model,
             "--confidence", str(args.confidence),
+            "--car-detected-topic", args.car_detected_topic,
         ]
 
     if not target.is_file():

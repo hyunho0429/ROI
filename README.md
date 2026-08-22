@@ -624,8 +624,8 @@ roslaunch path_planning kcity_2025_dijkstra.launch \
 - GPS/IMU 기반 위치 추정과 Pure Pursuit 경로 추종
 - PID 종방향 제어 및 MORAI Ego Ctrl Cmd UDP 송신
 - 3D LiDAR UDP 수신, clustering, bounding box, Kalman+Hungarian tracking
-- LiDAR tracking 결과와 끼어들기 공간 판단을 RViz에 표시
-- 끼어들기 좌·우 가능 여부와 map 장애물 목록을 ROS 메시지로 발행
+- 고속도로 카메라 조건이 활성화될 때만 LiDAR 왼쪽 끼어들기 공간을 RViz에 표시
+- 왼쪽 끼어들기 가능 여부와 map 장애물 목록을 ROS 메시지로 발행
 - 전방 카메라 영상의 ONNX 차선 segmentation 및 차선 후보 추적
 - YOLOv8 기본 객체 탐지
 - 커스텀 모델이 있을 때 신호등과 MORAI 장애물 탐지 결과 중첩
@@ -642,6 +642,7 @@ ROI/
 ├── Sensor/                         # feature-camera 원본 카메라 기능
 │   ├── LaneCandidates.py           # 차선 segmentation, 후보 추출 및 화면 표시
 │   ├── YoloCamera_v2.py            # 기본/커스텀 YOLO 탐지 및 화면 표시
+│   ├── CameraUDP.py                 # 최신 완성 프레임만 유지하는 저지연 수신기
 │   └── lane_segmentation.onnx      # 차선 segmentation 모델
 ├── lib/
 │   ├── define/Camera.py            # MORAI 카메라 UDP 데이터 구조/파싱
@@ -657,8 +658,10 @@ ROI/
 │   │                               # 기존 LiDAR 인식 노드와 RViz 설정
 │   ├── perception/camera_perception/
 │   │   ├── launch/camera_perception.launch
-│   │   └── scripts/camera_feature_runner.py
-│   │                               # 카메라 원본 코드를 roslaunch에서 실행하는 어댑터
+│   │   └── scripts/
+│   │       ├── camera_feature_runner.py
+│   │       └── highway_environment_gate_node.py
+│   │                               # YOLO car/점선 조건을 결합하는 고속도로 게이트
 │   ├── path_planning/              # UDP 주행, 경로 추종 및 LiDAR 연동
 │   ├── localization/               # GPS/IMU/EKF 위치 추정
 │   └── control/                    # Pure Pursuit 관련 패키지
@@ -674,7 +677,9 @@ morai_udp_ekf_purepursuit_lidar_camera.launch
 │   └── 기존 LiDAR tracking + merge-gap + RViz
 └── camera_perception.launch
     ├── lane_camera  → Sensor/LaneCandidates.py
-    └── yolo_camera  → Sensor/YoloCamera_v2.py
+    ├── yolo_camera  → Sensor/YoloCamera_v2.py
+    └── highway_environment_gate
+         car_detected AND (점선 조건, 현재 비활성) → merge-gap 활성화
 ```
 
 ### 센서 및 모델 준비
@@ -785,6 +790,9 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
 | `base_model_path` | `yolov8n.pt` | 기본 YOLO 모델 경로/이름 |
 | `custom_model_path` | `null.pt` | 커스텀 YOLO 모델 경로/이름 |
 | `yolo_confidence` | `0.4` | YOLO confidence 임계값 |
+| `enable_highway_gate` | `true` | 카메라 기반 고속도로 환경 게이트 실행 |
+| `require_dashed_lane` | `false` | `true`이면 car와 점선이 모두 탐지되어야 활성화 |
+| `car_detection_hold_s` | `2.0` | 일시적인 YOLO 누락 시 car 조건 유지시간 |
 | `merge_available_topic` | `/perception/merge_gap/available` | 왼쪽 차선 끼어들기 가능 토픽 |
 | `merge_unavailable_topic` | `/perception/merge_gap/unavailable` | 왼쪽 차선 끼어들기 불가능 토픽 |
 
@@ -854,10 +862,13 @@ rostopic echo /perception/merge_gap/available
 rostopic echo /perception/merge_gap/unavailable
 ```
 
-두 토픽은 모두 `std_msgs/Bool`이며 왼쪽 차선만 판단한다. 정상 입력에서는 두 값이
-항상 반대이고, LiDAR tracking 입력이 끊기면 안전하게 `available=false`,
-`unavailable=true`가 된다. 기존 주행 제어에는 연결하지 않는다. YOLO 차량 검출과
-점선 차선 조건은 아직 최종 판정에 포함되지 않는다.
+두 토픽은 모두 `std_msgs/Bool`이며 왼쪽 차선만 판단한다. 통합 카메라 launch에서는
+YOLO가 COCO `car`를 탐지해 `/perception/camera/highway_environment=true`가 된
+동안에만 끼어들기 판단과 RViz 왼쪽 선이 활성화된다. 정상 활성 상태에서는 두 값이
+항상 반대다. 게이트가 꺼질 때는 이전 가능 상태를 남기지 않도록 한 번
+`available=false`, `unavailable=true`를 발행한 뒤 판단 출력을 중단한다. 점선 인식은
+아직 미구현이므로 `require_dashed_lane=false`가 기본이며, 구현 후 이 값을 `true`로
+바꾸면 `car AND dashed_lane` 조건으로 전환된다. 기존 주행 제어에는 연결하지 않는다.
 
 더 자세한 센서별 설명과 개별 실행법은
 [`docs/LIDAR_CAMERA_INTEGRATION.md`](docs/LIDAR_CAMERA_INTEGRATION.md)를 참고한다.

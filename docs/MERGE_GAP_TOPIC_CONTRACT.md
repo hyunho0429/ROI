@@ -1,17 +1,26 @@
 # 왼쪽 차선 끼어들기 판단 토픽
 
-현재 판단은 LiDAR tracking의 장애물 위치, bounding box, 상대 속도, 앞뒤 여유
-거리와 TTC를 사용한다. YOLO 차량 검출과 점선 차선 조건은 아직 포함하지 않는다.
+공간 판단은 LiDAR tracking의 장애물 위치, bounding box, 상대 속도, 앞뒤 여유
+거리와 TTC를 사용한다. 통합 카메라 launch에서는 YOLO `car` 탐지가 고속도로
+환경 게이트를 활성화한 동안에만 이 판단 결과를 발행한다. 점선 조건은 인터페이스만
+준비되어 있고 아직 요구하지 않는다.
 
 | 기능 | 토픽 | 메시지 | 값 |
 |---|---|---|---|
 | 왼쪽 차선 끼어들기 가능 | `/perception/merge_gap/available` | `std_msgs/Bool` | 가능하면 `data: true` |
 | 왼쪽 차선 끼어들기 불가능 | `/perception/merge_gap/unavailable` | `std_msgs/Bool` | 불가능하면 `data: true` |
+| YOLO car 탐지 | `/perception/camera/car_detected` | `std_msgs/Bool` | 현재 프레임에서 COCO `car` 탐지 |
+| 고속도로 환경 게이트 | `/perception/camera/highway_environment` | `std_msgs/Bool` | 현재는 car 조건, 향후 car AND 점선 |
+| 점선 탐지(예약) | `/perception/camera/dashed_lane_detected` | `std_msgs/Bool` | 현재 발행 노드 미구현 |
 
 정상 입력에서는 두 값이 항상 반대다. RViz에서 왼쪽 공간이 확정된 초록색이면
 `available=true`이고, 빨간색 또는 확인 중인 노란색이면 `unavailable=true`다.
 LiDAR tracking 입력이 끊기거나 유효하지 않으면 안전하게 `available=false`,
 `unavailable=true`를 발행한다.
+
+고속도로 게이트가 `false`이면 RViz 끼어들기 선과 주기적인 판단 발행을 중단한다.
+게이트가 `true`에서 `false`로 바뀔 때는 이전 `available=true`가 남지 않도록 한 번
+`available=false`, `unavailable=true`를 발행한다.
 
 두 메시지에는 timestamp, 장애물 개수, 위치, 속도 등 추가 데이터가 없다. 이
 정보가 따로 필요하면 기존 `/perception/lidar/tracked_obstacles_map`
