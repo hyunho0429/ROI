@@ -737,10 +737,11 @@ source /opt/ros/noetic/setup.bash
 source devel/setup.bash
 ```
 
-### 1단계: 인식 화면만 안전하게 확인
+### 통합 실행
 
-`enable_control`의 기본값은 `false`이다. 다음 명령은 제어 송신을 비활성화한
-상태로 기존 LiDAR RViz, 차선 인식 화면, YOLO 화면을 동시에 실행한다.
+다음 한 줄로 LiDAR/RViz, YOLO, 보행자 정지·재출발 및 차량 제어를 실행한다.
+차선 인식은 기본적으로 비활성화되어 있다. `enable_control` 기본값이 `true`이므로
+네트워크와 위치 정보가 정상 수신되면 차량이 바로 움직일 수 있다.
 
 ```bash
 cd ~/ROI
@@ -753,26 +754,24 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch
 정상 실행 시 다음 화면이 나타난다.
 
 1. LiDAR tracking 및 merge-gap 상태를 표시하는 RViz
-2. 차선 원본/ROI/후보 결과를 표시하는 `LaneCandidates` 화면
-3. 객체 bounding box를 표시하는 `MORAI Cam 4 Traffic & Object Monitor` 화면
+2. 카메라 실시간 화면
+3. 입력 프레임과 bounding box가 일치하는 YOLO 검출 화면
 
 종료할 때는 launch 터미널에서 `Ctrl+C`를 누른다. OpenCV 창에서 누르는
 `q` 또는 `Esc`는 해당 카메라 프로세스만 종료할 수 있다.
 
-### 2단계: 실제 주행 활성화
+### 센서만 안전하게 확인
 
-센서 수신, 경로, RViz, 조향 방향과 비상 정지를 확인한 뒤에만 제어를 켠다.
+차량 제어 없이 센서 수신과 화면만 확인하려면 제어 송신을 끈다.
 
 ```bash
-roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
-  enable_control:=true
+roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch enable_control:=false
 ```
 
 목표 속도를 함께 지정하는 예:
 
 ```bash
 roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
-  enable_control:=true \
   target_speed_mps:=6.0
 ```
 
@@ -784,19 +783,19 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
 | `competition_status_host_port` | `9080` | MORAI Competition Status 송신(Host/Source) 포트 |
 | `competition_status_port` | `9081` | ROS PC Competition Status 수신(Destination) 포트 |
 | `morai_host_ip` | `192.168.0.151` | Ego Ctrl Cmd를 보낼 MORAI PC 주소 |
-| `enable_control` | `false` | 차량 제어 UDP 송신 여부 |
+| `enable_control` | `true` | 차량 제어 UDP 송신 여부 |
 | `target_speed_mps` | `6.0` | Pure Pursuit 목표 속도 (`21.6 km/h`) |
 | `rviz` | `true` | LiDAR RViz 실행 여부 |
-| `enable_lane` | `true` | 차선 인식 프로세스 실행 여부 |
+| `enable_lane` | `false` | 차선 인식 프로세스 실행 여부 |
 | `lane_port` | `1101` | 차선 카메라 UDP 수신 포트 |
 | `enable_yolo` | `true` | YOLO 프로세스 실행 여부 |
 | `yolo_port` | `1131` | YOLO 카메라 UDP 수신 포트 |
 | `base_model_path` | `yolov8n.pt` | 기본 YOLO 모델 경로/이름 |
 | `custom_model_path` | `null.pt` | 커스텀 YOLO 모델 경로/이름 |
 | `yolo_confidence` | `0.4` | YOLO confidence 임계값 |
-| `yolo_inference_size` | `416` | YOLO 추론 입력 크기 |
+| `yolo_inference_size` | `320` | YOLO 추론 입력 크기 |
 | `camera_display_fps` | `0.0` | `0`은 MORAI 카메라 수신 속도를 그대로 사용 |
-| `yolo_cpu_threads` | `0` | VM CPU 수에 맞게 GUI용 코어를 남기도록 자동 설정 |
+| `yolo_cpu_threads` | `1` | YOLO에 사용하는 PyTorch CPU 스레드 수 |
 | `enable_highway_gate` | `true` | 카메라 기반 고속도로 환경 게이트 실행 |
 | `require_dashed_lane` | `false` | `true`이면 car와 점선이 모두 탐지되어야 활성화 |
 | `car_detection_hold_s` | `2.0` | 일시적인 YOLO 누락 시 car 조건 유지시간 |
@@ -886,7 +885,7 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
 
 #### 화면은 정상인데 차량이 움직이지 않음
 
-- 기본값은 `enable_control=false`이다. 안전 확인 후 `true`로 지정한다.
+- 기본값은 `enable_control=true`이다. 센서만 확인할 때는 `enable_control:=false`로 지정한다.
 - `morai_host_ip`, 제어 포트, `ctrl_mode=2`, `gear=4`를 확인한다.
 
 ### 끼어들기 상태 토픽 사용

@@ -1,6 +1,5 @@
 <launch>
-  <!-- Existing driving + LiDAR tracking stack. Defaults intentionally match
-       morai_udp_ekf_purepursuit_lidar_tracking.launch. -->
+  <!-- Competition-ready integrated driving, LiDAR tracking and camera stack. -->
   <arg name="workspace_path" default="$(env HOME)/morai_ws" />
   <arg name="path_file" default="$(find morai_bringup)/../../../data/routes/2026_molit_comp_global_path.txt" />
   <arg name="bind_ip" default="0.0.0.0" />
@@ -12,7 +11,7 @@
   <arg name="lidar_x_m" default="0.0" />
   <arg name="lidar_y_m" default="0.0" />
   <arg name="lidar_yaw_deg" default="0.0" />
-  <arg name="enable_control" default="false" />
+  <arg name="enable_control" default="true" />
   <arg name="rviz" default="true" />
   <arg name="merge_available_topic" default="/perception/merge_gap/available" />
   <arg name="merge_unavailable_topic" default="/perception/merge_gap/unavailable" />
@@ -21,16 +20,16 @@
   <arg name="camera_stack_root" default="$(env HOME)/morai_ws/src/ROI" />
   <!-- Camera UDP receivers use the same local bind address as LiDAR. -->
   <arg name="camera_ip" default="$(arg bind_ip)" />
-  <arg name="enable_lane" default="true" />
+  <arg name="enable_lane" default="false" />
   <arg name="lane_port" default="1101" />
   <arg name="enable_yolo" default="true" />
   <arg name="yolo_port" default="1131" />
   <arg name="base_model_path" default="yolov8n.pt" />
   <arg name="custom_model_path" default="null.pt" />
   <arg name="yolo_confidence" default="0.4" />
-  <arg name="yolo_inference_size" default="416" />
+  <arg name="yolo_inference_size" default="320" />
   <arg name="camera_display_fps" default="0.0" />
-  <arg name="yolo_cpu_threads" default="0" />
+  <arg name="yolo_cpu_threads" default="1" />
   <arg name="car_detected_topic" default="/perception/camera/car_detected" />
   <arg name="person_detected_topic" default="/perception/camera/person_detected" />
   <arg name="dashed_lane_topic" default="/perception/camera/dashed_lane_detected" />

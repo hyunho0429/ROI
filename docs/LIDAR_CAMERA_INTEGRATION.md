@@ -29,25 +29,21 @@ MORAI 센서의 목적지 IP는 별도로 Ubuntu PC의 실제 IP로 설정해야
 
 ## 전체 실행
 
-먼저 제어 송신을 끈 상태로 화면과 센서 수신을 검증한다.
+다음 한 줄로 LiDAR/RViz, YOLO, 보행자 정지·재출발 및 차량 제어를 실행한다.
+기본값으로 차선 인식은 비활성화된다. 제어가 기본 활성화되어 있으므로 네트워크와
+위치 정보가 정상 수신되면 차량이 바로 움직일 수 있다.
 
 ```bash
-roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
-  enable_control:=false
+roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch
 ```
 
-정상 실행 시 다음 세 화면이 함께 나타난다.
+정상 실행 시 LiDAR tracking RViz와 카메라 실시간/YOLO 검출 화면이 나타난다.
+차선 인식 화면은 기본 실행에 포함되지 않는다.
 
-1. 기존 LiDAR tracking RViz
-2. `Lane Candidate Extraction` 차선 인식 화면
-3. `MORAI Cam 4 Traffic & Object Monitor` YOLO 화면
-
-경로·센서·조향 방향과 비상 정지를 확인한 뒤에만 실제 제어를 켠다.
+센서와 화면만 먼저 검증하려면 다음과 같이 제어 송신을 끈다.
 
 ```bash
-roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
-  enable_control:=true \
-  target_speed_mps:=6.0
+roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch enable_control:=false
 ```
 
 ## 주요 launch 인자
@@ -55,22 +51,22 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
 | 인자 | 기본값 | 설명 |
 |---|---:|---|
 | `rviz` | `true` | LiDAR RViz 표시 |
-| `enable_lane` | `true` | 차선 인식 프로세스 실행 |
+| `enable_lane` | `false` | 차선 인식 프로세스 실행 |
 | `lane_port` | `1101` | 차선 카메라 UDP 포트 |
 | `enable_yolo` | `true` | YOLO 프로세스 실행 |
 | `yolo_port` | `1131` | YOLO 카메라 UDP 포트 |
 | `base_model_path` | `yolov8n.pt` | 기본 YOLO 모델 |
 | `custom_model_path` | `null.pt` | 커스텀 신호등/장애물 모델 |
 | `yolo_confidence` | `0.4` | YOLO confidence 임계값 |
-| `yolo_inference_size` | `416` | YOLO 추론 입력 크기(작을수록 빠르지만 소형 객체 정확도 감소) |
+| `yolo_inference_size` | `320` | YOLO 추론 입력 크기(작을수록 빠르지만 소형 객체 정확도 감소) |
 | `camera_display_fps` | `0.0` | `0`은 MORAI 수신 프레임율로 즉시 표시 |
-| `yolo_cpu_threads` | `0` | VM GUI/UDP용 CPU를 남기는 PyTorch 자동 스레드 설정 |
+| `yolo_cpu_threads` | `1` | YOLO에 사용하는 PyTorch CPU 스레드 수 |
 | `enable_highway_gate` | `true` | YOLO 기반 고속도로 환경 게이트 |
 | `require_dashed_lane` | `false` | 점선 인식 구현 후 `true`로 전환 |
 | `car_detection_hold_s` | `2.0` | YOLO car 조건 유지시간 |
 | `enable_pedestrian_crossing` | `true` | YOLO person 기반 정지·재출발 |
 | `person_clear_confirmation_s` | `0.5` | person 미검출 후 재출발 확정 시간 |
-| `enable_control` | `false` | 차량 제어 UDP 송신 |
+| `enable_control` | `true` | 차량 제어 UDP 송신 |
 
 커스텀 모델은 저장소에 포함되지 않는다. `Sensor/null.pt`에 복사하거나 절대 경로로
 지정한다.
