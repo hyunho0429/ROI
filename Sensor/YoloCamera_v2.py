@@ -17,8 +17,7 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 import time
 import cv2
 import numpy as np
-from lib.define.Camera import Camera
-from lib.network.UDP import Receiver
+from Sensor.CameraUDP import LatestCameraReceiver
 
 # 공통 IP 설정 (기존 기본값은 유지하고 환경변수/CLI로 덮어쓸 수 있다.)
 IP = os.environ.get("MORAI_YOLO_CAM_IP", "0.0.0.0")
@@ -60,22 +59,19 @@ def main(ip=IP, port=PORT, base_model_path=BASE_MODEL_PATH,
         print(f"[{CAM_NAME}] 경고: 커스텀 모델을 찾지 못해 기본 YOLO만 실행합니다: "
               f"{resolved_custom_path}")
 
-    cam_data = Receiver(ip, port, Camera())
+    cam_data = LatestCameraReceiver(ip, port)
+    last_frame_sequence = 0
     
     print(f"[{CAM_NAME}] MORAI UDP 카메라 연결 시도 중... ({ip}:{port})")
 
     while True:
         try:
-            data = cam_data.get_data()
-            if data is None:
-                time.sleep(0.01)
+            frame = cam_data.wait_for_latest(last_frame_sequence, timeout=0.1)
+            if frame is None:
                 continue
+            last_frame_sequence = frame.sequence
 
-            # 데이터 유효성 검사
-            if not hasattr(data, "image") or not data.image.data:
-                continue
-
-            image_np = np.frombuffer(data.image.data, dtype=np.uint8)
+            image_np = np.frombuffer(frame.jpeg_data, dtype=np.uint8)
             if image_np.size == 0:
                 continue
 
@@ -125,6 +121,7 @@ def main(ip=IP, port=PORT, base_model_path=BASE_MODEL_PATH,
             print(f"[{CAM_NAME}] Error: {e}")
             time.sleep(0.01)
 
+    cam_data.close()
     cv2.destroyAllWindows()
 
 if __name__ == "__main__":

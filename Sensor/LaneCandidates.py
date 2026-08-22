@@ -80,8 +80,7 @@ import traceback
 import cv2
 import numpy as np
 
-from lib.define.Camera import Camera
-from lib.network.UDP import Receiver
+from Sensor.CameraUDP import LatestCameraReceiver
 
 
 # 모델 입력 크기는 ONNX에 고정되어 있다 (input "images": [1, 3, 360, 640]).
@@ -1052,23 +1051,23 @@ def run_offline(source, save_path=None, preview=True):
 IP = os.environ.get("MORAI_CAM_IP", "0.0.0.0")
 PORT = int(os.environ.get("MORAI_CAM_PORT", "1101"))
 latest_frame = None
+latest_frame_sequence = 0
 frame_lock = threading.Lock()
 
 
 def camera_thread_worker(ip, port):
-    global latest_frame
-    cam_receiver = Receiver(ip, port, Camera())
+    global latest_frame, latest_frame_sequence
+    cam_receiver = LatestCameraReceiver(ip, port)
+    last_received_sequence = 0
 
     while True:
         try:
-            data = cam_receiver.get_data()
-            if data is None:
-                time.sleep(0.01)
+            frame = cam_receiver.wait_for_latest(last_received_sequence, timeout=0.1)
+            if frame is None:
                 continue
-            if not hasattr(data, "image") or not data.image.data:
-                continue
+            last_received_sequence = frame.sequence
 
-            image_np = np.frombuffer(data.image.data, dtype=np.uint8)
+            image_np = np.frombuffer(frame.jpeg_data, dtype=np.uint8)
             if image_np.size == 0:
                 continue
             image = cv2.imdecode(image_np, cv2.IMREAD_COLOR)
@@ -1077,6 +1076,7 @@ def camera_thread_worker(ip, port):
 
             with frame_lock:
                 latest_frame = cv2.resize(image, (640, 480))
+                latest_frame_sequence = frame.sequence
 
         except (AttributeError, ValueError, OSError, cv2.error) as ex:
             print(f"[camera_thread_worker] recoverable error: {ex}")
@@ -1106,12 +1106,22 @@ def main(cam_ip=IP, cam_port=PORT):
     print("=" * 60)
 
     try:
+        last_processed_sequence = 0
         while True:
             with frame_lock:
-                if latest_frame is None:
-                    time.sleep(0.01)
-                    continue
-                img_frame = latest_frame.copy()
+                if (latest_frame is None
+                        or latest_frame_sequence <= last_processed_sequence):
+                    img_frame = None
+                    frame_sequence = last_processed_sequence
+                else:
+                    img_frame = latest_frame.copy()
+                    frame_sequence = latest_frame_sequence
+
+            if img_frame is None:
+                time.sleep(0.01)
+                continue
+
+            last_processed_sequence = frame_sequence
 
             panel, _info = process_frame(detector, img_frame)
             cv2.imshow(WINDOW_TITLE, panel)
