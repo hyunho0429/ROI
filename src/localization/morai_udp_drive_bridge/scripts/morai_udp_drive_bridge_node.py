@@ -35,7 +35,7 @@ class MoraiUdpDriveBridge:
         self.status_port = int(rospy.get_param("~status_port", COMPETITION_STATUS_PORT))
         self.status_topic = rospy.get_param("~status_topic", "/Ego_topic")
         self.status_frame_id = rospy.get_param("~status_frame_id", "map")
-        self.control_remote_ip = rospy.get_param("~control_remote_ip", "192.168.0.151")
+        self.control_remote_ip = rospy.get_param("~control_remote_ip", "192.168.0.148")
         self.control_remote_port = int(rospy.get_param("~control_remote_port", 9093))
         self.control_bind_ip = rospy.get_param("~control_bind_ip", "0.0.0.0")
         self.control_bind_port = int(rospy.get_param("~control_bind_port", 0))

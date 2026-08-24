@@ -56,7 +56,7 @@ PID의 양수 출력은 `accel`, 음수 출력은 `brake`로 분리한다. Pure 
 
 아래의 `192.168.56.x` 값은 기존 단독 Python 실행 예제의 네트워크 구성이다.
 통합 launch는 `feat/lidar` 설정을 이어받아 로컬 센서 수신에는
-`bind_ip=0.0.0.0`, 기본 제어 목적지에는 `morai_host_ip=192.168.0.151`을 사용한다.
+`bind_ip=0.0.0.0`, 기본 제어 목적지에는 `morai_host_ip=192.168.0.148`을 사용한다.
 MORAI 센서의 Destination IP는 기존 `feat/lidar`에서 사용하던 Ubuntu PC의 실제
 IP를 그대로 유지하면 되며 통합 launch 명령에 로컬 IP를 따로 넣지 않는다.
 
@@ -284,7 +284,7 @@ bind하지 않도록 Stanley만 센서를 수신하고 LiDAR는 융합 자세 UD
 ```bash
 # terminal 1
 roslaunch path_planning morai_stanley_udp.launch \
-  control_ip:=192.168.0.151
+  control_ip:=192.168.0.148
 
 # terminal 2
 roslaunch path_planning morai_lidar_rviz.launch \
@@ -782,7 +782,7 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
 | `bind_ip` | `0.0.0.0` | LiDAR와 카메라의 공통 로컬 UDP bind 주소 |
 | `competition_status_host_port` | `9080` | MORAI Competition Status 송신(Host/Source) 포트 |
 | `competition_status_port` | `9081` | ROS PC Competition Status 수신(Destination) 포트 |
-| `morai_host_ip` | `192.168.0.151` | Ego Ctrl Cmd를 보낼 MORAI PC 주소 |
+| `morai_host_ip` | `192.168.0.148` | Ego Ctrl Cmd를 보낼 MORAI PC 주소 |
 | `enable_control` | `true` | 차량 제어 UDP 송신 여부 |
 | `target_speed_mps` | `6.0` | Pure Pursuit 목표 속도 (`21.6 km/h`) |
 | `rviz` | `true` | LiDAR RViz 실행 여부 |

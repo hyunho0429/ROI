@@ -5,7 +5,7 @@
   <arg name="bind_ip" default="0.0.0.0" />
   <arg name="competition_status_host_port" default="9080" />
   <arg name="competition_status_port" default="9081" />
-  <arg name="morai_host_ip" default="192.168.0.151" />
+  <arg name="morai_host_ip" default="192.168.0.148" />
   <arg name="control_remote_port" default="9093" />
   <arg name="target_speed_mps" default="6.0" />
   <arg name="lidar_x_m" default="0.0" />

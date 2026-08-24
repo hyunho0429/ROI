@@ -15,7 +15,7 @@ localization이나 detection 노드가 직접 열지 않는다.
 
 ## 네트워크
 
-현재 문서의 예시는 MORAI PC 192.168.0.151, Ubuntu PC 192.168.0.200이다.
+현재 문서의 예시는 MORAI PC 192.168.0.148, Ubuntu PC 192.168.0.185이다.
 실제 주소는 다음으로 확인한다.
 
     ip -4 addr

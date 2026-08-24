@@ -22,7 +22,7 @@ from lib.define.Camera import Camera
 from lib.network.UDP import Receiver
 
 # 공통 IP 설정
-IP = "192.168.0.200"
+IP = "192.168.0.185"
 
 CAMERA_CONFIGS = [
     {"name": "Cam 1", "port": 1101},

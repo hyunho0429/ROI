@@ -10,6 +10,6 @@ source devel/setup.bash
 
 
 roslaunch morai_bringup morai_udp_ekf_purepursuit.launch \
-  morai_host_ip:=192.168.0.151 \
+  morai_host_ip:=192.168.0.148 \
   control_remote_port:=9093 \
   enable_control:=false

@@ -17,7 +17,7 @@ LIDAR_POSE_IP = "127.0.0.1"
 LIDAR_POSE_PORT = 4012
 # Ego Ctrl Cmd travels in the opposite direction: algorithm Destination Port
 # (UDP source) -> MORAI Host Port (UDP destination).
-CONTROL_IP = "192.168.0.151"
+CONTROL_IP = "192.168.0.148"
 CONTROL_PORT = 9093
 CONTROL_DESTINATION_PORT = 9094
 TARGET_SPEED_KMH = 40.0

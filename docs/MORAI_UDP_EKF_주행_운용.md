@@ -47,7 +47,7 @@ MORAI 버전이나 Network Settings에 다른 포트가 표시되면 launch 인�
 특히 Cmd Control destination port는 `9093` 또는 설치된 예제의 `9096`일 수 있으므로
 MORAI 설정 화면과 일치시켜야 한다.
 
-MORAI Host IP는 현재 기본값 `192.168.0.151`이다. Ubuntu와 MORAI PC가 다른 네트워크라면
+MORAI Host IP는 현재 기본값 `192.168.0.148`이다. Ubuntu와 MORAI PC가 다른 네트워크라면
 실제 MORAI PC 주소로 바꾼다.
 
 ## 3. Ubuntu 빌드
@@ -70,7 +70,7 @@ rospack find morai_msgs
 
 ```bash
 roslaunch morai_bringup morai_udp_ekf_purepursuit.launch \
-  morai_host_ip:=192.168.0.151 \
+  morai_host_ip:=192.168.0.148 \
   control_remote_port:=9093 \
   enable_control:=false
 ```
@@ -104,7 +104,7 @@ rosrun tf tf_echo map base_link
 
 ```bash
 roslaunch morai_bringup morai_udp_ekf_purepursuit.launch \
-  morai_host_ip:=192.168.0.151 \
+  morai_host_ip:=192.168.0.148 \
   control_remote_port:=9093 \
   target_speed_mps:=6.0 \
   wheelbase_m:=3.0 \

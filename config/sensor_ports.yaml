@@ -8,9 +8,9 @@ transport:
   udp_fallback_enabled: true
 
 network:
-  morai_host_ip: "192.168.0.151"
+  morai_host_ip: "192.168.0.148"
   ubuntu_bind_ip: "0.0.0.0"
-  ubuntu_algorithm_ip: "192.168.0.200"
+  ubuntu_algorithm_ip: "192.168.0.185"
 
 udp_fallback:
   cameras:

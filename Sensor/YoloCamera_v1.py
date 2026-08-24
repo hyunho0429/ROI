@@ -21,7 +21,7 @@ from lib.define.Camera import Camera
 from lib.network.UDP import Receiver
 
 # 공통 IP 설정
-IP = "192.168.0.200"
+IP = "192.168.0.185"
 
 # Cam 4 전용 설정 (Port: 1131)
 CAM_NAME = "Cam 4"

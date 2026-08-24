@@ -19,7 +19,7 @@ from lib.define.Camera import Camera
 from lib.network.UDP import Receiver
 
 # IP 및 4번 카메라 설정
-IP = "192.168.0.200"
+IP = "192.168.0.185"
 PORT = 1131  # Cam 4 포트
 
 

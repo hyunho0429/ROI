@@ -20,7 +20,7 @@ from lib.define.Camera import Camera
 from lib.network.UDP import Receiver
 
 # 공통 IP 설정
-IP = "192.168.0.200"
+IP = "192.168.0.185"
 
 # 카메라별 포트 및 설정 정의 (순서대로 1, 2, 3, 4분할에 매칭)
 CAMERA_CONFIGS = [
