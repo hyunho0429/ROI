@@ -11,6 +11,7 @@
   <arg name="dynamic_obstacle_topic" default="/detection/dynamic_obstacles" />
   <arg name="merge_available_topic" default="/perception/merge_gap/available" />
   <arg name="merge_unavailable_topic" default="/perception/merge_gap/unavailable" />
+  <arg name="merge_adjacent_obstacle_topic" default="/perception/merge_gap/left_lane_obstacles" />
   <arg name="merge_highway_gate_required" default="false" />
   <arg name="highway_gate_topic" default="/perception/camera/highway_environment" />
   <arg name="lidar_x_m" default="0.0" />
@@ -72,6 +73,9 @@
     <arg name="confirmation_scans" value="$(arg confirmation_scans)" />
     <arg name="available_topic" value="$(arg merge_available_topic)" />
     <arg name="unavailable_topic" value="$(arg merge_unavailable_topic)" />
+    <arg name="adjacent_obstacle_topic" value="$(arg merge_adjacent_obstacle_topic)" />
+    <arg name="obstacle_state_topic" value="$(arg obstacle_state_topic)" />
+    <arg name="odometry_topic" value="$(arg odometry_topic)" />
     <arg name="highway_gate_required" value="$(arg merge_highway_gate_required)" />
     <arg name="highway_gate_topic" value="$(arg highway_gate_topic)" />
   </include>

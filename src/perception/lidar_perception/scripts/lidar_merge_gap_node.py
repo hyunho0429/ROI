@@ -3,16 +3,20 @@
 
 import json
 import math
+import threading
 import time
 
 import rospy
+from nav_msgs.msg import Odometry
 from std_msgs.msg import Bool, String
 from visualization_msgs.msg import Marker, MarkerArray
 
+from lidar_perception.msg import MergeGapObstacle, MergeGapObstacleArray
 from lidar_perception.lidar_merge_gap import (
     MergeGapTracker,
     assess_tracked_merge_gaps,
     format_tracked_merge_gap_status,
+    select_map_obstacles_in_adjacent_lane,
 )
 
 
@@ -47,6 +51,16 @@ class MergeGapNode:
         self.unavailable_topic = _param(
             "unavailable_topic", "/perception/merge_gap/unavailable"
         )
+        self.adjacent_obstacle_topic = _param(
+            "adjacent_obstacle_topic",
+            "/perception/merge_gap/left_lane_obstacles",
+        )
+        self.obstacle_state_topic = _param(
+            "obstacle_state_topic", "/detection/obstacle_states"
+        )
+        self.odometry_topic = _param(
+            "odometry_topic", "/localization/odometry"
+        )
         self.highway_gate_required = bool(
             _param("highway_gate_required", False)
         )
@@ -72,6 +86,7 @@ class MergeGapNode:
         self.time_headway_s = float(_param("time_headway_s", 1.5))
         self.minimum_ttc_s = float(_param("minimum_ttc_s", 3.0))
         self.stale_timeout_s = float(_param("stale_timeout_s", 0.5))
+        self.map_state_timeout_s = float(_param("map_state_timeout_s", 0.5))
         self.log_interval_s = float(_param("log_interval_s", 1.0))
         self.marker_lifetime_s = float(_param("marker_lifetime_s", 0.25))
         confirmation_scans = int(_param("confirmation_scans", 3))
@@ -79,12 +94,20 @@ class MergeGapNode:
             raise ValueError("stale_timeout_s must be positive")
         if self.highway_gate_timeout_s <= 0.0:
             raise ValueError("highway_gate_timeout_s must be positive")
+        if self.map_state_timeout_s <= 0.0:
+            raise ValueError("map_state_timeout_s must be positive")
         self.confirmation = MergeGapTracker(confirmation_scans)
         self.last_input_at = None
         self.stale_published = False
         self.highway_gate_value = not self.highway_gate_required
         self.last_highway_gate_at = None
         self.outputs_active = False
+        self.map_state_lock = threading.Lock()
+        self.latest_obstacle_states = None
+        self.latest_obstacle_state_stamp = None
+        self.latest_obstacle_state_at = None
+        self.latest_map_pose = None
+        self.latest_map_pose_at = None
 
         self.result_publisher = rospy.Publisher(
             self.result_topic, String, queue_size=1
@@ -97,6 +120,11 @@ class MergeGapNode:
         )
         self.unavailable_publisher = rospy.Publisher(
             self.unavailable_topic, Bool, queue_size=1
+        )
+        self.adjacent_obstacle_publisher = rospy.Publisher(
+            self.adjacent_obstacle_topic,
+            MergeGapObstacleArray,
+            queue_size=1,
         )
         self.subscriber = rospy.Subscriber(
             self.input_topic,
@@ -112,6 +140,18 @@ class MergeGapNode:
                 self._highway_gate_callback,
                 queue_size=1,
             )
+        self.obstacle_state_subscriber = rospy.Subscriber(
+            self.obstacle_state_topic,
+            String,
+            self._obstacle_state_callback,
+            queue_size=1,
+        )
+        self.odometry_subscriber = rospy.Subscriber(
+            self.odometry_topic,
+            Odometry,
+            self._odometry_callback,
+            queue_size=10,
+        )
         self.stale_timer = rospy.Timer(
             rospy.Duration(min(0.2, 0.5 * self.stale_timeout_s)),
             self._stale_callback,
@@ -134,9 +174,10 @@ class MergeGapNode:
         )
         rospy.logwarn(
             "LEFT merge state outputs: available=%s unavailable=%s "
-            "highway_gate_required=%s gate_topic=%s",
+            "obstacles=%s highway_gate_required=%s gate_topic=%s",
             self.available_topic,
             self.unavailable_topic,
+            self.adjacent_obstacle_topic,
             self.highway_gate_required,
             self.highway_gate_topic,
         )
@@ -152,6 +193,122 @@ class MergeGapNode:
         unavailable = Bool(data=not left_available)
         self.available_publisher.publish(available)
         self.unavailable_publisher.publish(unavailable)
+
+    def _odometry_callback(self, message):
+        orientation = message.pose.pose.orientation
+        sin_yaw = 2.0 * (
+            orientation.w * orientation.z + orientation.x * orientation.y
+        )
+        cos_yaw = 1.0 - 2.0 * (
+            orientation.y * orientation.y + orientation.z * orientation.z
+        )
+        position = message.pose.pose.position
+        pose = (
+            float(position.x),
+            float(position.y),
+            math.atan2(sin_yaw, cos_yaw),
+        )
+        if not all(math.isfinite(value) for value in pose):
+            rospy.logwarn_throttle(1.0, "Invalid map odometry for merge obstacles")
+            return
+        with self.map_state_lock:
+            self.latest_map_pose = pose
+            self.latest_map_pose_at = time.monotonic()
+
+    def _obstacle_state_callback(self, message):
+        try:
+            payload = json.loads(message.data)
+            if not isinstance(payload, dict):
+                raise ValueError("obstacle state payload must be an object")
+            obstacles = payload.get("obstacles")
+            if not isinstance(obstacles, list):
+                raise ValueError("obstacles must be a list")
+            timestamp = float(payload.get("timestamp", 0.0))
+            if not math.isfinite(timestamp):
+                raise ValueError("obstacle timestamp must be finite")
+        except (TypeError, ValueError, json.JSONDecodeError) as error:
+            rospy.logwarn_throttle(1.0, "Invalid obstacle state payload: %s", error)
+            return
+        with self.map_state_lock:
+            self.latest_obstacle_states = obstacles
+            self.latest_obstacle_state_stamp = timestamp
+            self.latest_obstacle_state_at = time.monotonic()
+
+    def _publish_adjacent_obstacles(self, assessment):
+        if not assessment.get("confirmed_available", False):
+            return
+
+        output = MergeGapObstacleArray()
+        output.header.stamp = rospy.Time.now()
+        output.header.frame_id = "map"
+        output.side = "left"
+        output.valid = True
+        output.gap_available = True
+        output.gap_reason = str(assessment.get("reason", "available"))
+
+        now = time.monotonic()
+        with self.map_state_lock:
+            states = (
+                list(self.latest_obstacle_states)
+                if self.latest_obstacle_states is not None
+                else None
+            )
+            state_stamp = self.latest_obstacle_state_stamp
+            state_at = self.latest_obstacle_state_at
+            pose = self.latest_map_pose
+            pose_at = self.latest_map_pose_at
+        if (
+            states is None
+            or state_at is None
+            or pose is None
+            or pose_at is None
+            or now - state_at > self.map_state_timeout_s
+            or now - pose_at > self.map_state_timeout_s
+        ):
+            rospy.logwarn_throttle(
+                1.0,
+                "Merge gap is available, but map obstacle state or odometry is stale",
+            )
+            return
+
+        try:
+            selected = select_map_obstacles_in_adjacent_lane(
+                states,
+                pose[0],
+                pose[1],
+                pose[2],
+                "left",
+                self.lane_width_m,
+                self.vehicle_width_m,
+                self.lane_lateral_allowance_m,
+                self.detection_range_m,
+            )
+            if state_stamp is not None and state_stamp > 0.0:
+                output.header.stamp = rospy.Time.from_sec(state_stamp)
+            for state in selected:
+                obstacle = MergeGapObstacle()
+                obstacle.id = int(state["id"])
+                obstacle.center_x_map = float(state["center_x_map"])
+                obstacle.center_y_map = float(state["center_y_map"])
+                obstacle.length = float(state["length"])
+                obstacle.width = float(state["width"])
+                obstacle.velocity_x_map = float(state["velocity_x_map"])
+                obstacle.velocity_y_map = float(state["velocity_y_map"])
+                obstacle.speed_mps = float(state["speed_mps"])
+                obstacle.motion_state = str(state["motion_state"])
+                obstacle.yaw = float(state["yaw"])
+                obstacle.yaw_deg = float(state["yaw_deg"])
+                obstacle.yaw_valid = bool(state["yaw_valid"])
+                obstacle.yaw_source = str(state["yaw_source"])
+                output.obstacles.append(obstacle)
+        except (KeyError, TypeError, ValueError) as error:
+            rospy.logwarn_throttle(
+                1.0, "Cannot publish merge lane obstacles: %s", error
+            )
+            return
+
+        output.obstacle_count = len(output.obstacles)
+        self.adjacent_obstacle_publisher.publish(output)
 
     def _highway_gate_active(self):
         if not self.highway_gate_required:
@@ -237,6 +394,7 @@ class MergeGapNode:
             String(data=json.dumps(_json_safe(payload), ensure_ascii=False))
         )
         self._publish_binary_states(assessments)
+        self._publish_adjacent_obstacles(assessments["left"])
         self.marker_publisher.publish(self._markers(assessments))
         self.outputs_active = True
 

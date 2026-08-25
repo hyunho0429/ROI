@@ -6,6 +6,73 @@ import math
 LANES = (("left", 1.0), ("right", -1.0))
 
 
+def select_map_obstacles_in_adjacent_lane(
+    obstacles,
+    ego_x_map,
+    ego_y_map,
+    ego_yaw,
+    side,
+    lane_width_m,
+    vehicle_width_m,
+    lane_lateral_allowance_m,
+    detection_range_m,
+):
+    """Select map-frame objects overlapping an ego-relative adjacent lane.
+
+    The returned dictionaries are the original enriched obstacle states. The
+    selector only converts each map center into the current ego frame for lane
+    membership; published positions, velocities, and yaw remain in ``map``.
+    """
+    if side not in ("left", "right"):
+        raise ValueError("side must be left or right")
+    lane_width = float(lane_width_m)
+    vehicle_width = float(vehicle_width_m)
+    lane_allowance = float(lane_lateral_allowance_m)
+    detection_range = float(detection_range_m)
+    pose_values = (
+        float(ego_x_map),
+        float(ego_y_map),
+        float(ego_yaw),
+        lane_width,
+        vehicle_width,
+        lane_allowance,
+        detection_range,
+    )
+    if not all(math.isfinite(value) for value in pose_values):
+        raise ValueError("ego pose and lane parameters must be finite")
+    if lane_width <= 0.0 or vehicle_width <= 0.0 or detection_range <= 0.0:
+        raise ValueError("lane, vehicle width, and detection range must be positive")
+    if lane_allowance < 0.0:
+        raise ValueError("lane lateral allowance cannot be negative")
+
+    lateral_sign = 1.0 if side == "left" else -1.0
+    lane_center_y = lateral_sign * lane_width
+    center_tolerance = (
+        0.5 * max(0.0, lane_width - vehicle_width) + lane_allowance
+    )
+    cosine = math.cos(float(ego_yaw))
+    sine = math.sin(float(ego_yaw))
+    selected = []
+    for obstacle in obstacles:
+        center_x = float(obstacle["center_x_map"])
+        center_y = float(obstacle["center_y_map"])
+        width = max(0.0, float(obstacle.get("width", 0.0)))
+        if not all(math.isfinite(value) for value in (center_x, center_y, width)):
+            raise ValueError("map obstacle contains a non-finite value")
+        delta_x = center_x - float(ego_x_map)
+        delta_y = center_y - float(ego_y_map)
+        longitudinal = cosine * delta_x + sine * delta_y
+        lateral = -sine * delta_x + cosine * delta_y
+        if abs(longitudinal) > detection_range:
+            continue
+        if abs(lateral - lane_center_y) > center_tolerance + 0.5 * width:
+            continue
+        selected.append((longitudinal, obstacle))
+
+    selected.sort(key=lambda item: item[0])
+    return [obstacle for _, obstacle in selected]
+
+
 def _reason(side_obstacle, front_clearance, rear_clearance, longitudinal_margin,
             lateral_clearance, lateral_margin):
     if side_obstacle is not None:

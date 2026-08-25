@@ -803,6 +803,60 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
 | `person_clear_confirmation_s` | `0.5` | person 미검출 후 재출발까지 연속 확인 시간 |
 | `merge_available_topic` | `/perception/merge_gap/available` | 왼쪽 차선 끼어들기 가능 토픽 |
 | `merge_unavailable_topic` | `/perception/merge_gap/unavailable` | 왼쪽 차선 끼어들기 불가능 토픽 |
+| `merge_adjacent_obstacle_topic` | `/perception/merge_gap/left_lane_obstacles` | 끼어들기 판단 중 왼쪽 옆 차선 객체 상태 배열 |
+
+### 끼어들기 대상 차선 객체 상태
+
+카메라의 고속도로 환경 게이트가 활성화되고 왼쪽 끼어들기 공간이 최종적으로
+`available=true`로 확정된 동안에만 옆 차선 차량 정보가 다음 전용 토픽으로
+발행된다. `CHECKING`, `unavailable`, 게이트 비활성 상태에서는 이 객체 토픽을
+발행하지 않는다. 기존 끼어들기 가능/불가능
+`Bool` 토픽과 정적·동적 장애물 토픽은 변경하지 않는다.
+
+| 기능 | 토픽 | 메시지 |
+|---|---|---|
+| 왼쪽 차선 끼어들기 가능 | `/perception/merge_gap/available` | `std_msgs/Bool` |
+| 왼쪽 차선 끼어들기 불가능 | `/perception/merge_gap/unavailable` | `std_msgs/Bool` |
+| 왼쪽 옆 차선 객체 정보 | `/perception/merge_gap/left_lane_obstacles` | `lidar_perception/MergeGapObstacleArray` |
+
+`MergeGapObstacleArray`의 상위 필드는 다음과 같다.
+
+| 필드 | 설명 |
+|---|---|
+| `header` | `map` 좌표계와 객체 상태 생성 시각 |
+| `valid` | 발행 시 항상 `true`; 추적 상태나 odometry가 stale이면 발행하지 않음 |
+| `side` | 현재는 `left` 고정 |
+| `gap_available` | 발행 시 항상 `true`; 확인 스캔까지 통과한 상태 |
+| `gap_reason` | 가능·불가능 또는 데이터 무효 사유 |
+| `obstacle_count` | 왼쪽 옆 차선에서 선택된 객체 수 |
+| `obstacles` | `MergeGapObstacle[]` 객체 배열 |
+
+각 `MergeGapObstacle`에는 다음 데이터가 들어간다. 모든 위치·속도·yaw는
+`map` 좌표계를 기준으로 한다.
+
+| 필드 | 설명 |
+|---|---|
+| `id` | Kalman-Hungarian Tracking ID |
+| `center_x_map`, `center_y_map` | map 기준 장애물 중심점 [m] |
+| `length`, `width` | Bounding Box 길이와 폭 [m] |
+| `velocity_x_map`, `velocity_y_map` | map X/Y 방향 속도 [m/s] |
+| `speed_mps` | `hypot(velocity_x_map, velocity_y_map)` [m/s] |
+| `motion_state` | `UNKNOWN`, `STATIC`, `MOVING`, `STOPPED` |
+| `yaw` | 이동 방향 또는 BBox 방향 [rad] |
+| `yaw_deg` | yaw 디버깅 값 [deg] |
+| `yaw_valid` | yaw 사용 가능 여부 |
+| `yaw_source` | `BBOX`, `VELOCITY`, `HOLD`, `UNKNOWN` |
+
+이 토픽은 기존 `/detection/obstacle_states`의 map 추적·상태 결과를 왼쪽 옆
+차선으로 필터링한다. 별도의 유클리디안 클러스터링이나 Hungarian 추적기를
+추가로 실행하지 않는다. 주행팀은 과거 객체 메시지를 현재 상태로 오인하지 않도록
+반드시 `/perception/merge_gap/available`의 최신 `Bool` 값과 함께 사용한다.
+
+```bash
+rostopic echo /perception/merge_gap/left_lane_obstacles
+rosmsg show lidar_perception/MergeGapObstacleArray
+rosmsg show lidar_perception/MergeGapObstacle
+```
 
 통합 주행 브리지는 기존 일반 EgoVehicleStatus 포트 `909` 대신 Competition
 Vehicle Status를 `9081`에서 받는다. 두 상태의 `#MoraiInfo$` 패킷 구조는 같지만

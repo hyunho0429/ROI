@@ -10,6 +10,9 @@
   <arg name="confirmation_scans" default="3" />
   <arg name="available_topic" default="/perception/merge_gap/available" />
   <arg name="unavailable_topic" default="/perception/merge_gap/unavailable" />
+  <arg name="adjacent_obstacle_topic" default="/perception/merge_gap/left_lane_obstacles" />
+  <arg name="obstacle_state_topic" default="/detection/obstacle_states" />
+  <arg name="odometry_topic" default="/localization/odometry" />
   <arg name="highway_gate_required" default="false" />
   <arg name="highway_gate_topic" default="/perception/camera/highway_environment" />
   <arg name="highway_gate_timeout_s" default="0.5" />
@@ -23,6 +26,9 @@
     <param name="marker_topic" value="/morai/lidar/merge_gap/markers" />
     <param name="available_topic" value="$(arg available_topic)" />
     <param name="unavailable_topic" value="$(arg unavailable_topic)" />
+    <param name="adjacent_obstacle_topic" value="$(arg adjacent_obstacle_topic)" />
+    <param name="obstacle_state_topic" value="$(arg obstacle_state_topic)" />
+    <param name="odometry_topic" value="$(arg odometry_topic)" />
     <param name="highway_gate_required" value="$(arg highway_gate_required)" />
     <param name="highway_gate_topic" value="$(arg highway_gate_topic)" />
     <param name="highway_gate_timeout_s" value="$(arg highway_gate_timeout_s)" />
@@ -38,6 +44,7 @@
     <param name="minimum_ttc_s" value="$(arg minimum_ttc_s)" />
     <param name="confirmation_scans" value="$(arg confirmation_scans)" />
     <param name="stale_timeout_s" value="0.5" />
+    <param name="map_state_timeout_s" value="0.5" />
     <param name="log_interval_s" value="1.0" />
   </node>
 </launch>

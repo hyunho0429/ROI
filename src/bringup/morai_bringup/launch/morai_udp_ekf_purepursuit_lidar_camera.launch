@@ -15,6 +15,7 @@
   <arg name="rviz" default="true" />
   <arg name="merge_available_topic" default="/perception/merge_gap/available" />
   <arg name="merge_unavailable_topic" default="/perception/merge_gap/unavailable" />
+  <arg name="merge_adjacent_obstacle_topic" default="/perception/merge_gap/left_lane_obstacles" />
 
   <!-- Camera defaults are preserved from feature-camera: lane=1101, YOLO=1131. -->
   <arg name="camera_stack_root" default="$(env HOME)/morai_ws/src/ROI" />
@@ -61,6 +62,7 @@
     <arg name="rviz" value="$(arg rviz)" />
     <arg name="merge_available_topic" value="$(arg merge_available_topic)" />
     <arg name="merge_unavailable_topic" value="$(arg merge_unavailable_topic)" />
+    <arg name="merge_adjacent_obstacle_topic" value="$(arg merge_adjacent_obstacle_topic)" />
     <arg name="merge_highway_gate_required" value="$(arg merge_highway_gate_required)" />
     <arg name="highway_gate_topic" value="$(arg highway_environment_topic)" />
     <arg name="pedestrian_stop_topic" value="$(arg pedestrian_stop_topic)" />

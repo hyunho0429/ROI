@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import os
+import math
 import sys
 import unittest
 
@@ -15,6 +16,7 @@ from lidar_perception.lidar_merge_gap import (
     assess_tracked_merge_gaps,
     format_merge_gap_status,
     format_tracked_merge_gap_status,
+    select_map_obstacles_in_adjacent_lane,
 )
 
 
@@ -66,6 +68,38 @@ def _assess_tracks(tracks, minimum_ttc=3.0):
         detection_range_m=40.0,
         time_headway_s=1.5,
         minimum_ttc_s=minimum_ttc,
+    )
+
+
+def _map_obstacle(track_id, center_x, center_y, width=1.8):
+    return {
+        "id": track_id,
+        "center_x_map": float(center_x),
+        "center_y_map": float(center_y),
+        "length": 4.0,
+        "width": float(width),
+        "velocity_x_map": 1.0,
+        "velocity_y_map": 0.0,
+        "speed_mps": 1.0,
+        "motion_state": "MOVING",
+        "yaw": 0.0,
+        "yaw_deg": 0.0,
+        "yaw_valid": True,
+        "yaw_source": "VELOCITY",
+    }
+
+
+def _select_left(obstacles, ego_x=0.0, ego_y=0.0, ego_yaw=0.0):
+    return select_map_obstacles_in_adjacent_lane(
+        obstacles=obstacles,
+        ego_x_map=ego_x,
+        ego_y_map=ego_y,
+        ego_yaw=ego_yaw,
+        side="left",
+        lane_width_m=3.5,
+        vehicle_width_m=1.892,
+        lane_lateral_allowance_m=0.4,
+        detection_range_m=40.0,
     )
 
 
@@ -184,6 +218,34 @@ class TrackedMergeGapTest(unittest.TestCase):
 
         self.assertIn("LEFT=AVAILABLE", text)
         self.assertIn("ttc=infs", text)
+
+
+class MapAdjacentLaneSelectionTest(unittest.TestCase):
+    def test_selects_only_left_lane_objects_in_range(self):
+        selected = _select_left(
+            [
+                _map_obstacle(1, 12.0, 3.5),
+                _map_obstacle(2, -8.0, 3.4),
+                _map_obstacle(3, 5.0, -3.5),
+                _map_obstacle(4, 5.0, 0.0),
+                _map_obstacle(5, 45.0, 3.5),
+            ]
+        )
+
+        self.assertEqual([obstacle["id"] for obstacle in selected], [2, 1])
+
+    def test_uses_ego_heading_to_find_map_frame_left_lane(self):
+        selected = _select_left(
+            [
+                _map_obstacle(10, 6.5, 25.0),
+                _map_obstacle(11, 13.5, 25.0),
+            ],
+            ego_x=10.0,
+            ego_y=20.0,
+            ego_yaw=0.5 * math.pi,
+        )
+
+        self.assertEqual([obstacle["id"] for obstacle in selected], [10])
 
 
 if __name__ == "__main__":
