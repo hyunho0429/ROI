@@ -5,8 +5,6 @@
   <arg name="bind_ip" default="0.0.0.0" />
   <arg name="competition_status_host_port" default="9080" />
   <arg name="competition_status_port" default="9081" />
-  <!-- LiveLaneOracle synchronizes camera/status using simulator packet time. -->
-  <arg name="competition_status_use_packet_time" default="true" />
   <arg name="morai_host_ip" default="192.168.0.148" />
   <arg name="control_remote_port" default="9093" />
   <arg name="target_speed_mps" default="6.0" />
@@ -25,12 +23,6 @@
   <arg name="camera_ip" default="$(arg bind_ip)" />
   <arg name="enable_lane" default="false" />
   <arg name="lane_port" default="1101" />
-  <arg name="enable_hd_map_lane_oracle" default="true" />
-  <arg name="mgeo_path" default="$(arg camera_stack_root)/src/path_planning/mgeo/R_KR_PR_K-city_2025" />
-  <arg name="cam_set_path" default="$(arg camera_stack_root)/Sensor/cam_set.json" />
-  <arg name="lane_oracle_sensor_id" default="1" />
-  <arg name="lane_oracle_overlay" default="false" />
-  <arg name="ego_status_topic" default="/Ego_topic" />
   <arg name="enable_yolo" default="true" />
   <arg name="yolo_port" default="1131" />
   <arg name="base_model_path" default="yolov8n.pt" />
@@ -45,8 +37,8 @@
   <arg name="highway_environment_topic" default="/perception/camera/highway_environment" />
   <arg name="enable_highway_gate" default="$(arg enable_yolo)" />
   <arg name="merge_highway_gate_required" default="$(arg enable_highway_gate)" />
-  <!-- Highway/merge gate = YOLO car AND HD-map left dashed boundary. -->
-  <arg name="require_dashed_lane" default="true" />
+  <!-- 현재 false: car만 사용. 점선 인식 구현 후 true로 변경. -->
+  <arg name="require_dashed_lane" default="false" />
   <arg name="car_detection_hold_s" default="2.0" />
   <arg name="enable_pedestrian_crossing" default="$(arg enable_yolo)" />
   <arg name="pedestrian_stop_topic" default="/perception/pedestrian_crossing/stop_required" />
@@ -60,7 +52,6 @@
     <arg name="bind_ip" value="$(arg bind_ip)" />
     <arg name="competition_status_host_port" value="$(arg competition_status_host_port)" />
     <arg name="competition_status_port" value="$(arg competition_status_port)" />
-    <arg name="competition_status_use_packet_time" value="$(arg competition_status_use_packet_time)" />
     <arg name="morai_host_ip" value="$(arg morai_host_ip)" />
     <arg name="control_remote_port" value="$(arg control_remote_port)" />
     <arg name="target_speed_mps" value="$(arg target_speed_mps)" />
@@ -82,12 +73,6 @@
     <arg name="camera_ip" value="$(arg camera_ip)" />
     <arg name="enable_lane" value="$(arg enable_lane)" />
     <arg name="lane_port" value="$(arg lane_port)" />
-    <arg name="enable_hd_map_lane_oracle" value="$(arg enable_hd_map_lane_oracle)" />
-    <arg name="mgeo_path" value="$(arg mgeo_path)" />
-    <arg name="cam_set_path" value="$(arg cam_set_path)" />
-    <arg name="lane_oracle_sensor_id" value="$(arg lane_oracle_sensor_id)" />
-    <arg name="lane_oracle_overlay" value="$(arg lane_oracle_overlay)" />
-    <arg name="ego_status_topic" value="$(arg ego_status_topic)" />
     <arg name="enable_yolo" value="$(arg enable_yolo)" />
     <arg name="yolo_port" value="$(arg yolo_port)" />
     <arg name="base_model_path" value="$(arg base_model_path)" />

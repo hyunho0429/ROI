@@ -8,7 +8,6 @@
   <arg name="imu_port" default="4001" />
   <arg name="competition_status_host_port" default="9080" />
   <arg name="competition_status_port" default="9081" />
-  <arg name="competition_status_use_packet_time" default="false" />
   <arg name="ego_status_port" default="$(arg competition_status_port)" />
   <arg name="lidar_host_port" default="2000" />
   <arg name="lidar_port" default="2001" />
@@ -37,7 +36,6 @@
     <arg name="imu_port" value="$(arg imu_port)" />
     <arg name="competition_status_host_port" value="$(arg competition_status_host_port)" />
     <arg name="ego_status_port" value="$(arg ego_status_port)" />
-    <arg name="competition_status_use_packet_time" value="$(arg competition_status_use_packet_time)" />
     <arg name="morai_host_ip" value="$(arg morai_host_ip)" />
     <arg name="control_remote_port" value="$(arg control_remote_port)" />
     <arg name="control_source_port" value="$(arg control_source_port)" />

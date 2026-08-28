@@ -53,10 +53,6 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch enable_con
 | `rviz` | `true` | LiDAR RViz 표시 |
 | `enable_lane` | `false` | 차선 인식 프로세스 실행 |
 | `lane_port` | `1101` | 차선 카메라 UDP 포트 |
-| `enable_hd_map_lane_oracle` | `true` | MGeo 기반 왼쪽 점선 판정 실행 |
-| `mgeo_path` | `src/path_planning/mgeo/R_KR_PR_K-city_2025` | 오라클 MGeo 경로 |
-| `cam_set_path` | `Sensor/cam_set.json` | 전방 카메라 투영 파라미터 |
-| `lane_oracle_overlay` | `false` | HD맵 차선 오버레이 창 표시 |
 | `enable_yolo` | `true` | YOLO 프로세스 실행 |
 | `yolo_port` | `1131` | YOLO 카메라 UDP 포트 |
 | `base_model_path` | `yolov8n.pt` | 기본 YOLO 모델 |
@@ -65,8 +61,8 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch enable_con
 | `yolo_inference_size` | `320` | YOLO 추론 입력 크기(작을수록 빠르지만 소형 객체 정확도 감소) |
 | `camera_display_fps` | `0.0` | `0`은 MORAI 수신 프레임율로 즉시 표시 |
 | `yolo_cpu_threads` | `1` | YOLO에 사용하는 PyTorch CPU 스레드 수 |
-| `enable_highway_gate` | `true` | YOLO car와 점선 기반 고속도로 환경 게이트 |
-| `require_dashed_lane` | `true` | car와 MGeo 왼쪽 점선이 모두 필요 |
+| `enable_highway_gate` | `true` | YOLO 기반 고속도로 환경 게이트 |
+| `require_dashed_lane` | `false` | 점선 인식 구현 후 `true`로 전환 |
 | `car_detection_hold_s` | `2.0` | YOLO car 조건 유지시간 |
 | `enable_pedestrian_crossing` | `true` | YOLO person 기반 정지·재출발 |
 | `person_clear_confirmation_s` | `0.5` | person 미검출 후 재출발 확정 시간 |
@@ -99,25 +95,19 @@ YOLO 수신/표시와 모델 추론은 서로 다른 스레드에서 동작한�
 ## 고속도로 환경 기반 끼어들기 활성화
 
 통합 launch에서는 기본 YOLO의 COCO `car` 탐지 결과를
-`/perception/camera/car_detected`(`std_msgs/Bool`)로 발행한다. 동시에
-`LiveLaneOracle.py`가 MGeo의 ego-left 경계를 카메라에 투영하고, 해당 경계가
-`broken/white_dashed`이면 `/perception/camera/dashed_lane_detected=true`를
-발행한다. 별도 게이트 노드는 두 조건을 각각 2초간 유지하고
-`car AND dashed_lane` 결과를 `/perception/camera/highway_environment`로 10 Hz
-발행한다. 이 값이 `true`인 동안에만 왼쪽 끼어들기 판단, 관련 Bool 결과와 RViz
-선이 활성화된다.
+`/perception/camera/car_detected`(`std_msgs/Bool`)로 발행한다. 별도 게이트 노드가
+이를 2초간 유지해 `/perception/camera/highway_environment`를 10 Hz로 발행한다.
+이 값이 `true`인 동안에만 왼쪽 끼어들기 판단, 관련 Bool 결과와 RViz 선이
+활성화된다.
 
-점선 결과를 확인하려면 다음 토픽을 본다.
+점선 인식 토픽 `/perception/camera/dashed_lane_detected`는 향후 연결을 위해 미리
+정의되어 있지만 현재 발행 노드는 없다. 점선 인식 구현 후 다음 인자를 사용하면
+고속도로 게이트가 `car AND dashed_lane`으로 동작한다.
 
 ```bash
-rostopic echo /perception/camera/dashed_lane_detected
-rostopic echo /perception/camera/highway_environment
+roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
+  require_dashed_lane:=true
 ```
-
-이 구현은 카메라 신경망이 점선을 분류하는 방식이 아니라 MGeo의 차선 속성을
-카메라 영상 좌표에 투영하는 방식이다. Competition Status UDP 포트 `9081`은 기존
-주행 브리지만 bind하며, 오라클은 그 브리지가 발행한 `/Ego_topic`의 패킷 시각을
-`RecordDrive.interp_status()`에 공급해 카메라 프레임과 동기화한다.
 
 ## 보행자 횡단 정지
 

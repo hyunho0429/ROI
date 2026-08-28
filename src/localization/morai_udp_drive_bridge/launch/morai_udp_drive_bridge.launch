@@ -6,7 +6,6 @@
   <arg name="status_port" default="9081" />
   <arg name="status_topic" default="/Ego_topic" />
   <arg name="status_frame_id" default="map" />
-  <arg name="status_use_packet_time" default="false" />
   <arg name="control_remote_ip" default="192.168.0.148" />
   <!-- MORAI Network Settings의 Cmd Control Destination Port와 맞춘다. -->
   <arg name="control_remote_port" default="9093" />
@@ -32,6 +31,6 @@
     <param name="max_wheel_angle_rad" value="0.6981317008" />
     <param name="send_rate_hz" value="20.0" />
     <param name="command_timeout_sec" value="0.5" />
-    <param name="status_use_packet_time" value="$(arg status_use_packet_time)" />
+    <param name="status_use_packet_time" value="false" />
   </node>
 </launch>

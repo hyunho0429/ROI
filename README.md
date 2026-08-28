@@ -678,11 +678,10 @@ morai_udp_ekf_purepursuit_lidar_camera.launch
 │   ├── 기존 GPS/IMU/EKF/Pure Pursuit 주행 스택
 │   └── 기존 LiDAR tracking + merge-gap + RViz
 └── camera_perception.launch
-    ├── hd_map_lane_oracle → Sensor/LiveLaneOracle.py
-    │    MGeo ego-left boundary broken 여부 → dashed_lane_detected
+    ├── lane_camera  → Sensor/LaneCandidates.py
     ├── yolo_camera  → Sensor/YoloCamera_v2.py
     ├── highway_environment_gate
-    │    car_detected AND dashed_lane_detected → merge-gap 활성화
+    │    car_detected AND (점선 조건, 현재 비활성) → merge-gap 활성화
     └── pedestrian_crossing_fusion
          person_detected AND 가까운 동적 LiDAR 객체 → 정지/재출발
 ```
@@ -783,17 +782,12 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
 | `bind_ip` | `0.0.0.0` | LiDAR와 카메라의 공통 로컬 UDP bind 주소 |
 | `competition_status_host_port` | `9080` | MORAI Competition Status 송신(Host/Source) 포트 |
 | `competition_status_port` | `9081` | ROS PC Competition Status 수신(Destination) 포트 |
-| `competition_status_use_packet_time` | `true` | 카메라와 차량 상태를 시뮬레이터 시각으로 동기화 |
 | `morai_host_ip` | `192.168.0.148` | Ego Ctrl Cmd를 보낼 MORAI PC 주소 |
 | `enable_control` | `true` | 차량 제어 UDP 송신 여부 |
 | `target_speed_mps` | `6.0` | Pure Pursuit 목표 속도 (`21.6 km/h`) |
 | `rviz` | `true` | LiDAR RViz 실행 여부 |
 | `enable_lane` | `false` | 차선 인식 프로세스 실행 여부 |
 | `lane_port` | `1101` | 차선 카메라 UDP 수신 포트 |
-| `enable_hd_map_lane_oracle` | `true` | MGeo 기반 실시간 왼쪽 점선 판정 실행 |
-| `mgeo_path` | `src/path_planning/mgeo/R_KR_PR_K-city_2025` | 오라클이 읽는 MGeo 폴더 |
-| `cam_set_path` | `Sensor/cam_set.json` | HD맵을 전방 영상에 투영할 카메라 보정값 |
-| `lane_oracle_overlay` | `false` | HD맵 차선 오버레이 창 표시 여부 |
 | `enable_yolo` | `true` | YOLO 프로세스 실행 여부 |
 | `yolo_port` | `1131` | YOLO 카메라 UDP 수신 포트 |
 | `base_model_path` | `yolov8n.pt` | 기본 YOLO 모델 경로/이름 |
@@ -803,7 +797,7 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
 | `camera_display_fps` | `0.0` | `0`은 MORAI 카메라 수신 속도를 그대로 사용 |
 | `yolo_cpu_threads` | `1` | YOLO에 사용하는 PyTorch CPU 스레드 수 |
 | `enable_highway_gate` | `true` | 카메라 기반 고속도로 환경 게이트 실행 |
-| `require_dashed_lane` | `true` | car와 MGeo 왼쪽 점선이 모두 확인되어야 활성화 |
+| `require_dashed_lane` | `false` | `true`이면 car와 점선이 모두 탐지되어야 활성화 |
 | `car_detection_hold_s` | `2.0` | 일시적인 YOLO 누락 시 car 조건 유지시간 |
 | `enable_pedestrian_crossing` | `true` | YOLO person 기반 정지·재출발 제어 |
 | `person_clear_confirmation_s` | `0.5` | person 미검출 후 재출발까지 연속 확인 시간 |
@@ -961,19 +955,12 @@ rostopic echo /perception/merge_gap/unavailable
 ```
 
 두 토픽은 모두 `std_msgs/Bool`이며 왼쪽 차선만 판단한다. 통합 카메라 launch에서는
-YOLO가 COCO `car`를 탐지하고 `LiveLaneOracle.py`가 MGeo의 ego-left 경계를
-`broken/white_dashed`로 확인한 동안에만
-`/perception/camera/highway_environment=true`가 되어 끼어들기 판단과 RViz 왼쪽
-선이 활성화된다. 정상 활성 상태에서는 두 값이 항상 반대다. 게이트가 꺼질 때는
-이전 가능 상태를 남기지 않도록 한 번 `available=false`, `unavailable=true`를
-발행한 뒤 판단 출력을 중단한다. 이 점선 판정은 카메라 학습 모델의 인식 결과가
-아니라 MGeo 차선 속성을 카메라에 투영한 결과이며, 기존 주행 제어에는 연결하지 않는다.
-
-```bash
-rostopic echo /perception/camera/car_detected
-rostopic echo /perception/camera/dashed_lane_detected
-rostopic echo /perception/camera/highway_environment
-```
+YOLO가 COCO `car`를 탐지해 `/perception/camera/highway_environment=true`가 된
+동안에만 끼어들기 판단과 RViz 왼쪽 선이 활성화된다. 정상 활성 상태에서는 두 값이
+항상 반대다. 게이트가 꺼질 때는 이전 가능 상태를 남기지 않도록 한 번
+`available=false`, `unavailable=true`를 발행한 뒤 판단 출력을 중단한다. 점선 인식은
+아직 미구현이므로 `require_dashed_lane=false`가 기본이며, 구현 후 이 값을 `true`로
+바꾸면 `car AND dashed_lane` 조건으로 전환된다. 기존 주행 제어에는 연결하지 않는다.
 
 ### 보행자 정지 및 재출발
 
