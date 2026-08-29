@@ -23,6 +23,11 @@
   <arg name="lidar_global_forward_m" default="55.0" />
   <arg name="lidar_global_spacing_m" default="0.75" />
 
+  <!-- RViz Fixed Frame=morai_lidar requires morai_lidar to exist in the TF tree.
+       Current integrated LiDAR extrinsics are 0/0/0, so publish an identity
+       base_link -> morai_lidar transform for this debug stage. -->
+  <arg name="publish_lidar_tf" default="true" />
+
   <arg name="rate_hz" default="10.0" />
   <arg name="local_length_m" default="45.0" />
   <arg name="sample_spacing_m" default="0.5" />
@@ -54,6 +59,12 @@
   <arg name="bypass_max_abs_d_m" default="3.0" />
   <arg name="bypass_min_transition_length_m" default="4.0" />
   <arg name="allow_bypass_with_adjacent_lane" default="false" />
+
+  <node if="$(arg publish_lidar_tf)"
+        pkg="tf"
+        type="static_transform_publisher"
+        name="avoidance_debug_base_link_to_morai_lidar"
+        args="0 0 0 0 0 0 base_link morai_lidar 100" />
 
   <node pkg="purepursuit_mgeo"
         type="avoidance_frenet_debug_node.py"
