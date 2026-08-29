@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
-"""Debug-stage Frenet lane-change candidate generation.
+"""Frenet candidate generation for MORAI/MGeo avoidance debug stages.
 
-Stage A/B/C only:
-* map-frame obstacle input is handled by the ROS node, not here.
-* MGeo determines whether an adjacent lane actually exists/is allowed.
-* lane-change transition is sampled in Frenet (s,d) with quintic smoothstep.
-* output is converted back to map-frame PathPoint objects for RViz.
-* no collision rejection, cost function, path switching, or control yet.
+This module keeps two candidate families separate:
+
+1) MGeo lane-change candidates
+   - generated only toward a valid left/right adjacent MGeo link.
+
+2) Single-lane/free-space bypass candidates
+   - generated around one blocking obstacle when there is no adjacent lane.
+   - the lateral target is derived from obstacle width + ego width + margin.
+   - this stage does NOT yet prove that the bypass stays inside a road polygon.
+
+No collision rejection, cost function, path switching, or /ctrl_cmd lives here.
 """
 
 from __future__ import annotations
@@ -30,10 +35,13 @@ class MGeoLink:
     right_lane_change_dst_link_idx: Optional[str]
     road_id: Optional[str]
     ego_lane: Optional[int]
+    width_start_m: Optional[float]
+    width_end_m: Optional[float]
 
 
 @dataclass
 class FrenetLaneChangeCandidate:
+    kind: str
     side: str
     target_link_idx: str
     start_distance_m: float
@@ -44,8 +52,31 @@ class FrenetLaneChangeCandidate:
     path: List[PathPoint]
 
 
+@dataclass
+class FrenetBypassCandidate:
+    kind: str
+    side: str
+    obstacle_id: int
+    target_d_m: float
+    departure_start_s: float
+    hold_start_s: float
+    hold_end_s: float
+    return_end_s: float
+    extra_clearance_m: float
+    path: List[PathPoint]
+
+
 def _distance(a: PathPoint, b: PathPoint) -> float:
     return math.hypot(a.x - b.x, a.y - b.y)
+
+
+def _optional_float(value) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _raw_links_iter(raw_data):
@@ -54,7 +85,6 @@ def _raw_links_iter(raw_data):
     if isinstance(raw_data, dict):
         if isinstance(raw_data.get("links"), list):
             return raw_data["links"]
-        # Some exports may be keyed by link ID.
         return list(raw_data.values())
     raise ValueError("Unsupported link_set.json structure")
 
@@ -96,6 +126,8 @@ def load_mgeo_links(link_set_file: str) -> Dict[str, MGeoLink]:
             ),
             road_id=(str(raw["road_id"]) if raw.get("road_id") is not None else None),
             ego_lane=(int(raw["ego_lane"]) if raw.get("ego_lane") is not None else None),
+            width_start_m=_optional_float(raw.get("width_start")),
+            width_end_m=_optional_float(raw.get("width_end")),
         )
 
     if not links:
@@ -195,7 +227,6 @@ class TargetLaneProfile:
         deduped: List[Tuple[float, float]] = []
         for s, d in samples:
             if deduped and abs(s - deduped[-1][0]) < 0.05:
-                # Average duplicate longitudinal samples to reduce map-point jitter.
                 prev_s, prev_d = deduped[-1]
                 deduped[-1] = (0.5 * (prev_s + s), 0.5 * (prev_d + d))
             else:
@@ -224,7 +255,6 @@ class TargetLaneProfile:
         if s > self.max_s:
             return self.samples[-1][1] if s - self.max_s <= max_extrapolation_m else None
 
-        # Small profile; linear search is fine and deterministic.
         for i in range(len(self.samples) - 1):
             s0, d0 = self.samples[i]
             s1, d1 = self.samples[i + 1]
@@ -274,7 +304,6 @@ def generate_frenet_lane_change_candidate(
     if target_d_end is None:
         return None
 
-    # Sanity check only. MGeo decides adjacency; Frenet sign should normally agree.
     if side == "left" and target_d_end < 0.25:
         return None
     if side == "right" and target_d_end > -0.25:
@@ -298,7 +327,6 @@ def generate_frenet_lane_change_candidate(
         _append_unique(path, reference.frenet_to_map(s, d))
         s += spacing
 
-    # Ensure exact transition end exists for easier RViz inspection.
     if end_s <= local_end_s:
         _append_unique(path, reference.frenet_to_map(end_s, target_d_end))
 
@@ -306,6 +334,7 @@ def generate_frenet_lane_change_candidate(
         return None
 
     return FrenetLaneChangeCandidate(
+        kind="lane_change",
         side=side,
         target_link_idx=target_link.idx,
         start_distance_m=float(start_distance_m),
@@ -343,4 +372,118 @@ def generate_frenet_lane_change_candidates(
                 )
                 if candidate is not None:
                     candidates.append(candidate)
+    return candidates
+
+
+def generate_frenet_bypass_candidates(
+    reference: ReferencePath,
+    ego_s: float,
+    obstacle_id: int,
+    obstacle_s: float,
+    obstacle_d: float,
+    obstacle_longitudinal_half_m: float,
+    obstacle_lateral_half_m: float,
+    vehicle_width_m: float,
+    lateral_margin_m: float,
+    longitudinal_margin_m: float,
+    departure_length_m: float,
+    return_length_m: float,
+    extra_clearances_m: Sequence[float],
+    max_abs_d_m: float,
+    local_length_m: float,
+    sample_spacing_m: float = 0.5,
+    min_transition_length_m: float = 4.0,
+) -> List[FrenetBypassCandidate]:
+    """Generate left/right departure-hold-return candidates around one obstacle.
+
+    The target offset is derived from the minimum lateral separation required
+    between the obstacle envelope and the ego envelope.  ``max_abs_d_m`` is
+    only a debug guard; it is NOT a road-boundary proof.
+    """
+
+    local_end_s = min(ego_s + float(local_length_m), reference.total_length_m)
+    obstacle_front_s = obstacle_s - max(0.0, obstacle_longitudinal_half_m)
+    obstacle_rear_s = obstacle_s + max(0.0, obstacle_longitudinal_half_m)
+
+    hold_start_s = obstacle_front_s - max(0.0, longitudinal_margin_m)
+    hold_end_s = obstacle_rear_s + max(0.0, longitudinal_margin_m)
+
+    departure_start_s = max(ego_s, hold_start_s - max(0.0, departure_length_m))
+    departure_actual_m = hold_start_s - departure_start_s
+    return_end_s = hold_end_s + max(0.0, return_length_m)
+
+    if departure_actual_m < max(0.5, min_transition_length_m):
+        return []
+    if hold_end_s <= ego_s:
+        return []
+    if return_end_s > local_end_s:
+        return []
+
+    required_center_separation = (
+        max(0.0, obstacle_lateral_half_m)
+        + 0.5 * max(0.0, vehicle_width_m)
+        + max(0.0, lateral_margin_m)
+    )
+
+    spacing = max(float(sample_spacing_m), 0.10)
+    candidates: List[FrenetBypassCandidate] = []
+
+    for side in ("left", "right"):
+        sign = 1.0 if side == "left" else -1.0
+        base_target_d = obstacle_d + sign * required_center_separation
+
+        for extra in extra_clearances_m:
+            extra = max(0.0, float(extra))
+            target_d = base_target_d + sign * extra
+            if abs(target_d) > max(0.1, float(max_abs_d_m)):
+                continue
+
+            path: List[PathPoint] = []
+            s = ego_s
+            while s <= local_end_s + 1.0e-6:
+                if s < departure_start_s:
+                    d = 0.0
+                elif s <= hold_start_s:
+                    u = (s - departure_start_s) / max(departure_actual_m, 1.0e-6)
+                    d = target_d * _quintic_smoothstep(u)
+                elif s <= hold_end_s:
+                    d = target_d
+                elif s <= return_end_s:
+                    u = (s - hold_end_s) / max(return_end_s - hold_end_s, 1.0e-6)
+                    d = target_d * (1.0 - _quintic_smoothstep(u))
+                else:
+                    d = 0.0
+
+                _append_unique(path, reference.frenet_to_map(s, d))
+                s += spacing
+
+            # Add exact phase boundaries for clearer RViz inspection.
+            for exact_s, exact_d in (
+                (departure_start_s, 0.0),
+                (hold_start_s, target_d),
+                (hold_end_s, target_d),
+                (return_end_s, 0.0),
+            ):
+                if ego_s <= exact_s <= local_end_s:
+                    _append_unique(path, reference.frenet_to_map(exact_s, exact_d))
+
+            path.sort(key=lambda p: reference.project(p.x, p.y).s)
+            if len(path) < 2:
+                continue
+
+            candidates.append(
+                FrenetBypassCandidate(
+                    kind="bypass",
+                    side=side,
+                    obstacle_id=int(obstacle_id),
+                    target_d_m=float(target_d),
+                    departure_start_s=float(departure_start_s),
+                    hold_start_s=float(hold_start_s),
+                    hold_end_s=float(hold_end_s),
+                    return_end_s=float(return_end_s),
+                    extra_clearance_m=float(extra),
+                    path=path,
+                )
+            )
+
     return candidates
