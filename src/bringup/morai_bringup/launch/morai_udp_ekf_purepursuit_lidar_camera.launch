@@ -23,13 +23,6 @@
   <arg name="camera_ip" default="$(arg bind_ip)" />
   <arg name="enable_lane" default="false" />
   <arg name="lane_port" default="1101" />
-  <arg name="enable_hd_map_lane_oracle" default="true" />
-  <arg name="mgeo_path" default="$(arg camera_stack_root)/src/path_planning/mgeo/R_KR_PR_K-city_2025" />
-  <arg name="cam_set_path" default="$(arg camera_stack_root)/Sensor/cam_set.json" />
-  <arg name="lane_oracle_sensor_id" default="1" />
-  <arg name="lane_oracle_overlay" default="false" />
-  <arg name="hd_map_yaw_offset_deg" default="-1.361" />
-  <arg name="ego_status_topic" default="/Ego_topic" />
   <arg name="enable_yolo" default="true" />
   <arg name="yolo_port" default="1131" />
   <arg name="base_model_path" default="yolov8n.pt" />
@@ -44,11 +37,11 @@
   <arg name="highway_environment_topic" default="/perception/camera/highway_environment" />
   <arg name="enable_highway_gate" default="$(arg enable_yolo)" />
   <arg name="merge_highway_gate_required" default="$(arg enable_highway_gate)" />
-  <!-- 끼어들기 환경 = YOLO car/bus/truck AND HD MAP 왼쪽 점선. -->
-  <arg name="require_dashed_lane" default="true" />
-  <!-- 기존 LiDAR 평행 객체 조건은 고속도로 진입 게이트에서 제외한다. -->
+  <!-- HD map/점선 조건은 사용하지 않는다. -->
+  <arg name="require_dashed_lane" default="false" />
+  <!-- 끼어들기 환경 = YOLO car/bus/truck AND 왼쪽 차선 평행 주행 동적 객체. -->
   <arg name="left_parallel_dynamic_topic" default="/perception/lidar/left_lane_parallel_dynamic_detected" />
-  <arg name="require_left_parallel_dynamic" default="false" />
+  <arg name="require_left_parallel_dynamic" default="true" />
   <arg name="left_parallel_dynamic_hold_s" default="0.5" />
   <arg name="highway_latch_once" default="true" />
   <arg name="car_detection_hold_s" default="2.0" />
@@ -85,13 +78,6 @@
     <arg name="camera_ip" value="$(arg camera_ip)" />
     <arg name="enable_lane" value="$(arg enable_lane)" />
     <arg name="lane_port" value="$(arg lane_port)" />
-    <arg name="enable_hd_map_lane_oracle" value="$(arg enable_hd_map_lane_oracle)" />
-    <arg name="mgeo_path" value="$(arg mgeo_path)" />
-    <arg name="cam_set_path" value="$(arg cam_set_path)" />
-    <arg name="lane_oracle_sensor_id" value="$(arg lane_oracle_sensor_id)" />
-    <arg name="lane_oracle_overlay" value="$(arg lane_oracle_overlay)" />
-    <arg name="hd_map_yaw_offset_deg" value="$(arg hd_map_yaw_offset_deg)" />
-    <arg name="ego_status_topic" value="$(arg ego_status_topic)" />
     <arg name="enable_yolo" value="$(arg enable_yolo)" />
     <arg name="yolo_port" value="$(arg yolo_port)" />
     <arg name="base_model_path" value="$(arg base_model_path)" />

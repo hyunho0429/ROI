@@ -679,11 +679,9 @@ morai_udp_ekf_purepursuit_lidar_camera.launch
 │   └── 기존 LiDAR tracking + merge-gap + RViz
 └── camera_perception.launch
     ├── lane_camera  → Sensor/LaneCandidates.py
-    ├── hd_map_lane_oracle
-    │    MGeo + 전방 카메라 + Ego status (yaw -1.361°) → 왼쪽 점선
     ├── yolo_camera  → Sensor/YoloCamera_v2.py
     ├── highway_environment_gate
-    │    car/bus/truck AND HD MAP 왼쪽 점선 → merge-gap 활성화 후 유지
+    │    car/bus/truck AND 왼쪽 평행 주행 동적 객체 → merge-gap 활성화 후 유지
     └── pedestrian_crossing_fusion
          person_detected AND 가까운 동적 LiDAR 객체 → 정지/재출발
 ```
@@ -700,7 +698,7 @@ IP를 그대로 사용한다. 프로그램은 LiDAR와 카메라 모두 동일�
 | IMU | `4001` | 기존 주행 스택 |
 | Competition Vehicle Status | Host `9080` → Destination `9081` | 대회용 차량 상태, `/Ego_topic`으로 호환 변환 |
 | LiDAR | `2001` | RViz/tracking 입력 |
-| 차선/HD MAP 투영 카메라 | `1101` | 기본 통합 실행에서는 `LiveLaneOracle.py`가 사용 |
+| 차선 카메라 | `1101` | `LaneCandidates.py` |
 | YOLO 카메라 | `1131` | `YoloCamera_v2.py` |
 
 MORAI 센서 설정의 포트가 위 값과 일치해야 하며 Ubuntu 방화벽에서도 해당 UDP
@@ -742,8 +740,7 @@ source devel/setup.bash
 ### 통합 실행
 
 다음 한 줄로 LiDAR/RViz, YOLO, 보행자 정지·재출발 및 차량 제어를 실행한다.
-기존 영상 차선 모델(`LaneCandidates.py`)은 기본적으로 비활성화되어 있지만 HD MAP
-점선 판정 노드는 활성화되어 있다. `enable_control` 기본값이 `true`이므로
+차선 인식은 기본적으로 비활성화되어 있다. `enable_control` 기본값이 `true`이므로
 네트워크와 위치 정보가 정상 수신되면 차량이 바로 움직일 수 있다.
 
 ```bash
@@ -791,8 +788,6 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
 | `rviz` | `true` | LiDAR RViz 실행 여부 |
 | `enable_lane` | `false` | 차선 인식 프로세스 실행 여부 |
 | `lane_port` | `1101` | 차선 카메라 UDP 수신 포트 |
-| `enable_hd_map_lane_oracle` | `true` | HD MAP 왼쪽 점선 판정 실행 |
-| `hd_map_yaw_offset_deg` | `-1.361` | HD MAP 투영 Ego yaw 보정값 [deg] |
 | `enable_yolo` | `true` | YOLO 프로세스 실행 여부 |
 | `yolo_port` | `1131` | YOLO 카메라 UDP 수신 포트 |
 | `base_model_path` | `yolov8n.pt` | 기본 YOLO 모델 경로/이름 |
@@ -802,8 +797,8 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
 | `camera_display_fps` | `0.0` | `0`은 MORAI 카메라 수신 속도를 그대로 사용 |
 | `yolo_cpu_threads` | `1` | YOLO에 사용하는 PyTorch CPU 스레드 수 |
 | `enable_highway_gate` | `true` | 카메라 기반 고속도로 환경 게이트 실행 |
-| `require_dashed_lane` | `true` | car/bus/truck과 HD MAP 왼쪽 점선이 모두 탐지되어야 활성화 |
-| `require_left_parallel_dynamic` | `false` | LiDAR 평행 객체는 최초 활성화 조건에서 제외 |
+| `require_dashed_lane` | `false` | `true`이면 car와 점선이 모두 탐지되어야 활성화 |
+| `require_left_parallel_dynamic` | `true` | YOLO car/bus/truck과 왼쪽 차선 평행 주행 동적 객체가 모두 있어야 최초 활성화 |
 | `left_parallel_dynamic_hold_s` | `0.5` | 일시적인 LiDAR 추적 누락 허용시간 |
 | `highway_latch_once` | `true` | 고속도로 상태가 한 번 활성화되면 노드 종료 전까지 유지 |
 | `car_detection_hold_s` | `2.0` | 일시적인 YOLO 누락 시 car 조건 유지시간 |
@@ -963,18 +958,20 @@ rostopic echo /perception/merge_gap/unavailable
 ```
 
 두 토픽은 모두 `std_msgs/Bool`이며 왼쪽 차선만 판단한다. 통합 카메라 launch에서는
-YOLO가 COCO `car`, `bus`, `truck` 중 하나를 탐지하고, 동시에 HD MAP을 카메라에
-투영한 자차 왼쪽 경계가 백색 점선으로 확인되어야
-`/perception/camera/highway_environment=true`가 된다. 투영에는 Ego yaw
-`-1.361°` 보정을 기본 적용한다. 이때만 끼어들기 판단과 RViz 왼쪽 선이 활성화된다.
-최초 활성화 조건에서는 기존 LiDAR 평행 객체 탐지를 사용하지 않지만, 활성화 후 실제
-공간 가능/불가능 판단에는 기존 LiDAR clustering/BBox/Kalman-Hungarian 결과를 그대로
-사용한다. 정상 활성 상태에서는 가능/불가능 두 값이 항상
+YOLO가 COCO `car`, `bus`, `truck` 중 하나를 탐지하고, 동시에 LiDAR가 왼쪽 옆
+차선의 앞·옆·뒤 40m 범위에서
+ego와 같은 방향으로 주행하는 동적 객체를 확인해야
+`/perception/camera/highway_environment=true`가 된다. 이때만 끼어들기 판단과 RViz
+왼쪽 선이 활성화된다. LiDAR 조건은 `/detection/obstacle_states`에서 `MOVING`만
+허용하고, 1.0m/s 미만, 진행방향 오차 30도 초과, 횡속도 1.5m/s 초과 객체를 제외하며
+3회 연속 검출을 요구한다. 따라서 `STATIC`, `STOPPED`, `UNKNOWN`, 교차 이동 및
+역주행 객체는 게이트를 켜지 않는다. 정상 활성 상태에서는 가능/불가능 두 값이 항상
 반대다. 게이트가 꺼질 때는 이전 가능 상태를 남기지 않도록 한 번
 `available=false`, `unavailable=true`를 발행한 뒤 판단 출력을 중단한다. 기본
 `highway_latch_once=true`에서는 최초 활성화 이후 고속도로 상태를 계속 유지하므로
 이 비활성 전환은 노드 재시작/종료 때만 발생한다. 이전처럼 입력에 따라 다시 꺼지게
-하려면 `highway_latch_once:=false`로 실행한다. 기존 주행 제어에는 연결하지 않는다.
+하려면 `highway_latch_once:=false`로 실행한다. HD MAP과 점선 조건은 사용하지
+않으며 기존 주행 제어에는 연결하지 않는다.
 
 ### 보행자 정지 및 재출발
 

@@ -51,10 +51,8 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch enable_con
 | 인자 | 기본값 | 설명 |
 |---|---:|---|
 | `rviz` | `true` | LiDAR RViz 표시 |
-| `enable_lane` | `false` | 기존 영상 차선 모델 실행 |
-| `lane_port` | `1101` | 영상 차선/HD MAP 투영용 전방 카메라 UDP 포트 |
-| `enable_hd_map_lane_oracle` | `true` | HD MAP 왼쪽 점선 판정 노드 실행 |
-| `hd_map_yaw_offset_deg` | `-1.361` | HD MAP 투영 시 Ego yaw에 더하는 보정값 [deg] |
+| `enable_lane` | `false` | 차선 인식 프로세스 실행 |
+| `lane_port` | `1101` | 차선 카메라 UDP 포트 |
 | `enable_yolo` | `true` | YOLO 프로세스 실행 |
 | `yolo_port` | `1131` | YOLO 카메라 UDP 포트 |
 | `base_model_path` | `yolov8n.pt` | 기본 YOLO 모델 |
@@ -64,8 +62,8 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch enable_con
 | `camera_display_fps` | `0.0` | `0`은 MORAI 수신 프레임율로 즉시 표시 |
 | `yolo_cpu_threads` | `1` | YOLO에 사용하는 PyTorch CPU 스레드 수 |
 | `enable_highway_gate` | `true` | YOLO 기반 고속도로 환경 게이트 |
-| `require_dashed_lane` | `true` | YOLO 도로 차량과 HD MAP 왼쪽 점선을 AND로 결합 |
-| `require_left_parallel_dynamic` | `false` | LiDAR 평행 객체를 최초 고속도로 진입 조건으로 사용하지 않음 |
+| `require_dashed_lane` | `false` | 점선 인식 구현 후 `true`로 전환 |
+| `require_left_parallel_dynamic` | `true` | 왼쪽 차선 평행 주행 동적 객체 LiDAR 조건 사용 |
 | `left_parallel_dynamic_hold_s` | `0.5` | LiDAR 조건의 짧은 추적 누락 허용시간 |
 | `highway_latch_once` | `true` | 최초 고속도로 인지 후 상태를 노드 종료까지 유지 |
 | `car_detection_hold_s` | `2.0` | YOLO car 조건 유지시간 |
@@ -100,24 +98,27 @@ YOLO 수신/표시와 모델 추론은 서로 다른 스레드에서 동작한�
 ## 고속도로 환경 기반 끼어들기 활성화
 
 통합 launch에서는 기본 YOLO의 COCO `car`, `bus`, `truck` 탐지 결과를 기존 호환
-토픽 `/perception/camera/car_detected`(`std_msgs/Bool`)로 발행한다. 동시에
-`LiveLaneOracle.py`가 MGeo 차선 경계를 현재 전방 카메라 영상으로 투영하고, 자차
-왼쪽 경계가 유효한 백색 점선이면 `/perception/camera/dashed_lane_detected=true`를
-발행한다. 투영에는 Ego yaw 보정값 `-1.361°`를 기본 적용한다.
+토픽 `/perception/camera/car_detected`(`std_msgs/Bool`)로 발행한다. LiDAR 노드는 기존
+map-frame Kalman-Hungarian 결과에서 왼쪽 옆 차선의 앞·옆·뒤 40m 범위를 확인하고,
+ego와 같은 방향으로 움직이는 객체가 있으면
+`/perception/lidar/left_lane_parallel_dynamic_detected`를 발행한다. 두 값이 모두
+`true`일 때만 `/perception/camera/highway_environment=true`가 되며, 이 동안에만
+왼쪽 끼어들기 판단, 관련 Bool 결과와 RViz 선이 활성화된다. 기본값에서는 이 상태를
+한 번 인지하면 이후 카메라나 LiDAR 입력이 사라져도 노드 종료 전까지 유지한다.
 
-두 값이 모두 `true`일 때 `/perception/camera/highway_environment=true`가 되며,
-그때부터 왼쪽 끼어들기 판단, Bool 결과와 RViz 선이 활성화된다. 기본
-`highway_latch_once=true`이므로 한 번 활성화되면 노드 종료 전까지 유지한다. 기존
-`/perception/lidar/left_lane_parallel_dynamic_detected`는 남아 있지만 최초 고속도로
-진입 조건에서는 제외된다. 활성화 이후의 가능/불가능 판정은 기존 LiDAR clustering,
-BBox, Kalman-Hungarian 및 TTC 로직을 그대로 사용한다.
+LiDAR 조건은 `motion_state=MOVING`, 속도 1.0m/s 이상, ego 진행방향 오차 30도 이내,
+횡속도 1.5m/s 이하를 모두 요구하고 3회 연속 확인한다. `STATIC`, `STOPPED`,
+`UNKNOWN`, 교차 이동 및 역주행 객체는 제외하므로 정적 장애물 토픽과 혼동해
+게이트를 켜지 않는다.
 
-보정값이나 MGeo 경로를 바꿔 확인하려면 launch 인자를 덮어쓴다.
+점선 인식 토픽 `/perception/camera/dashed_lane_detected`는 향후 연결을 위해 미리
+정의되어 있지만 현재 발행 노드는 없다. 현재 기본값은 HD MAP과 점선 조건을 사용하지
+않는다. 향후 점선 인식 구현 후 다음 인자를 추가하면 기존 두 조건에 점선 조건까지
+AND로 결합된다.
 
 ```bash
 roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
-  hd_map_yaw_offset_deg:=-1.361 \
-  mgeo_path:=/absolute/path/to/R_KR_PR_K-city_2025
+  require_dashed_lane:=true
 ```
 
 ## 보행자 횡단 정지
