@@ -37,6 +37,7 @@ catkin_install_python(PROGRAMS
   scripts/lidar_tracking_node.py
   scripts/lidar_merge_gap_node.py
   scripts/lidar_tracked_obstacle_state_node.py
+  scripts/lidar_left_parallel_dynamic_node.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 

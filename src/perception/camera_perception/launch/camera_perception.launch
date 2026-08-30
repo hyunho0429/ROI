@@ -20,6 +20,9 @@
   <arg name="enable_highway_gate" default="$(arg enable_yolo)" />
   <!-- 점선 인식이 구현되면 true로 바꾸면 car AND dashed 조건이 된다. -->
   <arg name="require_dashed_lane" default="false" />
+  <arg name="left_parallel_dynamic_topic" default="/perception/lidar/left_lane_parallel_dynamic_detected" />
+  <arg name="require_left_parallel_dynamic" default="false" />
+  <arg name="left_parallel_dynamic_hold_s" default="0.5" />
   <arg name="car_detection_hold_s" default="2.0" />
   <arg name="enable_pedestrian_crossing" default="$(arg enable_yolo)" />
   <arg name="pedestrian_stop_topic" default="/perception/pedestrian_crossing/stop_required" />
@@ -52,6 +55,9 @@
     <param name="dashed_lane_topic" value="$(arg dashed_lane_topic)" />
     <param name="output_topic" value="$(arg highway_environment_topic)" />
     <param name="require_dashed_lane" value="$(arg require_dashed_lane)" />
+    <param name="left_parallel_dynamic_topic" value="$(arg left_parallel_dynamic_topic)" />
+    <param name="require_left_parallel_dynamic" value="$(arg require_left_parallel_dynamic)" />
+    <param name="left_parallel_dynamic_hold_s" value="$(arg left_parallel_dynamic_hold_s)" />
     <param name="car_hold_s" value="$(arg car_detection_hold_s)" />
     <param name="dashed_lane_hold_s" value="2.0" />
     <param name="publish_rate_hz" value="10.0" />

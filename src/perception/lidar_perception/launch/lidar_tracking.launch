@@ -9,6 +9,12 @@
   <arg name="obstacle_state_topic" default="/detection/obstacle_states" />
   <arg name="static_obstacle_topic" default="/detection/static_obstacles" />
   <arg name="dynamic_obstacle_topic" default="/detection/dynamic_obstacles" />
+  <arg name="left_parallel_dynamic_enabled" default="true" />
+  <arg name="left_parallel_dynamic_topic" default="/perception/lidar/left_lane_parallel_dynamic_detected" />
+  <arg name="left_parallel_dynamic_min_speed_mps" default="1.0" />
+  <arg name="left_parallel_dynamic_max_heading_error_deg" default="30.0" />
+  <arg name="left_parallel_dynamic_max_lateral_speed_mps" default="1.5" />
+  <arg name="left_parallel_dynamic_confirmation_scans" default="3" />
   <arg name="merge_available_topic" default="/perception/merge_gap/available" />
   <arg name="merge_unavailable_topic" default="/perception/merge_gap/unavailable" />
   <arg name="merge_adjacent_obstacle_topic" default="/perception/merge_gap/left_lane_obstacles" />
@@ -58,6 +64,28 @@
     <param name="output_topic" value="$(arg obstacle_state_topic)" />
     <param name="static_topic" value="$(arg static_obstacle_topic)" />
     <param name="dynamic_topic" value="$(arg dynamic_obstacle_topic)" />
+  </node>
+
+  <!-- Uses the existing map tracker/state output. It accepts MOVING objects
+       only and covers +/- detection range, including front/side/rear. -->
+  <node if="$(arg left_parallel_dynamic_enabled)"
+        pkg="lidar_perception"
+        type="lidar_left_parallel_dynamic_node.py"
+        name="lidar_left_parallel_dynamic"
+        output="screen">
+    <param name="obstacle_topic" value="$(arg obstacle_state_topic)" />
+    <param name="odometry_topic" value="$(arg odometry_topic)" />
+    <param name="output_topic" value="$(arg left_parallel_dynamic_topic)" />
+    <param name="lane_width_m" value="$(arg lane_width_m)" />
+    <param name="vehicle_width_m" value="$(arg vehicle_width_m)" />
+    <param name="lane_lateral_allowance_m" value="0.4" />
+    <param name="detection_range_m" value="40.0" />
+    <param name="minimum_speed_mps" value="$(arg left_parallel_dynamic_min_speed_mps)" />
+    <param name="maximum_heading_error_deg" value="$(arg left_parallel_dynamic_max_heading_error_deg)" />
+    <param name="maximum_lateral_speed_mps" value="$(arg left_parallel_dynamic_max_lateral_speed_mps)" />
+    <param name="confirmation_scans" value="$(arg left_parallel_dynamic_confirmation_scans)" />
+    <param name="input_stale_timeout_s" value="0.5" />
+    <param name="publish_rate_hz" value="20.0" />
   </node>
 
   <!-- Tracking is the minimum stage that can evaluate relative speed and TTC. -->

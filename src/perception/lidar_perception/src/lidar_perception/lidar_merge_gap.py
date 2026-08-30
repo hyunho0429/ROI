@@ -73,6 +73,92 @@ def select_map_obstacles_in_adjacent_lane(
     return [obstacle for _, obstacle in selected]
 
 
+def select_parallel_dynamic_obstacles_in_adjacent_lane(
+    obstacles,
+    ego_x_map,
+    ego_y_map,
+    ego_yaw,
+    side,
+    lane_width_m,
+    vehicle_width_m,
+    lane_lateral_allowance_m,
+    detection_range_m,
+    minimum_speed_mps,
+    maximum_heading_error_rad,
+    maximum_lateral_speed_mps,
+):
+    """Select moving, same-direction objects in an adjacent lane.
+
+    The lane selector is symmetric about the ego longitudinal origin, so
+    vehicles ahead of, alongside, and behind the ego are all considered.
+    Motion is checked from the map-frame velocity vector rather than the box
+    yaw. This keeps stationary boxes and crossing objects from opening the
+    highway merge gate.
+    """
+    minimum_speed = float(minimum_speed_mps)
+    maximum_heading_error = float(maximum_heading_error_rad)
+    maximum_lateral_speed = float(maximum_lateral_speed_mps)
+    thresholds = (
+        minimum_speed,
+        maximum_heading_error,
+        maximum_lateral_speed,
+    )
+    if not all(math.isfinite(value) for value in thresholds):
+        raise ValueError("parallel-motion thresholds must be finite")
+    if minimum_speed < 0.0:
+        raise ValueError("minimum speed cannot be negative")
+    if not 0.0 <= maximum_heading_error <= math.pi:
+        raise ValueError("heading error must be in [0, pi]")
+    if maximum_lateral_speed < 0.0:
+        raise ValueError("maximum lateral speed cannot be negative")
+
+    lane_obstacles = select_map_obstacles_in_adjacent_lane(
+        obstacles=obstacles,
+        ego_x_map=ego_x_map,
+        ego_y_map=ego_y_map,
+        ego_yaw=ego_yaw,
+        side=side,
+        lane_width_m=lane_width_m,
+        vehicle_width_m=vehicle_width_m,
+        lane_lateral_allowance_m=lane_lateral_allowance_m,
+        detection_range_m=detection_range_m,
+    )
+    cosine = math.cos(float(ego_yaw))
+    sine = math.sin(float(ego_yaw))
+    selected = []
+    for obstacle in lane_obstacles:
+        # UNKNOWN and STOPPED are deliberately rejected even though the
+        # general dynamic-obstacle topic retains them conservatively.
+        if str(obstacle.get("motion_state", "")).upper() != "MOVING":
+            continue
+        velocity_x = float(obstacle.get("velocity_x_map", math.nan))
+        velocity_y = float(obstacle.get("velocity_y_map", math.nan))
+        if not all(math.isfinite(value) for value in (velocity_x, velocity_y)):
+            continue
+        speed = math.hypot(velocity_x, velocity_y)
+        if speed < minimum_speed:
+            continue
+
+        longitudinal_speed = cosine * velocity_x + sine * velocity_y
+        lateral_speed = -sine * velocity_x + cosine * velocity_y
+        if longitudinal_speed < minimum_speed:
+            continue
+        if abs(lateral_speed) > maximum_lateral_speed:
+            continue
+
+        velocity_heading = math.atan2(velocity_y, velocity_x)
+        heading_error = abs(
+            math.atan2(
+                math.sin(velocity_heading - float(ego_yaw)),
+                math.cos(velocity_heading - float(ego_yaw)),
+            )
+        )
+        if heading_error > maximum_heading_error:
+            continue
+        selected.append(obstacle)
+    return selected
+
+
 def _reason(side_obstacle, front_clearance, rear_clearance, longitudinal_margin,
             lateral_clearance, lateral_margin):
     if side_obstacle is not None:

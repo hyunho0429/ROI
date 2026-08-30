@@ -16,6 +16,7 @@ from lidar_perception.lidar_merge_gap import (
     assess_tracked_merge_gaps,
     format_merge_gap_status,
     format_tracked_merge_gap_status,
+    select_parallel_dynamic_obstacles_in_adjacent_lane,
     select_map_obstacles_in_adjacent_lane,
 )
 
@@ -71,17 +72,25 @@ def _assess_tracks(tracks, minimum_ttc=3.0):
     )
 
 
-def _map_obstacle(track_id, center_x, center_y, width=1.8):
+def _map_obstacle(
+    track_id,
+    center_x,
+    center_y,
+    width=1.8,
+    velocity_x=1.0,
+    velocity_y=0.0,
+    motion_state="MOVING",
+):
     return {
         "id": track_id,
         "center_x_map": float(center_x),
         "center_y_map": float(center_y),
         "length": 4.0,
         "width": float(width),
-        "velocity_x_map": 1.0,
-        "velocity_y_map": 0.0,
-        "speed_mps": 1.0,
-        "motion_state": "MOVING",
+        "velocity_x_map": float(velocity_x),
+        "velocity_y_map": float(velocity_y),
+        "speed_mps": math.hypot(velocity_x, velocity_y),
+        "motion_state": motion_state,
         "yaw": 0.0,
         "yaw_deg": 0.0,
         "yaw_valid": True,
@@ -100,6 +109,23 @@ def _select_left(obstacles, ego_x=0.0, ego_y=0.0, ego_yaw=0.0):
         vehicle_width_m=1.892,
         lane_lateral_allowance_m=0.4,
         detection_range_m=40.0,
+    )
+
+
+def _select_left_parallel(obstacles, ego_x=0.0, ego_y=0.0, ego_yaw=0.0):
+    return select_parallel_dynamic_obstacles_in_adjacent_lane(
+        obstacles=obstacles,
+        ego_x_map=ego_x,
+        ego_y_map=ego_y,
+        ego_yaw=ego_yaw,
+        side="left",
+        lane_width_m=3.5,
+        vehicle_width_m=1.892,
+        lane_lateral_allowance_m=0.4,
+        detection_range_m=40.0,
+        minimum_speed_mps=1.0,
+        maximum_heading_error_rad=math.radians(30.0),
+        maximum_lateral_speed_mps=1.5,
     )
 
 
@@ -246,6 +272,80 @@ class MapAdjacentLaneSelectionTest(unittest.TestCase):
         )
 
         self.assertEqual([obstacle["id"] for obstacle in selected], [10])
+
+
+class ParallelDynamicLaneSelectionTest(unittest.TestCase):
+    def test_includes_left_lane_front_side_and_rear(self):
+        selected = _select_left_parallel(
+            [
+                _map_obstacle(1, 12.0, 3.5, velocity_x=6.0),
+                _map_obstacle(2, 0.0, 3.5, velocity_x=5.0),
+                _map_obstacle(3, -12.0, 3.5, velocity_x=4.0),
+            ]
+        )
+
+        self.assertEqual([obstacle["id"] for obstacle in selected], [3, 2, 1])
+
+    def test_rejects_static_stopped_and_unknown_objects(self):
+        selected = _select_left_parallel(
+            [
+                _map_obstacle(
+                    1, 5.0, 3.5, velocity_x=0.0, motion_state="STATIC"
+                ),
+                _map_obstacle(
+                    2, 6.0, 3.5, velocity_x=0.0, motion_state="STOPPED"
+                ),
+                _map_obstacle(
+                    3, 7.0, 3.5, velocity_x=2.0, motion_state="UNKNOWN"
+                ),
+            ]
+        )
+
+        self.assertEqual(selected, [])
+
+    def test_rejects_low_speed_tracker_jitter(self):
+        selected = _select_left_parallel(
+            [_map_obstacle(1, 5.0, 3.5, velocity_x=0.6)]
+        )
+
+        self.assertEqual(selected, [])
+
+    def test_rejects_crossing_and_opposite_direction_objects(self):
+        selected = _select_left_parallel(
+            [
+                _map_obstacle(1, 5.0, 3.5, velocity_x=0.0, velocity_y=4.0),
+                _map_obstacle(2, 7.0, 3.5, velocity_x=-5.0),
+            ]
+        )
+
+        self.assertEqual(selected, [])
+
+    def test_rejects_ego_lane_and_right_lane_movers(self):
+        selected = _select_left_parallel(
+            [
+                _map_obstacle(1, 5.0, 0.0, velocity_x=5.0),
+                _map_obstacle(2, 5.0, -3.5, velocity_x=5.0),
+            ]
+        )
+
+        self.assertEqual(selected, [])
+
+    def test_uses_ego_heading_for_lane_and_parallel_motion(self):
+        selected = _select_left_parallel(
+            [
+                _map_obstacle(
+                    1, 6.5, 25.0, velocity_x=0.0, velocity_y=5.0
+                ),
+                _map_obstacle(
+                    2, 13.5, 25.0, velocity_x=0.0, velocity_y=5.0
+                ),
+            ],
+            ego_x=10.0,
+            ego_y=20.0,
+            ego_yaw=0.5 * math.pi,
+        )
+
+        self.assertEqual([obstacle["id"] for obstacle in selected], [1])
 
 
 if __name__ == "__main__":
