@@ -3,6 +3,13 @@
   <arg name="camera_ip" default="0.0.0.0" />
   <arg name="enable_lane" default="true" />
   <arg name="lane_port" default="1101" />
+  <arg name="enable_hd_map_lane_oracle" default="false" />
+  <arg name="mgeo_path" default="$(arg camera_stack_root)/src/path_planning/mgeo/R_KR_PR_K-city_2025" />
+  <arg name="cam_set_path" default="$(arg camera_stack_root)/Sensor/cam_set.json" />
+  <arg name="lane_oracle_sensor_id" default="1" />
+  <arg name="lane_oracle_overlay" default="false" />
+  <arg name="hd_map_yaw_offset_deg" default="-1.361" />
+  <arg name="ego_status_topic" default="/Ego_topic" />
   <arg name="enable_yolo" default="true" />
   <arg name="yolo_port" default="1131" />
   <arg name="base_model_path" default="yolov8n.pt" />
@@ -18,7 +25,7 @@
   <arg name="dashed_lane_topic" default="/perception/camera/dashed_lane_detected" />
   <arg name="highway_environment_topic" default="/perception/camera/highway_environment" />
   <arg name="enable_highway_gate" default="$(arg enable_yolo)" />
-  <!-- 점선 인식이 구현되면 true로 바꾸면 car AND dashed 조건이 된다. -->
+  <!-- true이면 YOLO 도로 차량 AND HD MAP 왼쪽 점선 조건이 된다. -->
   <arg name="require_dashed_lane" default="false" />
   <arg name="left_parallel_dynamic_topic" default="/perception/lidar/left_lane_parallel_dynamic_detected" />
   <arg name="require_left_parallel_dynamic" default="false" />
@@ -38,6 +45,14 @@
         output="screen"
         respawn="false"
         args="--mode lane --camera-stack-root $(arg camera_stack_root) --cam-ip $(arg camera_ip) --cam-port $(arg lane_port)" />
+
+  <node if="$(arg enable_hd_map_lane_oracle)"
+        pkg="camera_perception"
+        type="camera_feature_runner.py"
+        name="hd_map_lane_oracle"
+        output="screen"
+        respawn="false"
+        args="--mode lane_oracle --camera-stack-root $(arg camera_stack_root) --cam-ip $(arg camera_ip) --cam-port $(arg lane_port) --mgeo-path $(arg mgeo_path) --cam-set-path $(arg cam_set_path) --sensor-id $(arg lane_oracle_sensor_id) --ego-status-topic $(arg ego_status_topic) --dashed-lane-topic $(arg dashed_lane_topic) --yaw-offset-deg $(arg hd_map_yaw_offset_deg) --lane-oracle-overlay $(arg lane_oracle_overlay)" />
 
   <node if="$(arg enable_yolo)"
         pkg="camera_perception"
