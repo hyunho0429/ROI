@@ -65,6 +65,7 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch enable_con
 | `require_dashed_lane` | `false` | 점선 인식 구현 후 `true`로 전환 |
 | `require_left_parallel_dynamic` | `true` | 왼쪽 차선 평행 주행 동적 객체 LiDAR 조건 사용 |
 | `left_parallel_dynamic_hold_s` | `0.5` | LiDAR 조건의 짧은 추적 누락 허용시간 |
+| `highway_latch_once` | `true` | 최초 고속도로 인지 후 상태를 노드 종료까지 유지 |
 | `car_detection_hold_s` | `2.0` | YOLO car 조건 유지시간 |
 | `enable_pedestrian_crossing` | `true` | YOLO person 기반 정지·재출발 |
 | `person_clear_confirmation_s` | `0.5` | person 미검출 후 재출발 확정 시간 |
@@ -96,13 +97,14 @@ YOLO 수신/표시와 모델 추론은 서로 다른 스레드에서 동작한�
 
 ## 고속도로 환경 기반 끼어들기 활성화
 
-통합 launch에서는 기본 YOLO의 COCO `car` 탐지 결과를
-`/perception/camera/car_detected`(`std_msgs/Bool`)로 발행한다. LiDAR 노드는 기존
+통합 launch에서는 기본 YOLO의 COCO `car`, `bus`, `truck` 탐지 결과를 기존 호환
+토픽 `/perception/camera/car_detected`(`std_msgs/Bool`)로 발행한다. LiDAR 노드는 기존
 map-frame Kalman-Hungarian 결과에서 왼쪽 옆 차선의 앞·옆·뒤 40m 범위를 확인하고,
 ego와 같은 방향으로 움직이는 객체가 있으면
 `/perception/lidar/left_lane_parallel_dynamic_detected`를 발행한다. 두 값이 모두
 `true`일 때만 `/perception/camera/highway_environment=true`가 되며, 이 동안에만
-왼쪽 끼어들기 판단, 관련 Bool 결과와 RViz 선이 활성화된다.
+왼쪽 끼어들기 판단, 관련 Bool 결과와 RViz 선이 활성화된다. 기본값에서는 이 상태를
+한 번 인지하면 이후 카메라나 LiDAR 입력이 사라져도 노드 종료 전까지 유지한다.
 
 LiDAR 조건은 `motion_state=MOVING`, 속도 1.0m/s 이상, ego 진행방향 오차 30도 이내,
 횡속도 1.5m/s 이하를 모두 요구하고 3회 연속 확인한다. `STATIC`, `STOPPED`,

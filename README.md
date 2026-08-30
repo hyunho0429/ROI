@@ -681,7 +681,7 @@ morai_udp_ekf_purepursuit_lidar_camera.launch
     ├── lane_camera  → Sensor/LaneCandidates.py
     ├── yolo_camera  → Sensor/YoloCamera_v2.py
     ├── highway_environment_gate
-    │    car_detected AND 왼쪽 평행 주행 동적 객체 → merge-gap 활성화
+    │    car/bus/truck AND 왼쪽 평행 주행 동적 객체 → merge-gap 활성화 후 유지
     └── pedestrian_crossing_fusion
          person_detected AND 가까운 동적 LiDAR 객체 → 정지/재출발
 ```
@@ -798,8 +798,9 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
 | `yolo_cpu_threads` | `1` | YOLO에 사용하는 PyTorch CPU 스레드 수 |
 | `enable_highway_gate` | `true` | 카메라 기반 고속도로 환경 게이트 실행 |
 | `require_dashed_lane` | `false` | `true`이면 car와 점선이 모두 탐지되어야 활성화 |
-| `require_left_parallel_dynamic` | `true` | YOLO car와 왼쪽 차선 평행 주행 동적 객체가 모두 있어야 활성화 |
+| `require_left_parallel_dynamic` | `true` | YOLO car/bus/truck과 왼쪽 차선 평행 주행 동적 객체가 모두 있어야 최초 활성화 |
 | `left_parallel_dynamic_hold_s` | `0.5` | 일시적인 LiDAR 추적 누락 허용시간 |
+| `highway_latch_once` | `true` | 고속도로 상태가 한 번 활성화되면 노드 종료 전까지 유지 |
 | `car_detection_hold_s` | `2.0` | 일시적인 YOLO 누락 시 car 조건 유지시간 |
 | `enable_pedestrian_crossing` | `true` | YOLO person 기반 정지·재출발 제어 |
 | `person_clear_confirmation_s` | `0.5` | person 미검출 후 재출발까지 연속 확인 시간 |
@@ -957,7 +958,8 @@ rostopic echo /perception/merge_gap/unavailable
 ```
 
 두 토픽은 모두 `std_msgs/Bool`이며 왼쪽 차선만 판단한다. 통합 카메라 launch에서는
-YOLO가 COCO `car`를 탐지하고, 동시에 LiDAR가 왼쪽 옆 차선의 앞·옆·뒤 40m 범위에서
+YOLO가 COCO `car`, `bus`, `truck` 중 하나를 탐지하고, 동시에 LiDAR가 왼쪽 옆
+차선의 앞·옆·뒤 40m 범위에서
 ego와 같은 방향으로 주행하는 동적 객체를 확인해야
 `/perception/camera/highway_environment=true`가 된다. 이때만 끼어들기 판단과 RViz
 왼쪽 선이 활성화된다. LiDAR 조건은 `/detection/obstacle_states`에서 `MOVING`만
@@ -965,8 +967,11 @@ ego와 같은 방향으로 주행하는 동적 객체를 확인해야
 3회 연속 검출을 요구한다. 따라서 `STATIC`, `STOPPED`, `UNKNOWN`, 교차 이동 및
 역주행 객체는 게이트를 켜지 않는다. 정상 활성 상태에서는 가능/불가능 두 값이 항상
 반대다. 게이트가 꺼질 때는 이전 가능 상태를 남기지 않도록 한 번
-`available=false`, `unavailable=true`를 발행한 뒤 판단 출력을 중단한다. HD MAP과
-점선 조건은 사용하지 않으며 기존 주행 제어에는 연결하지 않는다.
+`available=false`, `unavailable=true`를 발행한 뒤 판단 출력을 중단한다. 기본
+`highway_latch_once=true`에서는 최초 활성화 이후 고속도로 상태를 계속 유지하므로
+이 비활성 전환은 노드 재시작/종료 때만 발생한다. 이전처럼 입력에 따라 다시 꺼지게
+하려면 `highway_latch_once:=false`로 실행한다. HD MAP과 점선 조건은 사용하지
+않으며 기존 주행 제어에는 연결하지 않는다.
 
 ### 보행자 정지 및 재출발
 

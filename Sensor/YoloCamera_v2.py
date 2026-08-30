@@ -19,6 +19,10 @@ import time
 import cv2
 import numpy as np
 from Sensor.CameraUDP import LatestCameraReceiver
+from Sensor.highway_vehicle import (
+    HIGHWAY_VEHICLE_CLASSES,
+    highway_vehicle_detected,
+)
 
 # 공통 IP 설정 (기존 기본값은 유지하고 환경변수/CLI로 덮어쓸 수 있다.)
 IP = os.environ.get("MORAI_YOLO_CAM_IP", "0.0.0.0")
@@ -210,7 +214,7 @@ def main(ip=IP, port=PORT, base_model_path=BASE_MODEL_PATH,
                     base_results[0], base_model, (0, 255, 0), image.shape[0]
                 )
 
-                # Publish and display the COCO car/person result immediately.
+                # Publish and display the COCO road-vehicle/person result immediately.
                 # When null.pt exists, waiting for its second inference here
                 # nearly doubles the age of the frame shown in the YOLO window.
                 base_completed_at = time.monotonic()
@@ -245,7 +249,9 @@ def main(ip=IP, port=PORT, base_model_path=BASE_MODEL_PATH,
                         fps=smoothed_fps,
                     )
 
-                car_detected = "car" in detected_labels
+                # Preserve the existing topic name for compatibility. Its
+                # highway-gate meaning now covers car, bus, and truck.
+                car_detected = highway_vehicle_detected(detected_labels)
                 person_detected = "person" in detected_labels
                 with detection_state_lock:
                     detection_state["car"] = car_detected
@@ -255,7 +261,10 @@ def main(ip=IP, port=PORT, base_model_path=BASE_MODEL_PATH,
                 if car_detected:
                     rospy.loginfo_throttle(
                         1.0,
-                        "YOLO car detected; highway camera condition is true",
+                        "YOLO highway vehicle detected (%s); camera condition is true",
+                        ",".join(
+                            sorted(detected_labels.intersection(HIGHWAY_VEHICLE_CLASSES))
+                        ),
                     )
                 if person_detected:
                     rospy.logwarn_throttle(

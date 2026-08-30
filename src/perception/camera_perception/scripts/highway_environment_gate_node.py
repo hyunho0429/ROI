@@ -6,6 +6,8 @@ import time
 import rospy
 from std_msgs.msg import Bool
 
+from camera_perception.highway_environment import HighwayEnvironmentLatch
+
 
 def _param(name, default):
     return rospy.get_param("~" + name, default)
@@ -30,6 +32,7 @@ class HighwayEnvironmentGateNode:
         self.require_left_parallel_dynamic = bool(
             _param("require_left_parallel_dynamic", False)
         )
+        self.latch_once = bool(_param("latch_once", True))
         self.car_hold_s = float(_param("car_hold_s", 2.0))
         self.dashed_lane_hold_s = float(_param("dashed_lane_hold_s", 2.0))
         self.left_parallel_dynamic_hold_s = float(
@@ -49,6 +52,7 @@ class HighwayEnvironmentGateNode:
         self.last_dashed_lane_detected_at = None
         self.last_left_parallel_dynamic_at = None
         self.last_output = None
+        self.state_latch = HighwayEnvironmentLatch(self.latch_once)
 
         self.publisher = rospy.Publisher(
             self.output_topic, Bool, queue_size=1
@@ -79,12 +83,13 @@ class HighwayEnvironmentGateNode:
         rospy.logwarn(
             "Highway gate: car=%s dashed=%s required_dashed=%s "
             "left_parallel_dynamic=%s required_left_parallel_dynamic=%s "
-            "output=%s",
+            "latch_once=%s output=%s",
             self.car_detected_topic,
             self.dashed_lane_topic,
             self.require_dashed_lane,
             self.left_parallel_dynamic_topic,
             self.require_left_parallel_dynamic,
+            self.latch_once,
             self.output_topic,
         )
 
@@ -119,7 +124,7 @@ class HighwayEnvironmentGateNode:
             self.left_parallel_dynamic_hold_s,
             now,
         )
-        active = (
+        conditions_met = (
             car_active
             and (dashed_active if self.require_dashed_lane else True)
             and (
@@ -128,19 +133,21 @@ class HighwayEnvironmentGateNode:
                 else True
             )
         )
+        active = self.state_latch.update(conditions_met)
         self.publisher.publish(Bool(data=active))
 
         if active != self.last_output:
             rospy.logwarn(
                 "Highway environment gate changed: active=%s car=%s "
                 "dashed=%s dashed_required=%s left_parallel_dynamic=%s "
-                "left_parallel_dynamic_required=%s",
+                "left_parallel_dynamic_required=%s latched=%s",
                 active,
                 car_active,
                 dashed_active,
                 self.require_dashed_lane,
                 left_parallel_dynamic_active,
                 self.require_left_parallel_dynamic,
+                self.state_latch.latched,
             )
             self.last_output = active
 

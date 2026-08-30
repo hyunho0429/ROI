@@ -39,10 +39,11 @@
   <arg name="merge_highway_gate_required" default="$(arg enable_highway_gate)" />
   <!-- HD map/점선 조건은 사용하지 않는다. -->
   <arg name="require_dashed_lane" default="false" />
-  <!-- 끼어들기 환경 = YOLO car AND 왼쪽 차선 평행 주행 동적 객체. -->
+  <!-- 끼어들기 환경 = YOLO car/bus/truck AND 왼쪽 차선 평행 주행 동적 객체. -->
   <arg name="left_parallel_dynamic_topic" default="/perception/lidar/left_lane_parallel_dynamic_detected" />
   <arg name="require_left_parallel_dynamic" default="true" />
   <arg name="left_parallel_dynamic_hold_s" default="0.5" />
+  <arg name="highway_latch_once" default="true" />
   <arg name="car_detection_hold_s" default="2.0" />
   <arg name="enable_pedestrian_crossing" default="$(arg enable_yolo)" />
   <arg name="pedestrian_stop_topic" default="/perception/pedestrian_crossing/stop_required" />
@@ -94,6 +95,7 @@
     <arg name="left_parallel_dynamic_topic" value="$(arg left_parallel_dynamic_topic)" />
     <arg name="require_left_parallel_dynamic" value="$(arg require_left_parallel_dynamic)" />
     <arg name="left_parallel_dynamic_hold_s" value="$(arg left_parallel_dynamic_hold_s)" />
+    <arg name="highway_latch_once" value="$(arg highway_latch_once)" />
     <arg name="car_detection_hold_s" value="$(arg car_detection_hold_s)" />
     <arg name="enable_pedestrian_crossing" value="$(arg enable_pedestrian_crossing)" />
     <arg name="pedestrian_stop_topic" value="$(arg pedestrian_stop_topic)" />
