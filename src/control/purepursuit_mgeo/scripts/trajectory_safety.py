@@ -112,6 +112,70 @@ def _max_curvature(path) -> float:
     return maximum
 
 
+
+def check_path_collision(
+    path,
+    obstacles: Sequence[ObstacleBox],
+    vehicle_length_m: float,
+    vehicle_width_m: float,
+    vehicle_center_from_base_m: float,
+    collision_longitudinal_margin_m: float,
+    collision_lateral_margin_m: float,
+    collision_sample_stride: int = 1,
+):
+    """Return (collision_obstacle_id, path_index) for the first OBB overlap.
+
+    This is used by the path manager to guard the *remaining committed path*
+    during execution.  (None, None) means no current static OBB overlap.
+    """
+    if len(path) < 2:
+        return None, None
+
+    ego_length = max(
+        0.10,
+        float(vehicle_length_m)
+        + 2.0 * max(0.0, collision_longitudinal_margin_m),
+    )
+    ego_width = max(
+        0.10,
+        float(vehicle_width_m)
+        + 2.0 * max(0.0, collision_lateral_margin_m),
+    )
+    stride = max(1, int(collision_sample_stride))
+
+    for i in range(0, len(path), stride):
+        p = path[i]
+        tx, ty = _path_tangent(path, i)
+        yaw = math.atan2(ty, tx)
+        center_x = float(p.x) + float(vehicle_center_from_base_m) * tx
+        center_y = float(p.y) + float(vehicle_center_from_base_m) * ty
+
+        for obs in obstacles:
+            dx = obs.center_x - center_x
+            dy = obs.center_y - center_y
+            broad = (
+                0.5 * math.hypot(ego_length, ego_width)
+                + 0.5 * math.hypot(obs.length, obs.width)
+                + 0.25
+            )
+            if dx * dx + dy * dy > broad * broad:
+                continue
+            if _obb_overlap(
+                center_x,
+                center_y,
+                yaw,
+                ego_length,
+                ego_width,
+                obs.center_x,
+                obs.center_y,
+                obs.yaw,
+                max(0.10, obs.length),
+                max(0.10, obs.width),
+            ):
+                return obs.obstacle_id, i
+
+    return None, None
+
 def evaluate_candidate(
     candidate_index: int,
     candidate,
