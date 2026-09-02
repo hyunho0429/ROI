@@ -31,6 +31,8 @@ from nav_msgs.msg import Odometry, Path as RosPath
 from std_msgs.msg import ColorRGBA, String
 from visualization_msgs.msg import Marker, MarkerArray
 
+from trajectory_safety import ObstacleBox, CandidateEvaluation, evaluate_candidate
+
 from lidar_perception.msg import LidarObstacleArray
 from purepursuit_mgeo.path import PathPoint, load_mgeo_path
 from frenet_path import FrenetProjection, ReferencePath
@@ -242,7 +244,20 @@ class AvoidanceFrenetDebugNode:
 
         self.latest_odom: Optional[Odometry] = None
         self.latest_obstacles: Optional[LidarObstacleArray] = None
+        self.latest_odom_received_at: Optional[rospy.Time] = None
+        self.latest_obstacles_received_at: Optional[rospy.Time] = None
         self.last_current_link_idx: Optional[str] = None
+
+        # Last debug-only safety layer before active-path control integration.
+        self.odom_timeout_s = float(rospy.get_param("~odom_timeout_s", 0.50))
+        self.obstacle_timeout_s = float(rospy.get_param("~obstacle_timeout_s", 0.60))
+        self.collision_longitudinal_margin_m = float(rospy.get_param("~collision_longitudinal_margin_m", 0.25))
+        self.collision_lateral_margin_m = float(rospy.get_param("~collision_lateral_margin_m", 0.20))
+        self.wheelbase_m = float(rospy.get_param("~wheelbase_m", 3.0))
+        self.max_steering_rad = float(rospy.get_param("~max_steering_rad", 0.6981317008))
+        self.evaluation_speed_mps = float(rospy.get_param("~evaluation_speed_mps", 3.0))
+        self.max_lateral_accel_mps2 = float(rospy.get_param("~max_lateral_accel_mps2", 2.5))
+        self.collision_sample_stride = int(rospy.get_param("~collision_sample_stride", 1))
 
         self.global_pub = rospy.Publisher("~global_path", RosPath, queue_size=1, latch=True)
         self.candidate_pub = rospy.Publisher("~candidate_paths", MarkerArray, queue_size=1)
@@ -251,6 +266,8 @@ class AvoidanceFrenetDebugNode:
         self.link_pub = rospy.Publisher("~mgeo_links", MarkerArray, queue_size=1)
         self.ego_pub = rospy.Publisher("~ego_footprint", MarkerArray, queue_size=1)
         self.debug_pub = rospy.Publisher("~frenet_debug", String, queue_size=1)
+        self.selected_path_pub = rospy.Publisher("~selected_path", RosPath, queue_size=1)
+        self.evaluation_pub = rospy.Publisher("~candidate_evaluations", MarkerArray, queue_size=1)
 
         # Duplicate visualization topics in morai_lidar coordinates.  These are
         # ONLY for RViz; no planner/control computation uses this frame.
@@ -273,6 +290,12 @@ class AvoidanceFrenetDebugNode:
             self.lidar_ego_pub = rospy.Publisher(
                 self.lidar_viz_prefix + "/ego_footprint", MarkerArray, queue_size=1
             )
+            self.lidar_selected_path_pub = rospy.Publisher(
+                self.lidar_viz_prefix + "/selected_path", RosPath, queue_size=1
+            )
+            self.lidar_evaluation_pub = rospy.Publisher(
+                self.lidar_viz_prefix + "/candidate_evaluations", MarkerArray, queue_size=1
+            )
 
         self.odom_sub = rospy.Subscriber(
             self.odom_topic, Odometry, self._odom_callback, queue_size=5
@@ -287,7 +310,7 @@ class AvoidanceFrenetDebugNode:
         )
 
         rospy.loginfo(
-            "Frenet avoidance C.5 DEBUG: NO collision rejection, NO /ctrl_cmd. "
+            "Frenet avoidance D/E DEBUG: OBB collision + feasibility + selected path; NO /ctrl_cmd. "
             "vehicle=%.3fx%.3fx%.3f center_from_base=%.2f",
             self.vehicle_length_m,
             self.vehicle_width_m,
@@ -308,9 +331,11 @@ class AvoidanceFrenetDebugNode:
 
     def _odom_callback(self, msg: Odometry) -> None:
         self.latest_odom = msg
+        self.latest_odom_received_at = rospy.Time.now()
 
     def _obstacle_callback(self, msg: LidarObstacleArray) -> None:
         self.latest_obstacles = msg
+        self.latest_obstacles_received_at = rospy.Time.now()
 
     def _publish_global_path(self) -> None:
         msg = RosPath()
@@ -638,6 +663,100 @@ class AvoidanceFrenetDebugNode:
         result.markers.append(label)
         return result
 
+    def _candidate_to_ros_path(self, candidate: Optional[Candidate]) -> RosPath:
+        msg = RosPath()
+        msg.header.frame_id = self.map_frame
+        msg.header.stamp = rospy.Time.now()
+        if candidate is None:
+            return msg
+        for i, p in enumerate(candidate.path):
+            ps = PoseStamped()
+            ps.header = msg.header
+            ps.pose.position.x = p.x
+            ps.pose.position.y = p.y
+            ps.pose.position.z = p.z + 0.15
+            tx, ty = _path_tangent(candidate.path, i)
+            ps.pose.orientation = _yaw_to_quaternion(math.atan2(ty, tx))
+            msg.poses.append(ps)
+        return msg
+
+    def _ros_path_to_lidar(self, path_msg: RosPath, odom: Odometry) -> RosPath:
+        out = RosPath()
+        out.header.frame_id = self.lidar_viz_frame
+        out.header.stamp = path_msg.header.stamp
+        for ps_in in path_msg.poses:
+            ps = PoseStamped()
+            ps.header = out.header
+            x, y, z = self._map_xyz_to_lidar(
+                ps_in.pose.position.x, ps_in.pose.position.y, ps_in.pose.position.z, odom
+            )
+            ps.pose.position.x, ps.pose.position.y, ps.pose.position.z = x, y, z
+            yaw_map = _quaternion_to_yaw(ps_in.pose.orientation)
+            ps.pose.orientation = _yaw_to_quaternion(self._map_yaw_to_lidar(yaw_map, odom))
+            out.poses.append(ps)
+        return out
+
+    def _evaluation_markers(
+        self,
+        candidates: List[Candidate],
+        evaluations: List[CandidateEvaluation],
+        selected_index: Optional[int],
+    ) -> MarkerArray:
+        result = MarkerArray()
+        clear = Marker()
+        clear.action = Marker.DELETEALL
+        result.markers.append(clear)
+        for ev in evaluations:
+            if ev.candidate_index < 0 or ev.candidate_index >= len(candidates):
+                continue
+            candidate = candidates[ev.candidate_index]
+            if not candidate.path:
+                continue
+            line = Marker()
+            line.header.frame_id = self.map_frame
+            line.header.stamp = rospy.Time.now()
+            line.ns = "candidate_safety"
+            line.id = ev.candidate_index * 2
+            line.type = Marker.LINE_STRIP
+            line.action = Marker.ADD
+            line.pose.orientation.w = 1.0
+            line.scale.x = 0.32 if ev.candidate_index == selected_index else 0.12
+            if ev.candidate_index == selected_index:
+                line.color.r, line.color.g, line.color.b, line.color.a = 0.15, 1.0, 0.20, 1.0
+            elif ev.valid:
+                line.color.r, line.color.g, line.color.b, line.color.a = 0.20, 0.95, 0.35, 0.75
+            elif ev.reason == "collision":
+                line.color.r, line.color.g, line.color.b, line.color.a = 1.0, 0.05, 0.05, 0.90
+            else:
+                line.color.r, line.color.g, line.color.b, line.color.a = 1.0, 0.75, 0.05, 0.90
+            line.points = [_point(p.x, p.y, p.z + 0.22) for p in candidate.path]
+            result.markers.append(line)
+
+            label = Marker()
+            label.header = line.header
+            label.ns = "candidate_safety_labels"
+            label.id = ev.candidate_index * 2 + 1
+            label.type = Marker.TEXT_VIEW_FACING
+            label.action = Marker.ADD
+            label.pose.orientation.w = 1.0
+            anchor = candidate.path[min(len(candidate.path) - 1, len(candidate.path) // 2)]
+            label.pose.position.x = anchor.x
+            label.pose.position.y = anchor.y
+            label.pose.position.z = anchor.z + 1.5
+            label.scale.z = 0.34
+            label.color.r = label.color.g = label.color.b = 1.0
+            label.color.a = 1.0
+            prefix = "SELECT" if ev.candidate_index == selected_index else ("SAFE" if ev.valid else "REJECT")
+            detail = ev.reason
+            if ev.collision_obstacle_id is not None:
+                detail += " obs={}".format(ev.collision_obstacle_id)
+            label.text = "{} #{} {} k={:.3f} steer={:.2f} aY={:.2f}".format(
+                prefix, ev.candidate_index, detail,
+                ev.max_curvature_1pm, ev.max_steering_rad, ev.max_lateral_accel_mps2,
+            )
+            result.markers.append(label)
+        return result
+
     def _link_markers(self, current_link) -> MarkerArray:
         result = MarkerArray()
         clear = Marker()
@@ -827,9 +946,22 @@ class AvoidanceFrenetDebugNode:
         return result, summaries
 
     def _timer_callback(self, _event) -> None:
-        if self.latest_odom is None:
+        now = rospy.Time.now()
+        if self.latest_odom is None or self.latest_odom_received_at is None:
             rospy.logwarn_throttle(3.0, "Waiting for %s", self.odom_topic)
             return
+        odom_age = (now - self.latest_odom_received_at).to_sec()
+        if odom_age > self.odom_timeout_s:
+            rospy.logwarn_throttle(1.0, "STALE odometry age=%.2fs; planner output suppressed", odom_age)
+            self.selected_path_pub.publish(self._candidate_to_ros_path(None))
+            return
+
+        obstacles_fresh = (
+            self.latest_obstacles is not None
+            and self.latest_obstacles_received_at is not None
+            and (now - self.latest_obstacles_received_at).to_sec() <= self.obstacle_timeout_s
+        )
+        planning_obstacles = self.latest_obstacles if obstacles_fresh else None
 
         pose = self.latest_odom.pose.pose
         ego_projection = self.reference.project(pose.position.x, pose.position.y)
@@ -840,7 +972,7 @@ class AvoidanceFrenetDebugNode:
             rospy.logwarn_throttle(2.0, "No MGeo link near current global reference point")
             return
 
-        obstacle_infos = self._obstacle_infos(self.latest_obstacles, ego_projection)
+        obstacle_infos = self._obstacle_infos(planning_obstacles, ego_projection)
         threats = [info for info in obstacle_infos if info.threatening]
         threats.sort(key=lambda info: info.near_edge_distance_m)
         active_threat = threats[0] if threats else None
@@ -891,8 +1023,49 @@ class AvoidanceFrenetDebugNode:
 
         candidates: List[Candidate] = list(lane_candidates) + list(bypass_candidates)
 
+        safety_obstacles = []
+        if planning_obstacles is not None:
+            for obs in planning_obstacles.obstacles:
+                safety_obstacles.append(
+                    ObstacleBox(
+                        obstacle_id=int(obs.id),
+                        center_x=float(obs.center_x_map),
+                        center_y=float(obs.center_y_map),
+                        yaw=float(obs.yaw),
+                        length=max(0.10, float(obs.length)),
+                        width=max(0.10, float(obs.width)),
+                    )
+                )
+
+        evaluations: List[CandidateEvaluation] = []
+        for candidate_index, candidate in enumerate(candidates):
+            evaluations.append(
+                evaluate_candidate(
+                    candidate_index=candidate_index,
+                    candidate=candidate,
+                    obstacles=safety_obstacles,
+                    vehicle_length_m=self.vehicle_length_m,
+                    vehicle_width_m=self.vehicle_width_m,
+                    vehicle_center_from_base_m=self.vehicle_center_from_base_m,
+                    collision_longitudinal_margin_m=self.collision_longitudinal_margin_m,
+                    collision_lateral_margin_m=self.collision_lateral_margin_m,
+                    wheelbase_m=self.wheelbase_m,
+                    max_steering_rad=self.max_steering_rad,
+                    evaluation_speed_mps=self.evaluation_speed_mps,
+                    max_lateral_accel_mps2=self.max_lateral_accel_mps2,
+                    collision_sample_stride=self.collision_sample_stride,
+                )
+            )
+
+        valid_evaluations = [ev for ev in evaluations if ev.valid]
+        selected_evaluation = min(valid_evaluations, key=lambda ev: ev.cost) if valid_evaluations else None
+        selected_index = selected_evaluation.candidate_index if selected_evaluation is not None else None
+        selected_candidate = candidates[selected_index] if selected_index is not None else None
+        selected_path_msg = self._candidate_to_ros_path(selected_candidate)
+        evaluation_markers = self._evaluation_markers(candidates, evaluations, selected_index)
+
         obstacle_markers, obstacle_summaries = self._obstacle_markers(
-            self.latest_obstacles, obstacle_infos
+            planning_obstacles, obstacle_infos
         )
         ego_markers = self._ego_markers(self.latest_odom)
         link_markers = self._link_markers(current_link)
@@ -905,6 +1078,8 @@ class AvoidanceFrenetDebugNode:
         self.link_pub.publish(link_markers)
         self.candidate_pub.publish(candidate_markers)
         self.corridor_pub.publish(corridor_markers)
+        self.selected_path_pub.publish(selected_path_msg)
+        self.evaluation_pub.publish(evaluation_markers)
 
         # Second visualization-only copy in the moving LiDAR frame.
         if self.publish_lidar_visualization:
@@ -925,6 +1100,12 @@ class AvoidanceFrenetDebugNode:
             )
             self.lidar_corridor_pub.publish(
                 self._marker_array_to_lidar(corridor_markers, self.latest_odom)
+            )
+            self.lidar_selected_path_pub.publish(
+                self._ros_path_to_lidar(selected_path_msg, self.latest_odom)
+            )
+            self.lidar_evaluation_pub.publish(
+                self._marker_array_to_lidar(evaluation_markers, self.latest_odom)
             )
 
         debug_payload = {
@@ -951,6 +1132,29 @@ class AvoidanceFrenetDebugNode:
             "lane_candidate_count": len(lane_candidates),
             "bypass_candidate_count": len(bypass_candidates),
             "candidate_count": len(candidates),
+            "safe_candidate_count": len(valid_evaluations),
+            "selected_candidate_index": selected_index,
+            "selected_candidate_kind": getattr(selected_candidate, "kind", None) if selected_candidate else None,
+            "selected_candidate_side": getattr(selected_candidate, "side", None) if selected_candidate else None,
+            "selected_cost": round(selected_evaluation.cost, 4) if selected_evaluation else None,
+            "input_freshness": {
+                "odom_age_s": round(odom_age, 3),
+                "obstacles_fresh": obstacles_fresh,
+                "obstacle_age_s": round((now - self.latest_obstacles_received_at).to_sec(), 3) if self.latest_obstacles_received_at else None,
+            },
+            "candidate_evaluations": [
+                {
+                    "index": ev.candidate_index,
+                    "valid": ev.valid,
+                    "reason": ev.reason,
+                    "collision_obstacle_id": ev.collision_obstacle_id,
+                    "first_collision_path_index": ev.first_collision_path_index,
+                    "max_curvature_1pm": round(ev.max_curvature_1pm, 4),
+                    "max_steering_rad": round(ev.max_steering_rad, 4),
+                    "max_lateral_accel_mps2": round(ev.max_lateral_accel_mps2, 3),
+                    "cost": round(ev.cost, 4) if math.isfinite(ev.cost) else None,
+                } for ev in evaluations
+            ],
             "obstacle_count": len(obstacle_summaries),
             "obstacles": obstacle_summaries,
             "bypass_note": "debug free-space only; road polygon/boundary check not implemented",
