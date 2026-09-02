@@ -1,9 +1,9 @@
 <launch>
-  <!-- Stage C.5 visual/debug only. Never publishes /ctrl_cmd. -->
+  <!-- Stage D/E visual safety evaluation. Never publishes /ctrl_cmd. -->
   <arg name="path_file"
        default="$(find morai_bringup)/../../../data/routes/2026_molit_comp_global_path.txt" />
   <arg name="link_set_file"
-       default="$(find morai_bringup)/../../../data/mgeo/R_KR_PR_K-city_2025/link_set.json" />
+       default="$(find morai_bringup)/../../../data/mgeo/link_set.json" />
 
   <arg name="odom_topic" default="/localization/odometry" />
   <arg name="obstacle_topic" default="/perception/lidar/tracked_obstacles_map" />
@@ -60,6 +60,18 @@
   <arg name="bypass_min_transition_length_m" default="4.0" />
   <arg name="allow_bypass_with_adjacent_lane" default="false" />
 
+  <!-- Candidate safety evaluation. These affect only debug selection, not control. -->
+  <arg name="odom_timeout_s" default="0.50" />
+  <arg name="obstacle_timeout_s" default="0.60" />
+  <arg name="collision_longitudinal_margin_m" default="0.25" />
+  <arg name="collision_lateral_margin_m" default="0.20" />
+  <arg name="wheelbase_m" default="3.0" />
+  <arg name="max_steering_rad" default="0.6981317008" />
+  <!-- First real-driving tests should be slower than the current 6 m/s cruise. -->
+  <arg name="evaluation_speed_mps" default="3.0" />
+  <arg name="max_lateral_accel_mps2" default="2.5" />
+  <arg name="collision_sample_stride" default="1" />
+
   <node if="$(arg publish_lidar_tf)"
         pkg="tf"
         type="static_transform_publisher"
@@ -110,5 +122,15 @@
     <param name="bypass_max_abs_d_m" value="$(arg bypass_max_abs_d_m)" />
     <param name="bypass_min_transition_length_m" value="$(arg bypass_min_transition_length_m)" />
     <param name="allow_bypass_with_adjacent_lane" value="$(arg allow_bypass_with_adjacent_lane)" />
+
+    <param name="odom_timeout_s" value="$(arg odom_timeout_s)" />
+    <param name="obstacle_timeout_s" value="$(arg obstacle_timeout_s)" />
+    <param name="collision_longitudinal_margin_m" value="$(arg collision_longitudinal_margin_m)" />
+    <param name="collision_lateral_margin_m" value="$(arg collision_lateral_margin_m)" />
+    <param name="wheelbase_m" value="$(arg wheelbase_m)" />
+    <param name="max_steering_rad" value="$(arg max_steering_rad)" />
+    <param name="evaluation_speed_mps" value="$(arg evaluation_speed_mps)" />
+    <param name="max_lateral_accel_mps2" value="$(arg max_lateral_accel_mps2)" />
+    <param name="collision_sample_stride" value="$(arg collision_sample_stride)" />
   </node>
 </launch>
