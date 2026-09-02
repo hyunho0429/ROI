@@ -8,11 +8,16 @@ Adds to the previous A/B/C stage:
   and no adjacent MGeo lane is available,
 * candidate swept-width / sparse vehicle-footprint visualization.
 
-Still intentionally NOT implemented:
-* candidate collision rejection,
+Stage D/E/F planner responsibilities included here:
+* static obstacle OBB candidate rejection,
+* curvature/steering/lateral-acceleration feasibility checks,
+* deterministic best-candidate selection,
+* small control-facing status topics for the separate path manager.
+
+Still intentionally NOT implemented here:
 * road-polygon / lane-boundary legality for bypass candidates,
-* cost / best-candidate selection,
-* active path switching,
+* dynamic obstacle prediction,
+* active-path commitment/state handling,
 * /ctrl_cmd publishing.
 """
 
@@ -28,7 +33,7 @@ from typing import List, Optional, Sequence, Union
 import rospy
 from geometry_msgs.msg import Point, PoseStamped, Quaternion
 from nav_msgs.msg import Odometry, Path as RosPath
-from std_msgs.msg import ColorRGBA, String
+from std_msgs.msg import Bool, ColorRGBA, String
 from visualization_msgs.msg import Marker, MarkerArray
 
 from trajectory_safety import ObstacleBox, CandidateEvaluation, evaluate_candidate
@@ -269,6 +274,14 @@ class AvoidanceFrenetDebugNode:
         self.selected_path_pub = rospy.Publisher("~selected_path", RosPath, queue_size=1)
         self.evaluation_pub = rospy.Publisher("~candidate_evaluations", MarkerArray, queue_size=1)
 
+        # Small control-facing status topics.  They deliberately use standard
+        # messages so the path manager can remain independent of custom msgs.
+        self.planner_ready_pub = rospy.Publisher("~planner_ready", Bool, queue_size=1)
+        self.avoidance_required_pub = rospy.Publisher("~avoidance_required", Bool, queue_size=1)
+        self.safe_path_available_pub = rospy.Publisher("~safe_path_available", Bool, queue_size=1)
+        self.selected_kind_pub = rospy.Publisher("~selected_kind", String, queue_size=1)
+        self.selected_side_pub = rospy.Publisher("~selected_side", String, queue_size=1)
+
         # Duplicate visualization topics in morai_lidar coordinates.  These are
         # ONLY for RViz; no planner/control computation uses this frame.
         if self.publish_lidar_visualization:
@@ -328,6 +341,20 @@ class AvoidanceFrenetDebugNode:
                 self.lidar_z_m,
                 math.degrees(self.lidar_yaw_rad),
             )
+
+    def _publish_control_status(
+        self,
+        planner_ready: bool,
+        avoidance_required: bool,
+        safe_path_available: bool,
+        selected_kind: str = "",
+        selected_side: str = "",
+    ) -> None:
+        self.planner_ready_pub.publish(Bool(data=bool(planner_ready)))
+        self.avoidance_required_pub.publish(Bool(data=bool(avoidance_required)))
+        self.safe_path_available_pub.publish(Bool(data=bool(safe_path_available)))
+        self.selected_kind_pub.publish(String(data=str(selected_kind or "")))
+        self.selected_side_pub.publish(String(data=str(selected_side or "")))
 
     def _odom_callback(self, msg: Odometry) -> None:
         self.latest_odom = msg
@@ -949,11 +976,13 @@ class AvoidanceFrenetDebugNode:
         now = rospy.Time.now()
         if self.latest_odom is None or self.latest_odom_received_at is None:
             rospy.logwarn_throttle(3.0, "Waiting for %s", self.odom_topic)
+            self._publish_control_status(False, False, False)
             return
         odom_age = (now - self.latest_odom_received_at).to_sec()
         if odom_age > self.odom_timeout_s:
             rospy.logwarn_throttle(1.0, "STALE odometry age=%.2fs; planner output suppressed", odom_age)
             self.selected_path_pub.publish(self._candidate_to_ros_path(None))
+            self._publish_control_status(False, False, False)
             return
 
         obstacles_fresh = (
@@ -970,6 +999,8 @@ class AvoidanceFrenetDebugNode:
 
         if current_link is None:
             rospy.logwarn_throttle(2.0, "No MGeo link near current global reference point")
+            self.selected_path_pub.publish(self._candidate_to_ros_path(None))
+            self._publish_control_status(False, False, False)
             return
 
         obstacle_infos = self._obstacle_infos(planning_obstacles, ego_projection)
@@ -1063,6 +1094,15 @@ class AvoidanceFrenetDebugNode:
         selected_candidate = candidates[selected_index] if selected_index is not None else None
         selected_path_msg = self._candidate_to_ros_path(selected_candidate)
         evaluation_markers = self._evaluation_markers(candidates, evaluations, selected_index)
+
+        planner_ready = bool(obstacles_fresh)
+        self._publish_control_status(
+            planner_ready=planner_ready,
+            avoidance_required=active_threat is not None,
+            safe_path_available=selected_candidate is not None,
+            selected_kind=getattr(selected_candidate, "kind", "") if selected_candidate else "",
+            selected_side=getattr(selected_candidate, "side", "") if selected_candidate else "",
+        )
 
         obstacle_markers, obstacle_summaries = self._obstacle_markers(
             planning_obstacles, obstacle_infos
