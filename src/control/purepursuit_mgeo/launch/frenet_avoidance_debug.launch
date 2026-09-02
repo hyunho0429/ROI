@@ -60,7 +60,7 @@
   <arg name="bypass_min_transition_length_m" default="4.0" />
   <arg name="allow_bypass_with_adjacent_lane" default="false" />
 
-  <!-- Candidate safety evaluation. These affect only debug selection, not control. -->
+  <!-- Candidate safety evaluation. Stage F path manager consumes the selected safe path. -->
   <arg name="odom_timeout_s" default="0.50" />
   <arg name="obstacle_timeout_s" default="0.60" />
   <arg name="collision_longitudinal_margin_m" default="0.25" />
