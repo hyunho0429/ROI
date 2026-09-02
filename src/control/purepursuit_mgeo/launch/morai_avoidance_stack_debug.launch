@@ -3,7 +3,7 @@
        and the avoidance evaluator.  Keep control disabled at this stage. -->
   <arg name="morai_host_ip" default="192.168.0.148" />
   <arg name="path_file" default="$(find morai_bringup)/../../../data/routes/2026_molit_comp_global_path.txt" />
-  <arg name="link_set_file" default="$(find morai_bringup)/../../../data/mgeo/link_set.json" />
+  <arg name="link_set_file" default="$(find morai_bringup)/../../../data/mgeo/R_KR_PR_K-city_2025/link_set.json" />
 
   <include file="$(find morai_bringup)/launch/morai_udp_ekf_purepursuit_lidar_camera.launch">
     <arg name="morai_host_ip" value="$(arg morai_host_ip)" />
