@@ -186,6 +186,16 @@ class AvoidancePathManager:
 
         global_points = load_mgeo_path(path_file)
         self.reference = ReferencePath(global_points)
+        self.closed_loop_endpoint_tolerance_m = float(
+            rospy.get_param("~closed_loop_endpoint_tolerance_m", 1.0)
+        )
+        endpoint_gap_m = math.hypot(
+            global_points[-1].x - global_points[0].x,
+            global_points[-1].y - global_points[0].y,
+        )
+        self.reference_is_closed_loop = (
+            endpoint_gap_m <= self.closed_loop_endpoint_tolerance_m
+        )
 
         self.latest_odom: Optional[Odometry] = None
         self.latest_odom_at: Optional[rospy.Time] = None
@@ -259,6 +269,12 @@ class AvoidancePathManager:
             rospy.get_name(),
             rospy.get_name(),
         )
+        rospy.logwarn(
+            "Reference route closed_loop=%s endpoint_gap=%.3fm tolerance=%.3fm",
+            self.reference_is_closed_loop,
+            endpoint_gap_m,
+            self.closed_loop_endpoint_tolerance_m,
+        )
 
     def _mark_planner_status(self) -> None:
         self.planner_status_at = rospy.Time.now()
@@ -310,22 +326,63 @@ class AvoidancePathManager:
         return msg
 
     def _normal_path(self, ego_projection) -> List[PathPoint]:
-        start_s = max(0.0, ego_projection.s - self.normal_back_m)
-        end_s = min(
-            self.reference.total_length_m,
-            ego_projection.s + self.normal_forward_m,
-        )
-        start_i = max(
-            0,
-            bisect.bisect_left(self.reference.cumulative_s, start_s) - 1,
-        )
-        end_i = min(
-            len(self.reference.points),
-            bisect.bisect_right(self.reference.cumulative_s, end_s) + 1,
-        )
-        result = list(self.reference.points[start_i:end_i])
+        total = self.reference.total_length_m
+
+        # Open route: preserve the original behavior.
+        if not self.reference_is_closed_loop or total <= 1.0e-6:
+            start_s = max(0.0, ego_projection.s - self.normal_back_m)
+            end_s = min(total, ego_projection.s + self.normal_forward_m)
+            start_i = max(
+                0,
+                bisect.bisect_left(self.reference.cumulative_s, start_s) - 1,
+            )
+            end_i = min(
+                len(self.reference.points),
+                bisect.bisect_right(self.reference.cumulative_s, end_s) + 1,
+            )
+            result = list(self.reference.points[start_i:end_i])
+            if len(result) < 2:
+                return list(self.reference.points[-2:])
+            return result
+
+        # Closed route: s is allowed to run below 0 / above total and each
+        # crossed lap is mapped back into [0, total].  This keeps the active
+        # path continuous across the global-path end/start seam instead of
+        # clamping it to the final few points.
+        start_unwrapped = ego_projection.s - self.normal_back_m
+        end_unwrapped = ego_projection.s + self.normal_forward_m
+        first_lap = int(math.floor(start_unwrapped / total))
+        last_lap = int(math.floor((end_unwrapped - 1.0e-9) / total))
+
+        result: List[PathPoint] = []
+        duplicate_tol2 = 1.0e-8
+
+        for lap in range(first_lap, last_lap + 1):
+            lap_origin = lap * total
+            local_start = max(0.0, start_unwrapped - lap_origin)
+            local_end = min(total, end_unwrapped - lap_origin)
+            if local_end < local_start:
+                continue
+
+            start_i = max(
+                0,
+                bisect.bisect_left(self.reference.cumulative_s, local_start) - 1,
+            )
+            end_i = min(
+                len(self.reference.points),
+                bisect.bisect_right(self.reference.cumulative_s, local_end) + 1,
+            )
+
+            for point in self.reference.points[start_i:end_i]:
+                if result:
+                    dx = point.x - result[-1].x
+                    dy = point.y - result[-1].y
+                    if dx * dx + dy * dy <= duplicate_tol2:
+                        continue
+                result.append(point)
+
         if len(result) < 2:
-            return list(self.reference.points[-2:])
+            return list(self.reference.points[:2])
         return result
 
     def _remaining_committed(self, x: float, y: float) -> Tuple[List[PathPoint], int, float, float]:
