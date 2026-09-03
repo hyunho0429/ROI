@@ -171,7 +171,7 @@ class AvoidanceFrenetDebugNode:
             "~obstacle_topic", "/perception/lidar/tracked_obstacles_map"
         )
         self.rate_hz = float(rospy.get_param("~rate_hz", 10.0))
-        self.local_length_m = float(rospy.get_param("~local_length_m", 45.0))
+        self.local_length_m = float(rospy.get_param("~local_length_m", 55.0))
         self.sample_spacing_m = float(rospy.get_param("~sample_spacing_m", 0.5))
         self.obstacle_display_height_m = float(
             rospy.get_param("~obstacle_display_height_m", 1.5)
@@ -190,12 +190,12 @@ class AvoidanceFrenetDebugNode:
             rospy.get_param("~vehicle_center_from_base_m", 1.50)
         )
         self.candidate_corridor_margin_m = float(
-            rospy.get_param("~candidate_corridor_margin_m", 0.20)
+            rospy.get_param("~candidate_corridor_margin_m", 0.45)
         )
 
-        self.trigger_distance_m = float(rospy.get_param("~trigger_distance_m", 30.0))
+        self.trigger_distance_m = float(rospy.get_param("~trigger_distance_m", 35.0))
         self.trigger_lateral_margin_m = float(
-            rospy.get_param("~trigger_lateral_margin_m", 0.25)
+            rospy.get_param("~trigger_lateral_margin_m", 0.35)
         )
 
         self.start_distances_m = _parse_float_list(
@@ -208,24 +208,24 @@ class AvoidanceFrenetDebugNode:
         )
 
         self.bypass_lateral_margin_m = float(
-            rospy.get_param("~bypass_lateral_margin_m", 0.30)
+            rospy.get_param("~bypass_lateral_margin_m", 0.85)
         )
         self.bypass_longitudinal_margin_m = float(
-            rospy.get_param("~bypass_longitudinal_margin_m", 2.0)
+            rospy.get_param("~bypass_longitudinal_margin_m", 3.0)
         )
         self.bypass_departure_length_m = float(
-            rospy.get_param("~bypass_departure_length_m", 10.0)
+            rospy.get_param("~bypass_departure_length_m", 16.0)
         )
         self.bypass_return_length_m = float(
-            rospy.get_param("~bypass_return_length_m", 10.0)
+            rospy.get_param("~bypass_return_length_m", 14.0)
         )
         self.bypass_extra_clearances_m = _parse_float_list(
-            rospy.get_param("~bypass_extra_clearances_m", [0.0, 0.35]),
-            [0.0, 0.35],
+            rospy.get_param("~bypass_extra_clearances_m", [0.0, 0.4, 0.8]),
+            [0.0, 0.4, 0.8],
         )
-        self.bypass_max_abs_d_m = float(rospy.get_param("~bypass_max_abs_d_m", 3.0))
+        self.bypass_max_abs_d_m = float(rospy.get_param("~bypass_max_abs_d_m", 3.8))
         self.bypass_min_transition_length_m = float(
-            rospy.get_param("~bypass_min_transition_length_m", 4.0)
+            rospy.get_param("~bypass_min_transition_length_m", 6.0)
         )
         self.allow_bypass_with_adjacent_lane = bool(
             rospy.get_param("~allow_bypass_with_adjacent_lane", False)
@@ -256,11 +256,11 @@ class AvoidanceFrenetDebugNode:
         # Last debug-only safety layer before active-path control integration.
         self.odom_timeout_s = float(rospy.get_param("~odom_timeout_s", 0.50))
         self.obstacle_timeout_s = float(rospy.get_param("~obstacle_timeout_s", 0.60))
-        self.collision_longitudinal_margin_m = float(rospy.get_param("~collision_longitudinal_margin_m", 0.25))
-        self.collision_lateral_margin_m = float(rospy.get_param("~collision_lateral_margin_m", 0.20))
+        self.collision_longitudinal_margin_m = float(rospy.get_param("~collision_longitudinal_margin_m", 0.40))
+        self.collision_lateral_margin_m = float(rospy.get_param("~collision_lateral_margin_m", 0.45))
         self.wheelbase_m = float(rospy.get_param("~wheelbase_m", 3.0))
         self.max_steering_rad = float(rospy.get_param("~max_steering_rad", 0.6981317008))
-        self.evaluation_speed_mps = float(rospy.get_param("~evaluation_speed_mps", 3.0))
+        self.evaluation_speed_mps = float(rospy.get_param("~evaluation_speed_mps", 2.0))
         self.max_lateral_accel_mps2 = float(rospy.get_param("~max_lateral_accel_mps2", 2.5))
         self.collision_sample_stride = int(rospy.get_param("~collision_sample_stride", 1))
 
@@ -323,7 +323,7 @@ class AvoidanceFrenetDebugNode:
         )
 
         rospy.loginfo(
-            "Frenet avoidance D/E DEBUG: OBB collision + feasibility + selected path; NO /ctrl_cmd. "
+            "Frenet avoidance F5: ego_d-continuous bypass replanning + OBB safety; NO /ctrl_cmd. "
             "vehicle=%.3fx%.3fx%.3f center_from_base=%.2f",
             self.vehicle_length_m,
             self.vehicle_width_m,
@@ -994,6 +994,14 @@ class AvoidanceFrenetDebugNode:
 
         pose = self.latest_odom.pose.pose
         ego_projection = self.reference.project(pose.position.x, pose.position.y)
+        ego_yaw = _quaternion_to_yaw(pose.orientation)
+        reference_yaw = math.atan2(
+            ego_projection.tangent_y, ego_projection.tangent_x
+        )
+        ego_heading_error = _normalize_angle(ego_yaw - reference_yaw)
+        # dd/ds = tan(heading error). Clamp noisy/localization spikes so a
+        # single bad yaw sample cannot create an extreme replanning polynomial.
+        ego_d_slope = max(-0.70, min(0.70, math.tan(ego_heading_error)))
         reference_point = self.reference.frenet_to_map(ego_projection.s, 0.0)
         current_link = self.link_index.nearest_link(reference_point.x, reference_point.y)
 
@@ -1034,6 +1042,8 @@ class AvoidanceFrenetDebugNode:
             bypass_candidates = generate_frenet_bypass_candidates(
                 reference=self.reference,
                 ego_s=ego_projection.s,
+                ego_d=ego_projection.d,
+                ego_d_slope=ego_d_slope,
                 obstacle_id=active_threat.obstacle_id,
                 obstacle_s=active_threat.projection.s,
                 obstacle_d=active_threat.projection.d,
@@ -1153,6 +1163,8 @@ class AvoidanceFrenetDebugNode:
             "ego": {
                 "s_m": round(ego_projection.s, 3),
                 "d_m": round(ego_projection.d, 3),
+                "heading_error_deg": round(math.degrees(ego_heading_error), 3),
+                "d_slope": round(ego_d_slope, 4),
             },
             "vehicle": {
                 "length_m": self.vehicle_length_m,
@@ -1228,7 +1240,7 @@ class AvoidanceFrenetDebugNode:
 
         rospy.loginfo_throttle(
             1.0,
-            "Frenet C.5 mode=%s ego(s=%.1f,d=%+.2f) threats=%d lane=%d bypass=%d",
+            "Frenet F5 mode=%s ego(s=%.1f,d=%+.2f) threats=%d lane=%d bypass=%d",
             mode,
             ego_projection.s,
             ego_projection.d,
@@ -1248,3 +1260,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+  
