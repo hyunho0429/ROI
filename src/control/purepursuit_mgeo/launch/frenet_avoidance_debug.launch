@@ -29,7 +29,7 @@
   <arg name="publish_lidar_tf" default="true" />
 
   <arg name="rate_hz" default="10.0" />
-  <arg name="local_length_m" default="45.0" />
+  <arg name="local_length_m" default="55.0" />
   <arg name="sample_spacing_m" default="0.5" />
 
   <!-- Confirmed vehicle dimensions. -->
@@ -38,12 +38,12 @@
   <arg name="vehicle_height_m" default="2.434" />
   <!-- Provisional: Pure Pursuit treats base_link as rear axle center. Verify in RViz. -->
   <arg name="vehicle_center_from_base_m" default="1.50" />
-  <arg name="candidate_corridor_margin_m" default="0.20" />
+  <arg name="candidate_corridor_margin_m" default="0.45" />
 
   <!-- A LiDAR track triggers avoidance candidates only when it overlaps the
        global-path vehicle corridor and is close enough ahead. -->
-  <arg name="trigger_distance_m" default="30.0" />
-  <arg name="trigger_lateral_margin_m" default="0.25" />
+  <arg name="trigger_distance_m" default="35.0" />
+  <arg name="trigger_lateral_margin_m" default="0.35" />
 
   <!-- Adjacent-lane sampling. -->
   <arg name="lane_change_start_distances_m" default="[3.0, 7.0, 11.0]" />
@@ -51,24 +51,24 @@
   <arg name="always_show_lane_candidates" default="false" />
 
   <!-- One-lane/free-space bypass sampling. This does NOT yet check road polygons. -->
-  <arg name="bypass_lateral_margin_m" default="0.30" />
-  <arg name="bypass_longitudinal_margin_m" default="2.0" />
-  <arg name="bypass_departure_length_m" default="10.0" />
-  <arg name="bypass_return_length_m" default="10.0" />
-  <arg name="bypass_extra_clearances_m" default="[0.0, 0.35]" />
-  <arg name="bypass_max_abs_d_m" default="3.0" />
-  <arg name="bypass_min_transition_length_m" default="4.0" />
+  <arg name="bypass_lateral_margin_m" default="0.85" />
+  <arg name="bypass_longitudinal_margin_m" default="3.0" />
+  <arg name="bypass_departure_length_m" default="16.0" />
+  <arg name="bypass_return_length_m" default="14.0" />
+  <arg name="bypass_extra_clearances_m" default="[0.0, 0.4, 0.8]" />
+  <arg name="bypass_max_abs_d_m" default="3.8" />
+  <arg name="bypass_min_transition_length_m" default="6.0" />
   <arg name="allow_bypass_with_adjacent_lane" default="false" />
 
-  <!-- Candidate safety evaluation. Stage F path manager consumes the selected safe path. -->
+  <!-- Candidate safety evaluation. These affect only debug selection, not control. -->
   <arg name="odom_timeout_s" default="0.50" />
   <arg name="obstacle_timeout_s" default="0.60" />
-  <arg name="collision_longitudinal_margin_m" default="0.25" />
-  <arg name="collision_lateral_margin_m" default="0.20" />
+  <arg name="collision_longitudinal_margin_m" default="0.40" />
+  <arg name="collision_lateral_margin_m" default="0.45" />
   <arg name="wheelbase_m" default="3.0" />
   <arg name="max_steering_rad" default="0.6981317008" />
   <!-- First real-driving tests should be slower than the current 6 m/s cruise. -->
-  <arg name="evaluation_speed_mps" default="3.0" />
+  <arg name="evaluation_speed_mps" default="2.0" />
   <arg name="max_lateral_accel_mps2" default="2.5" />
   <arg name="collision_sample_stride" default="1" />
 
