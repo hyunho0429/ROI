@@ -65,5 +65,11 @@
     <param name="vehicle_center_from_base_m" value="1.50" />
     <param name="collision_longitudinal_margin_m" value="0.25" />
     <param name="collision_lateral_margin_m" value="0.20" />
+
+    <!-- Keep the committed avoidance SIDE, but permit the exact path geometry
+         to refresh when the latest tracked OBB blocks the frozen path. -->
+    <param name="allow_same_side_guard_refresh" value="true" />
+    <param name="guard_stop_confirm_s" value="0.30" />
+    <param name="guard_refresh_min_interval_s" value="0.20" />
   </node>
 </launch>
