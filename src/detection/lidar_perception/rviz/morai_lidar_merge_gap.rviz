@@ -1,0 +1,90 @@
+Panels:
+  - Class: rviz/Displays
+    Name: Displays
+  - Class: rviz/Views
+    Name: Views
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Alpha: 0.35
+      Cell Size: 1
+      Class: rviz/Grid
+      Color: 160; 160; 164
+      Enabled: true
+      Name: Ego Local Grid
+      Plane: XY
+      Plane Cell Count: 80
+      Reference Frame: <Fixed Frame>
+    - Class: rviz/Axes
+      Enabled: true
+      Length: 5
+      Name: Ego Axes
+      Radius: 0.08
+      Reference Frame: morai_lidar
+    - Alpha: 0.30
+      Autocompute Intensity Bounds: false
+      Channel Name: distance_m
+      Class: rviz/PointCloud2
+      Color Transformer: Intensity
+      Decay Time: 0
+      Enabled: true
+      Max Color: 180; 180; 180
+      Max Intensity: 40
+      Min Color: 70; 70; 70
+      Min Intensity: 0
+      Name: Filtered UDP PointCloud
+      Position Transformer: XYZ
+      Queue Size: 2
+      Size (Pixels): 3
+      Style: Points
+      Topic: /morai/lidar/display_points
+      Use rainbow: false
+    - Alpha: 0.80
+      Class: rviz/PointCloud2
+      Color Transformer: RGB8
+      Decay Time: 0
+      Enabled: true
+      Name: Current Detections
+      Position Transformer: XYZ
+      Queue Size: 2
+      Size (Pixels): 4
+      Style: Points
+      Topic: /morai/lidar/tracking/clustered_points
+    - Class: rviz/MarkerArray
+      Enabled: true
+      Marker Topic: /morai/lidar/tracking/markers
+      Name: Track IDs Boxes and Velocity
+      Queue Size: 10
+    - Class: rviz/MarkerArray
+      Enabled: true
+      Marker Topic: /morai/lidar/merge_gap/markers
+      Name: Left Right Merge Gap Status
+      Queue Size: 10
+  Enabled: true
+  Global Options:
+    Background Color: 30; 30; 30
+    Fixed Frame: morai_lidar
+    Frame Rate: 30
+  Name: root
+  Tools:
+    - Class: rviz/Interact
+    - Class: rviz/MoveCamera
+    - Class: rviz/Select
+    - Class: rviz/FocusCamera
+    - Class: rviz/Measure
+  Views:
+    Current:
+      Class: rviz/Orbit
+      Distance: 45
+      Focal Point:
+        X: 8
+        Y: 0
+        Z: 0
+      Name: Merge Gap 3D View
+      Near Clip Distance: 0.01
+      Pitch: 0.65
+      Target Frame: morai_lidar
+      Yaw: 3.14
+Window Geometry:
+  Height: 900
+  Width: 1400

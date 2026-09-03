@@ -42,7 +42,7 @@ PID의 양수 출력은 `accel`, 음수 출력은 `brake`로 분리한다. Pure 
 ## 네트워크 설정
 
 기본값은
-`src/path_planning/src/path_planning/morai_competition_config.py`에 정의되어
+`src/control/path_planning/src/path_planning/morai_competition_config.py`에 정의되어
 있다.
 
 | 네트워크 | 방향 | MORAI Host/Source Port | MORAI Destination Port |
@@ -95,7 +95,7 @@ git pull origin dev/merged_sensor
 ```bash
 cd ~/ROI
 source /opt/ros/noetic/setup.bash
-python3 -m pip install -r src/path_planning/requirements.txt
+python3 -m pip install -r src/control/path_planning/requirements.txt
 catkin_make
 source devel/setup.bash
 ```
@@ -117,7 +117,7 @@ source devel/setup.bash
 cd ~/ROI
 source devel/setup.bash
 
-python3 src/path_planning/src/morai_competition_vehicle_status_logger.py \
+python3 src/control/path_planning/src/morai_competition_vehicle_status_logger.py \
   --host-port 9080 \
   --destination-port 9081 \
   --interval 1.0
@@ -137,7 +137,7 @@ Destination Port `9081`은 한 프로세스만 사용해야 하므로 Stanley �
 cd ~/ROI
 source devel/setup.bash
 
-python3 src/path_planning/src/morai_competition_status_inspect.py \
+python3 src/control/path_planning/src/morai_competition_status_inspect.py \
   --host-port 9080 \
   --destination-port 9081 \
   --count 10 \
@@ -200,7 +200,7 @@ vehicle_z_up      = raw_z_up
 cd ~/ROI
 source devel/setup.bash
 
-python3 src/path_planning/src/morai_lidar_intensity_inspect.py \
+python3 src/control/path_planning/src/morai_lidar_intensity_inspect.py \
   --host-port 2000 \
   --destination-port 2001 \
   --count 10 \
@@ -216,7 +216,7 @@ pcap 등에서 42 byte network header까지 포함된 데이터를 직접 넣을
 CSV로 일부 point를 저장해서 확인하려면:
 
 ```bash
-python3 src/path_planning/src/morai_lidar_intensity_inspect.py \
+python3 src/control/path_planning/src/morai_lidar_intensity_inspect.py \
   --host-port 2000 \
   --destination-port 2001 \
   --count 3 \
@@ -228,7 +228,7 @@ python3 src/path_planning/src/morai_lidar_intensity_inspect.py \
 장착 yaw 방향이 맞는지 확인한다.
 
 ```bash
-PYTHONPATH=src/path_planning/src python3 src/path_planning/src/lidar_monitor.py \
+PYTHONPATH=src/control/path_planning/src python3 src/control/path_planning/src/lidar_monitor.py \
   --bind-ip 0.0.0.0 \
   --host-port 2000 \
   --destination-port 2001 \
@@ -243,7 +243,7 @@ PYTHONPATH=src/path_planning/src python3 src/path_planning/src/lidar_monitor.py 
 그 값을 다음 실행에 적용한다.
 
 ```bash
-PYTHONPATH=src/path_planning/src python3 src/path_planning/src/lidar_monitor.py \
+PYTHONPATH=src/control/path_planning/src python3 src/control/path_planning/src/lidar_monitor.py \
   --bind-ip 0.0.0.0 \
   --host-port 2000 \
   --destination-port 2001 \
@@ -434,7 +434,7 @@ cd ~/ROI
 source devel/setup.bash
 export MORAI_PC_IP=192.168.56.1
 
-python3 src/path_planning/src/morai_udp_control_check.py \
+python3 src/control/path_planning/src/morai_udp_control_check.py \
   --control-ip "$MORAI_PC_IP"
 ```
 
@@ -470,7 +470,7 @@ roslaunch path_planning morai_stanley_udp.launch \
 ```
 
 기본 전역 경로는
-`src/path_planning/data/2026_molit_comp_global_path.txt`이고 목표 속도는
+`src/control/path_planning/data/2026_molit_comp_global_path.txt`이고 목표 속도는
 `30 km/h`이다.
 
 목표 속도와 PID 이득을 변경하는 예:
@@ -526,7 +526,7 @@ Competition control state: ctrl_mode=2 (AV-ExternalCtrl), gear=4 (D)
 
 GPS가 일시적으로 끊겨도 설정된 `max_gps_outage` 동안 IMU와 Competition Status
 속도를 사용해 추측 항법을 계속한다. 자세한 내용은
-`src/path_planning/README_TUNNEL_LOCALIZATION.md`를 참고한다.
+`src/control/path_planning/README_TUNNEL_LOCALIZATION.md`를 참고한다.
 
 ## 기준 경로 기록
 
@@ -536,10 +536,10 @@ MORAI 차량을 수동으로 움직이며 GPS 기준점을 CSV로 기록할 수 
 cd ~/ROI
 source devel/setup.bash
 
-python3 src/path_planning/src/morai_gps_csv_recorder.py \
+python3 src/control/path_planning/src/morai_gps_csv_recorder.py \
   --bind-ip 0.0.0.0 \
   --port 3001 \
-  --output src/path_planning/data/morai_global_path.csv
+  --output src/control/path_planning/data/morai_global_path.csv
 ```
 
 CSV에는 원본 위도, 경도, 고도와 변환된 map-local ENU, CRS 및 고정 offset 정보가
@@ -551,18 +551,18 @@ CSV에는 원본 위도, 경도, 고도와 변환된 map-local ENU, CRS 및 고�
 
 ```bash
 cd ~/ROI
-python3 -m pip install -r src/path_planning/requirements.txt
+python3 -m pip install -r src/control/path_planning/requirements.txt
 
-python3 src/path_planning/src/morai_stanley_ins_udp.py \
-  --path src/path_planning/data/2026_molit_comp_global_path.txt \
+python3 src/control/path_planning/src/morai_stanley_ins_udp.py \
+  --path src/control/path_planning/data/2026_molit_comp_global_path.txt \
   --control-ip 192.168.56.1
 ```
 
 Competition 속도 보조 추측 항법 실행기는 다음과 같다.
 
 ```bash
-python3 src/path_planning/src/morai_stanley_dead_reckoning_udp.py \
-  --path src/path_planning/data/2026_molit_comp_global_path.txt \
+python3 src/control/path_planning/src/morai_stanley_dead_reckoning_udp.py \
+  --path src/control/path_planning/data/2026_molit_comp_global_path.txt \
   --control-ip 192.168.56.1
 ```
 
@@ -609,10 +609,10 @@ roslaunch path_planning kcity_2025_dijkstra.launch \
 
 ## 상세 문서
 
-- `src/path_planning/README_PURE_PURSUIT_UDP.md`: UDP 패킷, 좌표 변환, 제어 및
+- `src/control/path_planning/README_PURE_PURSUIT_UDP.md`: UDP 패킷, 좌표 변환, 제어 및
   튜닝 상세
-- `src/path_planning/README_TUNNEL_LOCALIZATION.md`: GPS 음영 구간 위치 추정
-- `src/path_planning/README_GPS_CSV_RECORDER.md`: GPS 기준 경로 기록
+- `src/control/path_planning/README_TUNNEL_LOCALIZATION.md`: GPS 음영 구간 위치 추정
+- `src/control/path_planning/README_GPS_CSV_RECORDER.md`: GPS 기준 경로 기록
 
 ## LiDAR + 카메라 통합 실행
 
@@ -626,9 +626,9 @@ roslaunch path_planning kcity_2025_dijkstra.launch \
 - 3D LiDAR UDP 수신, clustering, bounding box, Kalman+Hungarian tracking
 - 고속도로 카메라 조건이 활성화될 때만 LiDAR 왼쪽 끼어들기 공간을 RViz에 표시
 - 왼쪽 끼어들기 가능 여부와 map 장애물 목록을 ROS 메시지로 발행
-- 전방 카메라 영상의 ONNX 차선 segmentation 및 차선 후보 추적
-- YOLOv8 기본 객체 탐지
-- 커스텀 모델이 있을 때 신호등과 MORAI 장애물 탐지 결과 중첩
+- `lane_detection`의 PyTorch 차선 segmentation, BEV 후처리 및 별도 오버레이 창
+- `feature-camera`의 YOLOv8 기본 객체 탐지와 `best0902.pt` 커스텀 탐지
+- 신호등과 카메라 장애물 객체 배열 및 기존 car/person 호환 토픽 동시 발행
 - YOLO person 단독 인식 기반 보행자 즉시 정지 및 재출발
 - LiDAR/RViz, 차선 인식, YOLO 화면을 하나의 `roslaunch`로 실행
 
@@ -640,33 +640,24 @@ roslaunch path_planning kcity_2025_dijkstra.launch \
 
 ```text
 ROI/
-├── Sensor/                         # feature-camera 원본 카메라 기능
-│   ├── LaneCandidates.py           # 차선 segmentation, 후보 추출 및 화면 표시
-│   ├── YoloCamera_v2.py            # 기본/커스텀 YOLO 탐지 및 화면 표시
-│   ├── CameraUDP.py                 # 최신 완성 프레임만 유지하는 저지연 수신기
-│   └── lane_segmentation.onnx      # 차선 segmentation 모델
-├── lib/
-│   ├── define/Camera.py            # MORAI 카메라 UDP 데이터 구조/파싱
-│   └── network/UDP.py              # 카메라 UDP Receiver
 ├── src/
-│   ├── bringup/morai_bringup/
-│   │   └── launch/
-│   │       ├── morai_udp_ekf_purepursuit_lidar_tracking.launch
-│   │       │                       # 기존 feat/lidar 통합 launch
-│   │       └── morai_udp_ekf_purepursuit_lidar_camera.launch
-│   │                               # 주행+LiDAR+카메라 최상위 launch
-│   ├── perception/lidar_perception/
-│   │                               # 기존 LiDAR 인식 노드와 RViz 설정
-│   ├── perception/camera_perception/
-│   │   ├── launch/camera_perception.launch
-│   │   └── scripts/
-│   │       ├── camera_feature_runner.py
-│   │       ├── highway_environment_gate_node.py
-│   │       └── pedestrian_crossing_fusion_node.py
-│   │                               # 고속도로 게이트와 보행자 카메라/LiDAR 융합
-│   ├── path_planning/              # UDP 주행, 경로 추종 및 LiDAR 연동
-│   ├── localization/               # GPS/IMU/EKF 위치 추정
-│   └── control/                    # Pure Pursuit 관련 패키지
+│   ├── localization/               # GPS·IMU·EKF 위치 추정
+│   ├── control/                    # 경로 계획·Pure Pursuit 제어
+│   ├── detection/
+│   │   ├── camera_perception/      # YOLO, 차선 인식, 카메라 융합
+│   │   │   ├── models/             # yolov8n.pt, best0902.pt
+│   │   │   ├── lane/               # lane_detection 전체 코드·모델·MGeo
+│   │   │   ├── scripts/            # ROS 실행 노드
+│   │   │   └── launch/
+│   │   ├── lidar_perception/       # LiDAR·BBox·Kalman-Hungarian·RViz
+│   │   ├── obstacle_state_publisher/
+│   │   └── sensor_runtime/         # 기존 센서 단독 실행 코드
+│   └── common/
+│       ├── common_msgs/            # 공통 카메라 객체 메시지
+│       ├── morai_bringup/launch/   # 전체 roslaunch
+│       └── morai_network/          # 공통 MORAI UDP 프로토콜
+├── config/
+├── data/
 └── docs/LIDAR_CAMERA_INTEGRATION.md
 ```
 
@@ -678,8 +669,8 @@ morai_udp_ekf_purepursuit_lidar_camera.launch
 │   ├── 기존 GPS/IMU/EKF/Pure Pursuit 주행 스택
 │   └── 기존 LiDAR tracking + merge-gap + RViz
 └── camera_perception.launch
-    ├── lane_camera  → Sensor/LaneCandidates.py
-    ├── yolo_camera  → Sensor/YoloCamera_v2.py
+    ├── lane_camera  → lane/live_overlay.py (별도 차선 오버레이 창)
+    ├── yolo_camera  → scripts/camera_object_detection_node.py
     ├── highway_environment_gate
     │    car/bus/truck AND 왼쪽 평행 주행 동적 객체 → merge-gap 활성화 후 유지
     └── pedestrian_crossing_fusion
@@ -698,19 +689,30 @@ IP를 그대로 사용한다. 프로그램은 LiDAR와 카메라 모두 동일�
 | IMU | `4001` | 기존 주행 스택 |
 | Competition Vehicle Status | Host `9080` → Destination `9081` | 대회용 차량 상태, `/Ego_topic`으로 호환 변환 |
 | LiDAR | `2001` | RViz/tracking 입력 |
-| 차선 카메라 | `1101` | `LaneCandidates.py` |
-| YOLO 카메라 | `1131` | `YoloCamera_v2.py` |
+| 차선 카메라 | `1101` | `lane/live_overlay.py` |
+| YOLO 카메라 | `1131` | `camera_object_detection_node.py` |
 
 MORAI 센서 설정의 포트가 위 값과 일치해야 하며 Ubuntu 방화벽에서도 해당 UDP
 수신을 허용해야 한다.
 
-- `Sensor/lane_segmentation.onnx`: 저장소에 포함되어 있다.
-- `yolov8n.pt`: 저장소에 없으며 Ultralytics가 최초 실행 시 내려받을 수 있다.
-- `Sensor/null.pt`: 커스텀 신호등/장애물 모델이며 저장소에 포함되어 있지 않다.
+새 `feature-camera` 탐지기는 기존 끼어들기·보행자 제어용 `Bool` 토픽을
+유지하면서 객체 배열도 함께 발행한다.
 
-커스텀 모델이 없으면 경고를 출력하고 기본 YOLO 객체 탐지만 계속한다. 커스텀
-탐지가 필요하면 모델을 `Sensor/null.pt`에 복사하거나 launch 인자로 절대 경로를
-지정한다.
+| 기능 | 토픽 | 메시지 |
+|---|---|---|
+| 차량 인식 상태 | `/perception/camera/car_detected` | `std_msgs/Bool` |
+| 보행자 인식 상태 | `/perception/camera/person_detected` | `std_msgs/Bool` |
+| 신호등 탐지 결과 | `/detection/traffic_light` | `common/ObjectInfoArray` |
+| 카메라 장애물 결과 | `/detection/obstacle` | `common/ObjectInfoArray` |
+
+`ObjectInfo`에는 `class_name`, `conf`, `x_center`, `y_center`, `width`,
+`height`가 포함되며 위치와 크기는 카메라 영상의 픽셀 좌표다.
+
+- `src/detection/camera_perception/lane/lane_seg_best.pt`: 차선 모델
+- `src/detection/camera_perception/models/yolov8n.pt`: COCO 객체 모델
+- `src/detection/camera_perception/models/best0902.pt`: 신호등/장애물 커스텀 모델
+
+세 모델 모두 저장소에 포함되며 기본 launch가 패키지 내부 절대 경로를 사용한다.
 
 ### 최초 설치와 빌드
 
@@ -723,7 +725,7 @@ git switch dev/merged_sensor
 git pull origin dev/merged_sensor
 
 source /opt/ros/noetic/setup.bash
-python3 -m pip install -r src/path_planning/requirements.txt
+python3 -m pip install -r src/control/path_planning/requirements.txt
 python3 -m pip install -r requirements.txt
 catkin_make
 source devel/setup.bash
@@ -740,7 +742,7 @@ source devel/setup.bash
 ### 통합 실행
 
 다음 한 줄로 LiDAR/RViz, YOLO, 보행자 정지·재출발 및 차량 제어를 실행한다.
-차선 인식은 기본적으로 비활성화되어 있다. `enable_control` 기본값이 `true`이므로
+차선 인식도 기본적으로 활성화되어 별도 오버레이 창이 열린다. `enable_control` 기본값이 `true`이므로
 네트워크와 위치 정보가 정상 수신되면 차량이 바로 움직일 수 있다.
 
 ```bash
@@ -754,8 +756,9 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch
 정상 실행 시 다음 화면이 나타난다.
 
 1. LiDAR tracking 및 merge-gap 상태를 표시하는 RViz
-2. 카메라 실시간 화면
-3. 입력 프레임과 bounding box가 일치하는 YOLO 검출 화면
+2. 차선 mask·차선 종류·횡/방위 오차를 표시하는 `lane overlay` 창
+3. 카메라 실시간 화면
+4. 입력 프레임과 bounding box가 일치하는 YOLO 검출 화면
 
 종료할 때는 launch 터미널에서 `Ctrl+C`를 누른다. OpenCV 창에서 누르는
 `q` 또는 `Esc`는 해당 카메라 프로세스만 종료할 수 있다.
@@ -786,12 +789,12 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
 | `enable_control` | `true` | 차량 제어 UDP 송신 여부 |
 | `target_speed_mps` | `6.0` | Pure Pursuit 목표 속도 (`21.6 km/h`) |
 | `rviz` | `true` | LiDAR RViz 실행 여부 |
-| `enable_lane` | `false` | 차선 인식 프로세스 실행 여부 |
+| `enable_lane` | `true` | 별도 차선 오버레이 창 실행 여부 |
 | `lane_port` | `1101` | 차선 카메라 UDP 수신 포트 |
 | `enable_yolo` | `true` | YOLO 프로세스 실행 여부 |
 | `yolo_port` | `1131` | YOLO 카메라 UDP 수신 포트 |
-| `base_model_path` | `yolov8n.pt` | 기본 YOLO 모델 경로/이름 |
-| `custom_model_path` | `null.pt` | 커스텀 YOLO 모델 경로/이름 |
+| `base_model_path` | 패키지의 `models/yolov8n.pt` | 기본 YOLO 모델 |
+| `custom_model_path` | 패키지의 `models/best0902.pt` | 커스텀 YOLO 모델 |
 | `yolo_confidence` | `0.4` | YOLO confidence 임계값 |
 | `yolo_inference_size` | `320` | YOLO 추론 입력 크기 |
 | `camera_display_fps` | `0.0` | `0`은 MORAI 카메라 수신 속도를 그대로 사용 |
@@ -903,14 +906,14 @@ roslaunch camera_perception camera_perception.launch enable_yolo:=false
 - `python3 -m pip install -r requirements.txt`가 완료됐는지 확인한다.
 - 같은 카메라 포트를 사용하는 기존 Python 프로그램을 종료한다.
 
-#### 기본 YOLO 모델을 내려받지 못함
+#### YOLO 모델을 불러오지 못함
 
-- 최초 실행 시 Ubuntu PC의 인터넷 연결을 확인한다.
-- 미리 받은 `yolov8n.pt`의 절대 경로를 `base_model_path`로 지정한다.
+- 패키지의 `models/yolov8n.pt`, `models/best0902.pt`가 존재하는지 확인한다.
+- 외부 모델을 사용할 때만 절대 경로를 launch 인자로 지정한다.
 
 #### 커스텀 탐지가 표시되지 않음
 
-- `Sensor/null.pt` 또는 `custom_model_path`가 실제 파일을 가리키는지 확인한다.
+- `src/detection/camera_perception/models/best0902.pt` 또는 `custom_model_path`가 실제 파일을 가리키는지 확인한다.
 - 모델의 class 이름과 학습 데이터가 현재 후처리 조건과 맞는지 확인한다.
 
 #### YOLO 화면이 느리거나 끊겨 보임

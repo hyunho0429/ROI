@@ -1,0 +1,13 @@
+uint32 id
+float64 center_x_map
+float64 center_y_map
+float64 length
+float64 width
+float64 velocity_x_map
+float64 velocity_y_map
+float64 speed_mps
+string motion_state
+float64 yaw
+float64 yaw_deg
+bool yaw_valid
+string yaw_source

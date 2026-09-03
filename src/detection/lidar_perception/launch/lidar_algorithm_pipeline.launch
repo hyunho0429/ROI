@@ -1,0 +1,75 @@
+<launch>
+  <arg name="algorithm_type" />
+  <arg name="algorithm_name" />
+  <arg name="result_prefix" />
+  <arg name="rviz_config" />
+  <arg name="rviz" default="true" />
+  <arg name="bind_ip" default="0.0.0.0" />
+  <arg name="host_port" default="2000" />
+  <arg name="destination_port" default="2001" />
+  <arg name="odometry_topic" default="/localization/odometry" />
+  <arg name="map_obstacle_topic" default="/perception/lidar/tracked_obstacles_map" />
+  <arg name="lidar_x_m" default="0.0" />
+  <arg name="lidar_y_m" default="0.0" />
+  <arg name="lidar_yaw_deg" default="0.0" />
+  <arg name="deskew_enabled" default="true" />
+  <arg name="udp_cluster_enabled" default="true" />
+  <arg name="cluster_tolerance_m" default="0.8" />
+  <arg name="cluster_min_points" default="3" />
+  <arg name="cluster_min_height_m" default="0.10" />
+  <arg name="x_min_m" default="-40.0" />
+  <arg name="x_max_m" default="40.0" />
+  <arg name="y_abs_m" default="8.0" />
+  <arg name="match_distance_m" default="3.0" />
+  <arg name="min_hits" default="3" />
+  <arg name="max_missed" default="6" />
+
+  <include file="$(find lidar_perception)/launch/lidar_udp_source.launch">
+    <arg name="bind_ip" value="$(arg bind_ip)" />
+    <arg name="host_port" value="$(arg host_port)" />
+    <arg name="destination_port" value="$(arg destination_port)" />
+    <arg name="odometry_topic" value="$(arg odometry_topic)" />
+    <arg name="deskew_enabled" value="$(arg deskew_enabled)" />
+    <arg name="cluster_enabled" value="$(arg udp_cluster_enabled)" />
+  </include>
+
+  <node pkg="lidar_perception"
+        type="$(arg algorithm_type)"
+        name="$(arg algorithm_name)"
+        output="screen">
+    <param name="input_topic" value="/morai/lidar/live_points" />
+    <param name="odometry_topic" value="$(arg odometry_topic)" />
+    <param name="map_obstacle_topic" value="$(arg map_obstacle_topic)" />
+    <param name="map_frame" value="map" />
+    <param name="lidar_x_m" value="$(arg lidar_x_m)" />
+    <param name="lidar_y_m" value="$(arg lidar_y_m)" />
+    <param name="lidar_yaw_deg" value="$(arg lidar_yaw_deg)" />
+    <param name="cluster_cloud_topic" value="/morai/lidar/$(arg result_prefix)/clustered_points" />
+    <param name="marker_topic" value="/morai/lidar/$(arg result_prefix)/markers" />
+    <param name="result_topic" value="/morai/lidar/$(arg result_prefix)/results" />
+    <param name="cluster_tolerance_m" value="$(arg cluster_tolerance_m)" />
+    <param name="cluster_min_points" value="$(arg cluster_min_points)" />
+    <param name="cluster_min_height_m" value="$(arg cluster_min_height_m)" />
+    <param name="cluster_max_clusters" value="32" />
+    <param name="cluster_max_input_points" value="5000" />
+    <param name="x_min_m" value="$(arg x_min_m)" />
+    <param name="x_max_m" value="$(arg x_max_m)" />
+    <param name="y_abs_m" value="$(arg y_abs_m)" />
+    <param name="z_min_m" value="-1.4" />
+    <param name="z_max_m" value="2.5" />
+    <param name="marker_lifetime_s" value="0.15" />
+    <param name="match_distance_m" value="$(arg match_distance_m)" />
+    <param name="min_hits" value="$(arg min_hits)" />
+    <param name="max_missed" value="$(arg max_missed)" />
+    <param name="process_accel_std_mps2" value="4.0" />
+    <param name="measurement_noise_m" value="0.35" />
+    <param name="velocity_scale_s" value="1.0" />
+  </node>
+
+  <node if="$(arg rviz)"
+        pkg="rviz"
+        type="rviz"
+        name="$(arg algorithm_name)_rviz"
+        args="-d $(find lidar_perception)/rviz/$(arg rviz_config)"
+        output="screen" />
+</launch>

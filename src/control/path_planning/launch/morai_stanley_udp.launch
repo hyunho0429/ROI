@@ -1,0 +1,130 @@
+<launch>
+    <!-- roslaunch is used only as a process/configuration runner. Sensor and
+         control traffic remains competition-compliant UDP. -->
+    <arg name="path" default="$(find path_planning)/data/2026_molit_comp_global_path.txt"/>
+    <arg name="global_info" default="$(find path_planning)/mgeo/R_KR_PR_K-city_2025/global_info.json"/>
+
+    <arg name="bind_ip" default="0.0.0.0"/>
+    <arg name="gps_port" default="3001"/>
+    <arg name="imu_port" default="4001"/>
+    <arg name="lidar_pose_output_ip" default="127.0.0.1"/>
+    <arg name="lidar_pose_output_port" default="4012"/>
+    <arg name="competition_status_host_port" default="9080"/>
+    <arg name="competition_status_destination_port" default="9081"/>
+    <arg name="collision_host_port" default="9091"/>
+    <arg name="collision_destination_port" default="9092"/>
+    <arg name="control_ip" default="192.168.0.148"/>
+    <arg name="ego_ctrl_cmd_host_port" default="9093"/>
+    <arg name="ego_ctrl_cmd_destination_port" default="9094"/>
+    <arg name="control_protocol" default="25s4"/>
+
+    <arg name="control_rate_hz" default="30.0"/>
+    <arg name="target_speed_kmh" default="40.0"/>
+    <arg name="medium_curve_speed_kmh" default="25.0"/>
+    <arg name="sharp_curve_speed_kmh" default="18.0"/>
+    <arg name="medium_curve_steering_deg" default="5.0"/>
+    <arg name="sharp_curve_steering_deg" default="9.0"/>
+    <arg name="curve_preview_distance_m" default="22.0"/>
+    <arg name="curve_preview_step_m" default="4.0"/>
+    <arg name="medium_curve_heading_deg" default="8.0"/>
+    <arg name="sharp_curve_heading_deg" default="16.0"/>
+    <arg name="speed_kp" default="0.075"/>
+    <arg name="speed_ki" default="0.0001"/>
+    <arg name="speed_kd" default="0.025"/>
+    <arg name="max_accel_pedal" default="1.0"/>
+    <arg name="max_brake_pedal" default="1.0"/>
+
+    <arg name="stanley_gain" default="0.35"/>
+    <arg name="softening_speed" default="2.2"/>
+    <arg name="stanley_control_speed_floor_kmh" default="35.0"/>
+    <arg name="lane_center_shift_m" default="0.80"/>
+    <arg name="path_lateral_offset_m" default="0.0"/>
+    <arg name="control_point_offset" default="1.5"/>
+    <arg name="localization_lateral_offset_m" default="0.60"/>
+    <arg name="heading_preview_distance" default="3.2"/>
+    <arg name="heading_preview_start_distance" default="20.0"/>
+    <arg name="heading_preview_deadband_deg" default="2.0"/>
+    <arg name="heading_error_gain" default="0.74"/>
+    <arg name="cross_track_error_gain" default="0.72"/>
+    <arg name="cross_track_deadband" default="0.02"/>
+    <arg name="max_steering_deg" default="16.0"/>
+    <arg name="vehicle_max_steering_deg" default="36.25"/>
+    <arg name="steering_filter_alpha" default="0.45"/>
+    <arg name="max_steering_rate_radps" default="1.00"/>
+    <arg name="startup_lane_bias_deg" default="0.0"/>
+    <arg name="startup_lane_bias_distance_m" default="25.0"/>
+    <arg name="startup_lane_bias_max_steering_deg" default="3.0"/>
+    <arg name="startup_steering_guard_distance_m" default="15.0"/>
+    <arg name="startup_steering_guard_deg" default="3.0"/>
+    <arg name="turn_steering_scale" default="0.92"/>
+    <arg name="turn_steering_scale_min_deg" default="3.0"/>
+    <arg name="morai_steer_sign" default="1.0"/>
+
+    <arg name="alignment_seconds" default="2.0"/>
+    <arg name="alignment_min_samples" default="20"/>
+    <arg name="max_gps_outage" default="120.0"/>
+
+    <node pkg="path_planning"
+          type="morai_stanley_ins_udp.py"
+          name="morai_stanley_ins_udp"
+          output="screen"
+          required="true"
+          args='--path "$(arg path)"
+                --global-info "$(arg global_info)"
+                --bind-ip $(arg bind_ip)
+                --gps-port $(arg gps_port)
+                --imu-port $(arg imu_port)
+                --lidar-pose-output-ip $(arg lidar_pose_output_ip)
+                --lidar-pose-output-port $(arg lidar_pose_output_port)
+                --competition-status-host-port $(arg competition_status_host_port)
+                --competition-status-port $(arg competition_status_destination_port)
+                --collision-host-port $(arg collision_host_port)
+                --collision-port $(arg collision_destination_port)
+                --control-ip $(arg control_ip)
+                --control-port $(arg ego_ctrl_cmd_host_port)
+                --control-source-port $(arg ego_ctrl_cmd_destination_port)
+                --control-protocol $(arg control_protocol)
+                --control-rate-hz $(arg control_rate_hz)
+                --target-speed-kmh $(arg target_speed_kmh)
+                --medium-curve-speed-kmh $(arg medium_curve_speed_kmh)
+                --sharp-curve-speed-kmh $(arg sharp_curve_speed_kmh)
+                --medium-curve-steering-deg $(arg medium_curve_steering_deg)
+                --sharp-curve-steering-deg $(arg sharp_curve_steering_deg)
+                --curve-preview-distance-m $(arg curve_preview_distance_m)
+                --curve-preview-step-m $(arg curve_preview_step_m)
+                --medium-curve-heading-deg $(arg medium_curve_heading_deg)
+                --sharp-curve-heading-deg $(arg sharp_curve_heading_deg)
+                --speed-kp $(arg speed_kp)
+                --speed-ki $(arg speed_ki)
+                --speed-kd $(arg speed_kd)
+                --max-accel-pedal $(arg max_accel_pedal)
+                --max-brake-pedal $(arg max_brake_pedal)
+                --stanley-gain $(arg stanley_gain)
+                --softening-speed $(arg softening_speed)
+                --stanley-control-speed-floor-kmh $(arg stanley_control_speed_floor_kmh)
+                --lane-center-shift-m $(arg lane_center_shift_m)
+                --path-lateral-offset-m $(arg path_lateral_offset_m)
+                --control-point-offset $(arg control_point_offset)
+                --localization-lateral-offset-m $(arg localization_lateral_offset_m)
+                --heading-preview-distance $(arg heading_preview_distance)
+                --heading-preview-start-distance $(arg heading_preview_start_distance)
+                --heading-preview-deadband-deg $(arg heading_preview_deadband_deg)
+                --heading-error-gain $(arg heading_error_gain)
+                --cross-track-error-gain $(arg cross_track_error_gain)
+                --cross-track-deadband $(arg cross_track_deadband)
+                --max-steering-deg $(arg max_steering_deg)
+                --vehicle-max-steering-deg $(arg vehicle_max_steering_deg)
+                --steering-filter-alpha $(arg steering_filter_alpha)
+                --max-steering-rate-radps $(arg max_steering_rate_radps)
+                --startup-lane-bias-deg $(arg startup_lane_bias_deg)
+                --startup-lane-bias-distance-m $(arg startup_lane_bias_distance_m)
+                --startup-lane-bias-max-steering-deg $(arg startup_lane_bias_max_steering_deg)
+                --startup-steering-guard-distance-m $(arg startup_steering_guard_distance_m)
+                --startup-steering-guard-deg $(arg startup_steering_guard_deg)
+                --turn-steering-scale $(arg turn_steering_scale)
+                --turn-steering-scale-min-deg $(arg turn_steering_scale_min_deg)
+                --morai-steer-sign $(arg morai_steer_sign)
+                --alignment-seconds $(arg alignment_seconds)
+                --alignment-min-samples $(arg alignment_min_samples)
+                --max-gps-outage $(arg max_gps_outage)'/>
+</launch>

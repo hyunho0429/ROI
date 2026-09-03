@@ -168,6 +168,8 @@ downloads/
 eggs/
 .eggs/
 lib/
+!src/common/morai_network/lib/
+!src/common/morai_network/lib/**
 lib64/
 parts/
 sdist/

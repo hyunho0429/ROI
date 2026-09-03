@@ -1,0 +1,45 @@
+<launch>
+  <arg name="rviz" default="true" />
+  <arg name="bind_ip" default="0.0.0.0" />
+  <arg name="host_port" default="2000" />
+  <arg name="destination_port" default="2001" />
+  <arg name="deskew_enabled" default="true" />
+  <arg name="deskew_pose_source" default="sensor_udp" />
+  <arg name="gps_port" default="3001" />
+  <arg name="imu_port" default="4001" />
+  <arg name="pose_bind_ip" default="127.0.0.1" />
+  <arg name="pose_port" default="4012" />
+  <arg name="vertical_support_enabled" default="true" />
+  <arg name="vertical_support_filter_cloud" default="true" />
+  <arg name="cluster_tolerance_m" default="0.8" />
+  <arg name="cluster_min_points" default="3" />
+  <arg name="cluster_min_height_m" default="0.10" />
+  <arg name="x_min_m" default="-40.0" />
+  <arg name="x_max_m" default="40.0" />
+  <arg name="y_abs_m" default="8.0" />
+
+  <include file="$(find path_planning)/launch/morai_lidar_perception_demo.launch">
+    <arg name="algorithm_type" value="morai_lidar_euclidean_clustering.py" />
+    <arg name="algorithm_name" value="morai_lidar_euclidean_clustering" />
+    <arg name="result_prefix" value="euclidean" />
+    <arg name="rviz_config" value="morai_lidar_euclidean.rviz" />
+    <arg name="rviz" value="$(arg rviz)" />
+    <arg name="bind_ip" value="$(arg bind_ip)" />
+    <arg name="host_port" value="$(arg host_port)" />
+    <arg name="destination_port" value="$(arg destination_port)" />
+    <arg name="deskew_enabled" value="$(arg deskew_enabled)" />
+    <arg name="deskew_pose_source" value="$(arg deskew_pose_source)" />
+    <arg name="gps_port" value="$(arg gps_port)" />
+    <arg name="imu_port" value="$(arg imu_port)" />
+    <arg name="pose_bind_ip" value="$(arg pose_bind_ip)" />
+    <arg name="pose_port" value="$(arg pose_port)" />
+    <arg name="vertical_support_enabled" value="$(arg vertical_support_enabled)" />
+    <arg name="vertical_support_filter_cloud" value="$(arg vertical_support_filter_cloud)" />
+    <arg name="cluster_tolerance_m" value="$(arg cluster_tolerance_m)" />
+    <arg name="cluster_min_points" value="$(arg cluster_min_points)" />
+    <arg name="cluster_min_height_m" value="$(arg cluster_min_height_m)" />
+    <arg name="x_min_m" value="$(arg x_min_m)" />
+    <arg name="x_max_m" value="$(arg x_max_m)" />
+    <arg name="y_abs_m" value="$(arg y_abs_m)" />
+  </include>
+</launch>
