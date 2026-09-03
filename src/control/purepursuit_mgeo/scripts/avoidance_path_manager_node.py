@@ -14,6 +14,8 @@ Scope of this stage
   without changing maneuver side or resetting completion progress.  This avoids
   stopping on tracker jitter while preserving maneuver commitment.
 * If no same-side safe refresh exists and the collision persists, request stop.
+* F6: planner status is consumed atomically with selected_path.header.seq.
+* F6: committed-path guard uses the same start-overlap escape-prefix rule as the planner.
 
 Deliberate limitation: lane-change candidates are NOT executed in this stage.
 They remain visualization/evaluation only until a lane hold + return state
@@ -127,6 +129,10 @@ class AvoidancePathManager:
         self.selected_side_topic = rospy.get_param(
             "~selected_side_topic", "/avoidance_frenet_debug/selected_side"
         )
+        self.plan_status_topic = rospy.get_param(
+            "~plan_status_topic", "/avoidance_frenet_debug/plan_status"
+        )
+        self.use_atomic_plan_status = bool(rospy.get_param("~use_atomic_plan_status", True))
 
         self.rate_hz = float(rospy.get_param("~rate_hz", 10.0))
         self.odom_timeout_s = float(rospy.get_param("~odom_timeout_s", 0.50))
@@ -186,6 +192,7 @@ class AvoidancePathManager:
         self.collision_sample_stride = int(
             rospy.get_param("~collision_sample_stride", 1)
         )
+        self.escape_prefix_m = float(rospy.get_param("~escape_prefix_m", 3.0))
         # A committed bypass is side-locked, but its exact geometry may be
         # refreshed when the latest obstacle OBB makes the frozen path unsafe.
         # This is intentionally NOT a free replan: only a fresh safe bypass on
@@ -220,6 +227,9 @@ class AvoidancePathManager:
 
         self.selected_points: List[PathPoint] = []
         self.selected_path_at: Optional[rospy.Time] = None
+        self.selected_path_seq: Optional[int] = None
+        self.plan_status_seq: Optional[int] = None
+        self.atomic_status_seen = False
         self.planner_ready = False
         self.avoidance_required = False
         self.safe_path_available = False
@@ -256,6 +266,9 @@ class AvoidancePathManager:
             self.selected_path_topic, RosPath, self._selected_path_cb, queue_size=1
         )
         rospy.Subscriber(
+            self.plan_status_topic, String, self._plan_status_cb, queue_size=1
+        )
+        rospy.Subscriber(
             self.planner_ready_topic, Bool, self._planner_ready_cb, queue_size=1
         )
         rospy.Subscriber(
@@ -282,8 +295,10 @@ class AvoidancePathManager:
         )
 
         rospy.logwarn(
-            "Avoidance Path Manager started: BYPASS control only, lane_change_control=%s. "
+            "Avoidance Path Manager F6 started: BYPASS control only, atomic_status=%s escape_prefix=%.1fm lane_change_control=%s. "
             "active_path=%s/active_path stop=%s/stop_required",
+            self.use_atomic_plan_status,
+            self.escape_prefix_m,
             self.allow_lane_change_control,
             rospy.get_name(),
             rospy.get_name(),
@@ -309,24 +324,51 @@ class AvoidancePathManager:
     def _selected_path_cb(self, msg: RosPath) -> None:
         self.selected_points = _points_from_ros_path(msg)
         self.selected_path_at = rospy.Time.now()
+        self.selected_path_seq = int(msg.header.seq)
+
+    def _plan_status_cb(self, msg: String) -> None:
+        if not self.use_atomic_plan_status:
+            return
+        try:
+            payload = json.loads(str(msg.data or "{}"))
+            self.plan_status_seq = int(payload.get("seq", -1))
+            self.planner_ready = bool(payload.get("planner_ready", False))
+            self.avoidance_required = bool(payload.get("avoidance_required", False))
+            self.safe_path_available = bool(payload.get("safe_path_available", False))
+            self.selected_kind = str(payload.get("selected_kind", "") or "")
+            self.selected_side = str(payload.get("selected_side", "") or "")
+            self.atomic_status_seen = True
+            self._mark_planner_status()
+        except Exception as exc:
+            rospy.logwarn_throttle(1.0, "Invalid atomic plan_status: %s", str(exc))
 
     def _planner_ready_cb(self, msg: Bool) -> None:
+        if self.use_atomic_plan_status:
+            return
         self.planner_ready = bool(msg.data)
         self._mark_planner_status()
 
     def _avoidance_required_cb(self, msg: Bool) -> None:
+        if self.use_atomic_plan_status:
+            return
         self.avoidance_required = bool(msg.data)
         self._mark_planner_status()
 
     def _safe_path_available_cb(self, msg: Bool) -> None:
+        if self.use_atomic_plan_status:
+            return
         self.safe_path_available = bool(msg.data)
         self._mark_planner_status()
 
     def _selected_kind_cb(self, msg: String) -> None:
+        if self.use_atomic_plan_status:
+            return
         self.selected_kind = str(msg.data or "")
         self._mark_planner_status()
 
     def _selected_side_cb(self, msg: String) -> None:
+        if self.use_atomic_plan_status:
+            return
         self.selected_side = str(msg.data or "")
         self._mark_planner_status()
 
@@ -416,6 +458,20 @@ class AvoidancePathManager:
         remaining_distance = max(0.0, total - progress)
         return remaining, nearest, fraction, remaining_distance
 
+    def _guard_path_from_ego(self, x: float, y: float) -> List[PathPoint]:
+        """Forward-only committed path used for collision guard.
+
+        ``active_path`` intentionally keeps a couple of points behind the ego so
+        Pure Pursuit has continuity.  Those already-passed points must NOT be
+        collision-checked as hypothetical future ego poses.  F5 used the same
+        back-padded path for both jobs, which could produce a false index-0
+        overlap beside an obstacle.
+        """
+        if len(self.committed_points) < 2:
+            return []
+        nearest = _nearest_index(self.committed_points, x, y)
+        return list(self.committed_points[nearest:])
+
     def _sensors_fresh(self, now: rospy.Time) -> Tuple[bool, dict]:
         odom_age = (
             (now - self.latest_odom_at).to_sec()
@@ -448,7 +504,16 @@ class AvoidancePathManager:
     def _selected_path_is_fresh(self, now: rospy.Time) -> bool:
         if self.selected_path_at is None:
             return False
-        return (now - self.selected_path_at).to_sec() <= self.selected_path_timeout_s
+        if (now - self.selected_path_at).to_sec() > self.selected_path_timeout_s:
+            return False
+        if self.use_atomic_plan_status:
+            if not self.atomic_status_seen:
+                return False
+            if self.selected_path_seq is None or self.plan_status_seq is None:
+                return False
+            if int(self.selected_path_seq) != int(self.plan_status_seq):
+                return False
+        return True
 
     def _kind_is_allowed(self) -> bool:
         if self.selected_kind == "bypass":
@@ -611,6 +676,7 @@ class AvoidancePathManager:
             collision_longitudinal_margin_m=self.collision_longitudinal_margin_m,
             collision_lateral_margin_m=self.collision_lateral_margin_m,
             collision_sample_stride=self.collision_sample_stride,
+            escape_prefix_m=self.escape_prefix_m,
         )
 
     def _timer_cb(self, _event) -> None:
@@ -655,10 +721,11 @@ class AvoidancePathManager:
                 self.state = self.AVOIDING_SENSOR_STOP
                 stop_required = True
             else:
-                collision_id, collision_index = self._committed_guard(remaining)
+                guard_path = self._guard_path_from_ego(x, y)
+                collision_id, collision_index = self._committed_guard(guard_path)
                 guard_collision_id = collision_id
                 guard_collision_distance_m = self._collision_distance_m(
-                    remaining, collision_index
+                    guard_path, collision_index
                 )
                 self.last_guard_collision_id = collision_id
 
@@ -782,6 +849,14 @@ class AvoidancePathManager:
                 "safe_path_available": self.safe_path_available,
                 "selected_kind": self.selected_kind,
                 "selected_side": self.selected_side,
+                "atomic_status": self.use_atomic_plan_status,
+                "plan_status_seq": self.plan_status_seq,
+                "selected_path_seq": self.selected_path_seq,
+                "seq_match": (
+                    self.plan_status_seq is not None
+                    and self.selected_path_seq is not None
+                    and int(self.plan_status_seq) == int(self.selected_path_seq)
+                ),
             },
             "freshness": freshness,
             "ego": {
@@ -815,6 +890,7 @@ class AvoidancePathManager:
                     else None
                 ),
                 "guard_refresh_count": self.guard_refresh_count,
+                "escape_prefix_m": self.escape_prefix_m,
             },
         }
         self.state_pub.publish(
