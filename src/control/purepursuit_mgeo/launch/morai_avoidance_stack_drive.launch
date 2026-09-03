@@ -8,7 +8,7 @@
   <arg name="link_set_file"
        default="$(find morai_bringup)/../../../data/mgeo/R_KR_PR_K-city_2025/link_set.json" />
   <arg name="enable_control" default="false" />
-  <arg name="target_speed_mps" default="3.0" />
+  <arg name="target_speed_mps" default="2.0" />
   <arg name="managed_timeout_s" default="2.0" />
 
   <!-- Private params for the existing /purepursuit_mgeo node.  The camera-team
@@ -36,6 +36,23 @@
     <arg name="path_file" value="$(arg path_file)" />
     <arg name="link_set_file" value="$(arg link_set_file)" />
     <arg name="evaluation_speed_mps" value="$(arg target_speed_mps)" />
+
+    <!-- Stage F4: earlier, wider, more conservative bypass. -->
+    <arg name="local_length_m" value="55.0" />
+    <arg name="trigger_distance_m" value="35.0" />
+    <arg name="trigger_lateral_margin_m" value="0.35" />
+    <arg name="candidate_corridor_margin_m" value="0.45" />
+
+    <arg name="bypass_lateral_margin_m" value="0.85" />
+    <arg name="bypass_longitudinal_margin_m" value="3.0" />
+    <arg name="bypass_departure_length_m" value="16.0" />
+    <arg name="bypass_return_length_m" value="14.0" />
+    <arg name="bypass_extra_clearances_m" value="[0.0, 0.4, 0.8]" />
+    <arg name="bypass_max_abs_d_m" value="3.8" />
+    <arg name="bypass_min_transition_length_m" value="6.0" />
+
+    <arg name="collision_longitudinal_margin_m" value="0.40" />
+    <arg name="collision_lateral_margin_m" value="0.45" />
   </include>
 
   <!-- Path Manager owns maneuver commitment and stop requests. -->
@@ -63,8 +80,8 @@
     <param name="vehicle_length_m" value="4.635" />
     <param name="vehicle_width_m" value="1.892" />
     <param name="vehicle_center_from_base_m" value="1.50" />
-    <param name="collision_longitudinal_margin_m" value="0.25" />
-    <param name="collision_lateral_margin_m" value="0.20" />
+    <param name="collision_longitudinal_margin_m" value="0.40" />
+    <param name="collision_lateral_margin_m" value="0.45" />
 
     <!-- Keep the committed avoidance SIDE, but permit the exact path geometry
          to refresh when the latest tracked OBB blocks the frozen path. -->
