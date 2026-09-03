@@ -1,5 +1,5 @@
 <launch>
-  <!-- Stage F5 Frenet avoidance / safety evaluation. Never publishes /ctrl_cmd. -->
+  <!-- Stage F6 Frenet avoidance / safety evaluation. Never publishes /ctrl_cmd. -->
   <arg name="path_file"
        default="$(find morai_bringup)/../../../data/routes/2026_molit_comp_global_path.txt" />
   <arg name="link_set_file"
@@ -71,6 +71,9 @@
   <arg name="evaluation_speed_mps" default="2.0" />
   <arg name="max_lateral_accel_mps2" default="2.5" />
   <arg name="collision_sample_stride" default="1" />
+  <!-- F6: only when point 0 is physically clear but inside the inflated safety
+       envelope, ramp collision margins from 0 to full over this prefix. -->
+  <arg name="escape_prefix_m" default="3.0" />
 
   <node if="$(arg publish_lidar_tf)"
         pkg="tf"
@@ -132,5 +135,6 @@
     <param name="evaluation_speed_mps" value="$(arg evaluation_speed_mps)" />
     <param name="max_lateral_accel_mps2" value="$(arg max_lateral_accel_mps2)" />
     <param name="collision_sample_stride" value="$(arg collision_sample_stride)" />
+    <param name="escape_prefix_m" value="$(arg escape_prefix_m)" />
   </node>
 </launch>
