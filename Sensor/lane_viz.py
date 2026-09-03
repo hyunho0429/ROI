@@ -38,18 +38,22 @@ def _lane_color(l):
     return ID_COLORS.get(l.lane_id, (150, 150, 150))
 
 
-def draw(det, frame_bgr, detector, alpha=0.35):
+def draw(det, frame_bgr, detector, alpha=0.35,
+         show_mask=True, show_lanes=True):
+    """오버레이 한 장. show_mask / show_lanes 는 live_overlay.py 의
+    m / l 키 토글용이다 - 껐을 때도 상단 HUD 는 그대로 남긴다."""
     frame = frame_bgr[detector.crop_top:] if frame_bgr.shape[0] > det.mask.shape[0] \
         else frame_bgr
     vis = frame.copy()
 
-    color = np.zeros_like(vis); hit = np.zeros(vis.shape[:2], bool)
-    for c, bgr in MASK_VIEW_COLORS.items():
-        m = det.mask == c
-        color[m] = bgr; hit |= m
-    vis[hit] = (vis[hit] * (1 - alpha) + color[hit] * alpha).astype(np.uint8)
+    if show_mask:
+        color = np.zeros_like(vis); hit = np.zeros(vis.shape[:2], bool)
+        for c, bgr in MASK_VIEW_COLORS.items():
+            m = det.mask == c
+            color[m] = bgr; hit |= m
+        vis[hit] = (vis[hit] * (1 - alpha) + color[hit] * alpha).astype(np.uint8)
 
-    for l in det.lanes:
+    for l in (det.lanes if show_lanes else ()):
         pts = l.sample()
         pts3 = np.column_stack([pts, np.full(len(pts), ROAD_Z_EGO)])
         uv, valid = detector.cam.project(pts3)

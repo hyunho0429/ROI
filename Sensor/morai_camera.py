@@ -52,7 +52,12 @@ for _p in (_roi_root, os.path.join(_roi_root, "lib")):
 from lib.define.Camera import Camera          # noqa: E402
 from lib.network.UDP import Receiver          # noqa: E402
 
-DEFAULT_IP = os.environ.get("MORAI_CAM_IP", "192.168.0.200")
+# **이 IP 는 시뮬레이터 주소가 아니라 이쪽에서 bind 하는 로컬 주소다.**
+# Receiver 가 socket.bind((ip, port)) 를 하기 때문에, 시뮬레이터 PC 의 IP
+# (예: 192.168.0.161) 를 넣으면 "Cannot assign requested address" 로 죽는다.
+# 시뮬레이터가 어느 인터페이스로 쏘든 받도록 0.0.0.0 으로 둔다. 보내는 쪽
+# 주소는 시뮬레이터의 센서 UDP destination 설정에서 이 PC 를 가리켜야 한다.
+DEFAULT_IP = os.environ.get("MORAI_CAM_IP", "0.0.0.0")
 DEFAULT_PORT = int(os.environ.get("MORAI_CAM_PORT", "1101"))
 
 
