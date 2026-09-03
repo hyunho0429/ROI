@@ -206,6 +206,33 @@ def _quintic_smoothstep(u: float) -> float:
     return 10.0 * u ** 3 - 15.0 * u ** 4 + 6.0 * u ** 5
 
 
+def _quintic_lateral_transition(
+    start_d: float,
+    target_d: float,
+    start_slope: float,
+    length_m: float,
+    u: float,
+) -> float:
+    """Quintic d(s) blend with current lateral slope continuity.
+
+    Boundary conditions are d(0)=start_d, d'(0)=start_slope, d''(0)=0,
+    d(L)=target_d, d'(L)=0, d''(L)=0.  ``start_slope`` is dd/ds.
+    """
+    L = max(float(length_m), 1.0e-6)
+    x = max(0.0, min(1.0, float(u))) * L
+    d0 = float(start_d)
+    d1 = float(target_d)
+    v0 = float(start_slope)
+
+    c0 = d0
+    c1 = v0
+    c2 = 0.0
+    c3 = (20.0 * (d1 - d0) - 12.0 * v0 * L) / (2.0 * L ** 3)
+    c4 = (30.0 * (d0 - d1) + 16.0 * v0 * L) / (2.0 * L ** 4)
+    c5 = (12.0 * (d1 - d0) - 6.0 * v0 * L) / (2.0 * L ** 5)
+    return c0 + c1 * x + c2 * x ** 2 + c3 * x ** 3 + c4 * x ** 4 + c5 * x ** 5
+
+
 class TargetLaneProfile:
     """Adjacent MGeo link represented as d(s) relative to the global route."""
 
@@ -378,6 +405,8 @@ def generate_frenet_lane_change_candidates(
 def generate_frenet_bypass_candidates(
     reference: ReferencePath,
     ego_s: float,
+    ego_d: float,
+    ego_d_slope: float,
     obstacle_id: int,
     obstacle_s: float,
     obstacle_d: float,
@@ -394,26 +423,36 @@ def generate_frenet_bypass_candidates(
     sample_spacing_m: float = 0.5,
     min_transition_length_m: float = 4.0,
 ) -> List[FrenetBypassCandidate]:
-    """Generate left/right departure-hold-return candidates around one obstacle.
+    """Generate left/right bypass candidates from the *current* Frenet state.
 
-    The target offset is derived from the minimum lateral separation required
-    between the obstacle envelope and the ego envelope.  ``max_abs_d_m`` is
-    only a debug guard; it is NOT a road-boundary proof.
+    Stage F5 fixes the replanning discontinuity from earlier stages.  A fresh
+    candidate now starts at ``(ego_s, ego_d)`` and preserves the current
+    lateral heading slope instead of pretending the ego is back on ``d=0``
+    every cycle.  While the obstacle is still ahead, the current
+    lateral offset is held until the normal departure point and then blended to
+    the target offset.  If replanning happens after that nominal departure point
+    (or even while already alongside the obstacle), the blend starts immediately
+    from the current ``ego_d``.
+
+    Candidate safety/curvature checks remain the final authority.  In particular,
+    this generator no longer rejects *all* candidates merely because the full
+    nominal minimum transition distance is unavailable: a vehicle that has
+    already moved laterally may need only a small continuation.
+
+    ``max_abs_d_m`` is only a debug guard; it is NOT a road-boundary proof.
     """
 
+    ego_s = float(ego_s)
+    ego_d = float(ego_d)
+    ego_d_slope = float(ego_d_slope)
     local_end_s = min(ego_s + float(local_length_m), reference.total_length_m)
     obstacle_front_s = obstacle_s - max(0.0, obstacle_longitudinal_half_m)
     obstacle_rear_s = obstacle_s + max(0.0, obstacle_longitudinal_half_m)
 
-    hold_start_s = obstacle_front_s - max(0.0, longitudinal_margin_m)
+    nominal_hold_start_s = obstacle_front_s - max(0.0, longitudinal_margin_m)
     hold_end_s = obstacle_rear_s + max(0.0, longitudinal_margin_m)
-
-    departure_start_s = max(ego_s, hold_start_s - max(0.0, departure_length_m))
-    departure_actual_m = hold_start_s - departure_start_s
     return_end_s = hold_end_s + max(0.0, return_length_m)
 
-    if departure_actual_m < max(0.5, min_transition_length_m):
-        return []
     if hold_end_s <= ego_s:
         return []
     if return_end_s > local_end_s:
@@ -426,6 +465,8 @@ def generate_frenet_bypass_candidates(
     )
 
     spacing = max(float(sample_spacing_m), 0.10)
+    nominal_departure_length_m = max(0.5, float(departure_length_m))
+    preferred_min_transition_m = max(0.5, float(min_transition_length_m))
     candidates: List[FrenetBypassCandidate] = []
 
     for side in ("left", "right"):
@@ -438,14 +479,55 @@ def generate_frenet_bypass_candidates(
             if abs(target_d) > max(0.1, float(max_abs_d_m)):
                 continue
 
+            lateral_delta = target_d - ego_d
+
+            # Before the obstacle's protected hold region, keep the current
+            # lateral state until the usual early-departure point.  If the ego
+            # has already passed that point, transition immediately from ego_d.
+            nominal_departure_start_s = (
+                nominal_hold_start_s - nominal_departure_length_m
+            )
+            transition_start_s = max(ego_s, nominal_departure_start_s)
+
+            if nominal_hold_start_s > transition_start_s + 1.0e-6:
+                # Normal case: arrive at target_d by the protected hold start.
+                transition_end_s = nominal_hold_start_s
+            else:
+                # Replanning late / already alongside the obstacle.  Continue
+                # outward from the current ego_d using the remaining protected
+                # interval.  The collision + steering evaluator will reject the
+                # path if this continuation is physically too late.
+                remaining_hold_m = max(0.0, hold_end_s - transition_start_s)
+                if remaining_hold_m <= 1.0e-6:
+                    continue
+                desired_span_m = min(
+                    nominal_departure_length_m,
+                    max(preferred_min_transition_m, 0.5 * remaining_hold_m),
+                )
+                transition_end_s = min(
+                    hold_end_s, transition_start_s + desired_span_m
+                )
+
+            transition_length_m = max(0.0, transition_end_s - transition_start_s)
+            if transition_length_m < 0.10 and abs(lateral_delta) > 0.05:
+                continue
+
             path: List[PathPoint] = []
             s = ego_s
             while s <= local_end_s + 1.0e-6:
-                if s < departure_start_s:
-                    d = 0.0
-                elif s <= hold_start_s:
-                    u = (s - departure_start_s) / max(departure_actual_m, 1.0e-6)
-                    d = target_d * _quintic_smoothstep(u)
+                if s < transition_start_s:
+                    # Critical F5 change: do NOT snap back to d=0 while waiting
+                    # for the normal departure point.  Preserve current ego_d.
+                    d = ego_d
+                elif s <= transition_end_s and transition_length_m > 1.0e-6:
+                    u = (s - transition_start_s) / transition_length_m
+                    d = _quintic_lateral_transition(
+                        start_d=ego_d,
+                        target_d=target_d,
+                        start_slope=ego_d_slope,
+                        length_m=transition_length_m,
+                        u=u,
+                    )
                 elif s <= hold_end_s:
                     d = target_d
                 elif s <= return_end_s:
@@ -457,10 +539,12 @@ def generate_frenet_bypass_candidates(
                 _append_unique(path, reference.frenet_to_map(s, d))
                 s += spacing
 
-            # Add exact phase boundaries for clearer RViz inspection.
+            # Add exact phase boundaries for clearer RViz inspection and to
+            # guarantee that the first candidate point matches current ego_d.
             for exact_s, exact_d in (
-                (departure_start_s, 0.0),
-                (hold_start_s, target_d),
+                (ego_s, ego_d),
+                (transition_start_s, ego_d),
+                (transition_end_s, target_d),
                 (hold_end_s, target_d),
                 (return_end_s, 0.0),
             ):
@@ -468,6 +552,13 @@ def generate_frenet_bypass_candidates(
                     _append_unique(path, reference.frenet_to_map(exact_s, exact_d))
 
             path.sort(key=lambda p: reference.project(p.x, p.y).s)
+            # Exact boundary points are appended after the sampled path, so a
+            # sort can place two identical coordinates next to each other.
+            # Remove those duplicates before curvature / Pure Pursuit tangent use.
+            deduped_path: List[PathPoint] = []
+            for point in path:
+                _append_unique(deduped_path, point)
+            path = deduped_path
             if len(path) < 2:
                 continue
 
@@ -477,8 +568,8 @@ def generate_frenet_bypass_candidates(
                     side=side,
                     obstacle_id=int(obstacle_id),
                     target_d_m=float(target_d),
-                    departure_start_s=float(departure_start_s),
-                    hold_start_s=float(hold_start_s),
+                    departure_start_s=float(transition_start_s),
+                    hold_start_s=float(transition_end_s),
                     hold_end_s=float(hold_end_s),
                     return_end_s=float(return_end_s),
                     extra_clearance_m=float(extra),
