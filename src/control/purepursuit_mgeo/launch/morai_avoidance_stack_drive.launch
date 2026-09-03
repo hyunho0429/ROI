@@ -37,7 +37,7 @@
     <arg name="link_set_file" value="$(arg link_set_file)" />
     <arg name="evaluation_speed_mps" value="$(arg target_speed_mps)" />
 
-    <!-- Stage F4: earlier, wider, more conservative bypass. -->
+    <!-- Stage F5: F4 clearance + current ego_d / heading-continuous replanning. -->
     <arg name="local_length_m" value="55.0" />
     <arg name="trigger_distance_m" value="35.0" />
     <arg name="trigger_lateral_margin_m" value="0.35" />
