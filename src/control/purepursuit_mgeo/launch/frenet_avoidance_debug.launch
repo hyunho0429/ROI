@@ -1,5 +1,5 @@
 <launch>
-  <!-- Stage D/E visual safety evaluation. Never publishes /ctrl_cmd. -->
+  <!-- Stage F5 Frenet avoidance / safety evaluation. Never publishes /ctrl_cmd. -->
   <arg name="path_file"
        default="$(find morai_bringup)/../../../data/routes/2026_molit_comp_global_path.txt" />
   <arg name="link_set_file"
