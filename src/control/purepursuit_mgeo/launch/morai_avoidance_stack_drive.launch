@@ -1,5 +1,5 @@
 <launch>
-  <!-- Stage F2: use the camera team's actual purepursuit_mgeo_node.py as the
+  <!-- Stage F6: use the camera team's actual purepursuit_mgeo_node.py as the
        only controller.  Planner/Path Manager only choose the path and request stop. -->
 
   <arg name="morai_host_ip" default="192.168.0.161" />
@@ -37,7 +37,7 @@
     <arg name="link_set_file" value="$(arg link_set_file)" />
     <arg name="evaluation_speed_mps" value="$(arg target_speed_mps)" />
 
-    <!-- Stage F5: F4 clearance + current ego_d / heading-continuous replanning. -->
+    <!-- Stage F6: F5 ego_d continuity + start-overlap escape prefix + atomic status. -->
     <arg name="local_length_m" value="55.0" />
     <arg name="trigger_distance_m" value="35.0" />
     <arg name="trigger_lateral_margin_m" value="0.35" />
@@ -53,6 +53,7 @@
 
     <arg name="collision_longitudinal_margin_m" value="0.40" />
     <arg name="collision_lateral_margin_m" value="0.45" />
+    <arg name="escape_prefix_m" value="3.0" />
   </include>
 
   <!-- Path Manager owns maneuver commitment and stop requests. -->
@@ -71,6 +72,8 @@
     <param name="safe_path_available_topic" value="/avoidance_frenet_debug/safe_path_available" />
     <param name="selected_kind_topic" value="/avoidance_frenet_debug/selected_kind" />
     <param name="selected_side_topic" value="/avoidance_frenet_debug/selected_side" />
+    <param name="plan_status_topic" value="/avoidance_frenet_debug/plan_status" />
+    <param name="use_atomic_plan_status" value="true" />
 
     <param name="allow_lane_change_control" value="false" />
     <param name="rate_hz" value="10.0" />
@@ -82,6 +85,7 @@
     <param name="vehicle_center_from_base_m" value="1.50" />
     <param name="collision_longitudinal_margin_m" value="0.40" />
     <param name="collision_lateral_margin_m" value="0.45" />
+    <param name="escape_prefix_m" value="3.0" />
 
     <!-- Keep the committed avoidance SIDE, but permit the exact path geometry
          to refresh when the latest tracked OBB blocks the frozen path. -->
