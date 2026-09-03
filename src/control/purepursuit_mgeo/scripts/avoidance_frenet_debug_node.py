@@ -8,7 +8,7 @@ Adds to the previous A/B/C stage:
   and no adjacent MGeo lane is available,
 * candidate swept-width / sparse vehicle-footprint visualization.
 
-Stage D/E/F planner responsibilities included here:
+Stage D/E/F6 planner responsibilities included here:
 * static obstacle OBB candidate rejection,
 * curvature/steering/lateral-acceleration feasibility checks,
 * deterministic best-candidate selection,
@@ -263,6 +263,8 @@ class AvoidanceFrenetDebugNode:
         self.evaluation_speed_mps = float(rospy.get_param("~evaluation_speed_mps", 2.0))
         self.max_lateral_accel_mps2 = float(rospy.get_param("~max_lateral_accel_mps2", 2.5))
         self.collision_sample_stride = int(rospy.get_param("~collision_sample_stride", 1))
+        self.escape_prefix_m = float(rospy.get_param("~escape_prefix_m", 3.0))
+        self.plan_seq = 0
 
         self.global_pub = rospy.Publisher("~global_path", RosPath, queue_size=1, latch=True)
         self.candidate_pub = rospy.Publisher("~candidate_paths", MarkerArray, queue_size=1)
@@ -281,6 +283,11 @@ class AvoidanceFrenetDebugNode:
         self.safe_path_available_pub = rospy.Publisher("~safe_path_available", Bool, queue_size=1)
         self.selected_kind_pub = rospy.Publisher("~selected_kind", String, queue_size=1)
         self.selected_side_pub = rospy.Publisher("~selected_side", String, queue_size=1)
+        # F6 atomic control-facing status. selected_path.header.seq carries the
+        # same sequence number so the Path Manager never combines a new status
+        # with an old path (or vice versa). Legacy scalar topics stay published
+        # for RViz/diagnostics.
+        self.plan_status_pub = rospy.Publisher("~plan_status", String, queue_size=1)
 
         # Duplicate visualization topics in morai_lidar coordinates.  These are
         # ONLY for RViz; no planner/control computation uses this frame.
@@ -323,7 +330,7 @@ class AvoidanceFrenetDebugNode:
         )
 
         rospy.loginfo(
-            "Frenet avoidance F5: ego_d-continuous bypass replanning + OBB safety; NO /ctrl_cmd. "
+            "Frenet avoidance F6: ego_d-continuous replanning + start-overlap escape prefix + atomic plan status; NO /ctrl_cmd. "
             "vehicle=%.3fx%.3fx%.3f center_from_base=%.2f",
             self.vehicle_length_m,
             self.vehicle_width_m,
@@ -342,14 +349,43 @@ class AvoidanceFrenetDebugNode:
                 math.degrees(self.lidar_yaw_rad),
             )
 
-    def _publish_control_status(
+    def _next_plan_seq(self) -> int:
+        self.plan_seq = (int(self.plan_seq) + 1) & 0xFFFFFFFF
+        if self.plan_seq == 0:
+            self.plan_seq = 1
+        return self.plan_seq
+
+    def _publish_control_bundle(
         self,
+        path_msg: RosPath,
         planner_ready: bool,
         avoidance_required: bool,
         safe_path_available: bool,
         selected_kind: str = "",
         selected_side: str = "",
     ) -> None:
+        # Publish path first, then one atomic JSON status carrying the exact same
+        # sequence.  The path manager accepts a selected path only when both seqs
+        # match.  This removes the F5 race between five independent scalar topics.
+        seq = self._next_plan_seq()
+        path_msg.header.seq = seq
+        path_msg.header.stamp = rospy.Time.now()
+        for ps in path_msg.poses:
+            ps.header.seq = seq
+            ps.header.stamp = path_msg.header.stamp
+        self.selected_path_pub.publish(path_msg)
+
+        payload = {
+            "seq": seq,
+            "planner_ready": bool(planner_ready),
+            "avoidance_required": bool(avoidance_required),
+            "safe_path_available": bool(safe_path_available),
+            "selected_kind": str(selected_kind or ""),
+            "selected_side": str(selected_side or ""),
+        }
+        self.plan_status_pub.publish(String(data=json.dumps(payload, separators=(",", ":"))))
+
+        # Legacy topics remain for diagnostics / backwards compatibility only.
         self.planner_ready_pub.publish(Bool(data=bool(planner_ready)))
         self.avoidance_required_pub.publish(Bool(data=bool(avoidance_required)))
         self.safe_path_available_pub.publish(Bool(data=bool(safe_path_available)))
@@ -976,13 +1012,12 @@ class AvoidanceFrenetDebugNode:
         now = rospy.Time.now()
         if self.latest_odom is None or self.latest_odom_received_at is None:
             rospy.logwarn_throttle(3.0, "Waiting for %s", self.odom_topic)
-            self._publish_control_status(False, False, False)
+            self._publish_control_bundle(self._candidate_to_ros_path(None), False, False, False)
             return
         odom_age = (now - self.latest_odom_received_at).to_sec()
         if odom_age > self.odom_timeout_s:
             rospy.logwarn_throttle(1.0, "STALE odometry age=%.2fs; planner output suppressed", odom_age)
-            self.selected_path_pub.publish(self._candidate_to_ros_path(None))
-            self._publish_control_status(False, False, False)
+            self._publish_control_bundle(self._candidate_to_ros_path(None), False, False, False)
             return
 
         obstacles_fresh = (
@@ -1007,8 +1042,7 @@ class AvoidanceFrenetDebugNode:
 
         if current_link is None:
             rospy.logwarn_throttle(2.0, "No MGeo link near current global reference point")
-            self.selected_path_pub.publish(self._candidate_to_ros_path(None))
-            self._publish_control_status(False, False, False)
+            self._publish_control_bundle(self._candidate_to_ros_path(None), False, False, False)
             return
 
         obstacle_infos = self._obstacle_infos(planning_obstacles, ego_projection)
@@ -1095,6 +1129,7 @@ class AvoidanceFrenetDebugNode:
                     evaluation_speed_mps=self.evaluation_speed_mps,
                     max_lateral_accel_mps2=self.max_lateral_accel_mps2,
                     collision_sample_stride=self.collision_sample_stride,
+                    escape_prefix_m=self.escape_prefix_m,
                 )
             )
 
@@ -1106,7 +1141,8 @@ class AvoidanceFrenetDebugNode:
         evaluation_markers = self._evaluation_markers(candidates, evaluations, selected_index)
 
         planner_ready = bool(obstacles_fresh)
-        self._publish_control_status(
+        self._publish_control_bundle(
+            path_msg=selected_path_msg,
             planner_ready=planner_ready,
             avoidance_required=active_threat is not None,
             safe_path_available=selected_candidate is not None,
@@ -1128,7 +1164,6 @@ class AvoidanceFrenetDebugNode:
         self.link_pub.publish(link_markers)
         self.candidate_pub.publish(candidate_markers)
         self.corridor_pub.publish(corridor_markers)
-        self.selected_path_pub.publish(selected_path_msg)
         self.evaluation_pub.publish(evaluation_markers)
 
         # Second visualization-only copy in the moving LiDAR frame.
@@ -1205,10 +1240,14 @@ class AvoidanceFrenetDebugNode:
                     "max_steering_rad": round(ev.max_steering_rad, 4),
                     "max_lateral_accel_mps2": round(ev.max_lateral_accel_mps2, 3),
                     "cost": round(ev.cost, 4) if math.isfinite(ev.cost) else None,
+                    "escape_prefix_used": bool(getattr(ev, "escape_prefix_used", False)),
+                    "escape_obstacle_id": getattr(ev, "escape_obstacle_id", None),
                 } for ev in evaluations
             ],
             "obstacle_count": len(obstacle_summaries),
             "obstacles": obstacle_summaries,
+            "escape_prefix_m": self.escape_prefix_m,
+            "plan_seq": self.plan_seq,
             "bypass_note": "debug free-space only; road polygon/boundary check not implemented",
             "lidar_visualization": {
                 "enabled": self.publish_lidar_visualization,
@@ -1260,4 +1299,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-  
