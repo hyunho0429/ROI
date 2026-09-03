@@ -5,12 +5,15 @@ Scope of this stage
 -------------------
 * NORMAL: publish a rolling local slice of the original global path.
 * BYPASS commit: when the planner reports a safe ``bypass`` candidate, copy it
-  once and keep following that same path until the vehicle has returned to the
-  global route.  Planner replans do not replace the committed maneuver.
+  and keep the maneuver side locked until the vehicle has returned to the
+  global route.
 * NO SAFE PATH / unsupported lane-change-only situation: request a stop.
 * While a bypass is committed, re-check the remaining committed path against
-  the latest LiDAR obstacle OBBs.  If it becomes blocked or sensors go stale,
-  request a stop while keeping the committed path.
+  the latest LiDAR obstacle OBBs.  If the frozen committed path becomes blocked
+  but the planner has a fresh safe bypass on the SAME side, refresh the geometry
+  without changing maneuver side or resetting completion progress.  This avoids
+  stopping on tracker jitter while preserving maneuver commitment.
+* If no same-side safe refresh exists and the collision persists, request stop.
 
 Deliberate limitation: lane-change candidates are NOT executed in this stage.
 They remain visualization/evaluation only until a lane hold + return state
@@ -183,6 +186,19 @@ class AvoidancePathManager:
         self.collision_sample_stride = int(
             rospy.get_param("~collision_sample_stride", 1)
         )
+        # A committed bypass is side-locked, but its exact geometry may be
+        # refreshed when the latest obstacle OBB makes the frozen path unsafe.
+        # This is intentionally NOT a free replan: only a fresh safe bypass on
+        # the already-committed side is accepted.
+        self.allow_same_side_guard_refresh = bool(
+            rospy.get_param("~allow_same_side_guard_refresh", True)
+        )
+        self.guard_stop_confirm_s = float(
+            rospy.get_param("~guard_stop_confirm_s", 0.30)
+        )
+        self.guard_refresh_min_interval_s = float(
+            rospy.get_param("~guard_refresh_min_interval_s", 0.20)
+        )
 
         global_points = load_mgeo_path(path_file)
         self.reference = ReferencePath(global_points)
@@ -219,6 +235,9 @@ class AvoidancePathManager:
         self.has_departed_global = False
         self.max_abs_global_d = 0.0
         self.last_guard_collision_id: Optional[int] = None
+        self.guard_collision_started_at: Optional[rospy.Time] = None
+        self.last_guard_refresh_at: Optional[rospy.Time] = None
+        self.guard_refresh_count = 0
 
         self.active_path_pub = rospy.Publisher("~active_path", RosPath, queue_size=1)
         self.committed_path_pub = rospy.Publisher(
@@ -488,6 +507,70 @@ class AvoidancePathManager:
         )
         return True
 
+    def _refresh_committed_from_selected(self, now: rospy.Time, pose) -> bool:
+        """Refresh a blocked committed bypass without changing maneuver side.
+
+        The planner may move a bypass slightly as a tracked obstacle OBB jitters.
+        We accept that updated geometry only when it is fresh, safe, still a
+        bypass, and on the same side as the original commitment.  Commit start
+        time / departure history are intentionally preserved.
+        """
+        if not self.allow_same_side_guard_refresh:
+            return False
+        if not self.committed_points or not self.commit_side:
+            return False
+        if not self.avoidance_required or not self.safe_path_available:
+            return False
+        if self.selected_kind != "bypass" or self.selected_side != self.commit_side:
+            return False
+        if not self._selected_path_is_fresh(now) or len(self.selected_points) < 3:
+            return False
+        if self.last_guard_refresh_at is not None:
+            age = (now - self.last_guard_refresh_at).to_sec()
+            if age < self.guard_refresh_min_interval_s:
+                return False
+
+        x = float(pose.position.x)
+        y = float(pose.position.y)
+        start_distance = math.hypot(
+            self.selected_points[0].x - x,
+            self.selected_points[0].y - y,
+        )
+        if start_distance > self.max_commit_start_distance_m:
+            return False
+
+        ego_yaw = _yaw_from_quaternion(pose.orientation)
+        path_yaw = _path_heading(self.selected_points, 0)
+        heading_error_deg = abs(math.degrees(_normalize_angle(path_yaw - ego_yaw)))
+        if heading_error_deg > self.max_commit_heading_error_deg:
+            return False
+
+        self.committed_points = list(self.selected_points)
+        self.committed_lengths = _path_lengths(self.committed_points)
+        self.last_guard_refresh_at = now
+        self.guard_refresh_count += 1
+        self.last_guard_collision_id = None
+        self.guard_collision_started_at = None
+        self.committed_path_pub.publish(self._ros_path(self.committed_points))
+        rospy.logwarn(
+            "BYPASS REFRESH same-side=%s count=%d points=%d length=%.1fm",
+            self.commit_side,
+            self.guard_refresh_count,
+            len(self.committed_points),
+            self.committed_lengths[-1],
+        )
+        return True
+
+    @staticmethod
+    def _collision_distance_m(
+        remaining: Sequence[PathPoint], collision_index: Optional[int]
+    ) -> Optional[float]:
+        if collision_index is None or len(remaining) < 2:
+            return None
+        lengths = _path_lengths(remaining)
+        index = max(0, min(int(collision_index), len(lengths) - 1))
+        return float(lengths[index])
+
     def _clear_commit(self) -> None:
         self.committed_points = []
         self.committed_lengths = []
@@ -496,6 +579,9 @@ class AvoidancePathManager:
         self.has_departed_global = False
         self.max_abs_global_d = 0.0
         self.last_guard_collision_id = None
+        self.guard_collision_started_at = None
+        self.last_guard_refresh_at = None
+        self.guard_refresh_count = 0
         self.committed_path_pub.publish(self._ros_path([]))
 
     def _obstacle_boxes(self) -> List[ObstacleBox]:
@@ -551,6 +637,8 @@ class AvoidancePathManager:
         remaining_fraction = None
         remaining_distance = None
         guard_collision_id = None
+        guard_collision_distance_m = None
+        guard_block_age_s = None
 
         if self.committed_points:
             remaining, _nearest, fraction, rem_dist = self._remaining_committed(x, y)
@@ -567,13 +655,57 @@ class AvoidancePathManager:
                 self.state = self.AVOIDING_SENSOR_STOP
                 stop_required = True
             else:
-                collision_id, _collision_index = self._committed_guard(remaining)
+                collision_id, collision_index = self._committed_guard(remaining)
                 guard_collision_id = collision_id
+                guard_collision_distance_m = self._collision_distance_m(
+                    remaining, collision_index
+                )
                 self.last_guard_collision_id = collision_id
+
                 if collision_id is not None:
-                    self.state = self.AVOIDING_BLOCKED
-                    stop_required = True
+                    # A frozen committed path can disagree with the planner a
+                    # moment later because the tracked OBB moved/jittered.  If
+                    # the planner already has a fresh safe bypass on the SAME
+                    # committed side, update only the geometry and keep going.
+                    refreshed = self._refresh_committed_from_selected(now, pose)
+                    if refreshed:
+                        remaining, _nearest, fraction, rem_dist = self._remaining_committed(x, y)
+                        remaining_fraction = fraction
+                        remaining_distance = rem_dist
+                        guard_collision_id = None
+                        guard_collision_distance_m = None
+                        guard_block_age_s = 0.0
+                        self.state = self.AVOIDING
+                        stop_required = False
+                    else:
+                        if self.guard_collision_started_at is None:
+                            self.guard_collision_started_at = now
+                        guard_block_age_s = max(
+                            0.0, (now - self.guard_collision_started_at).to_sec()
+                        )
+                        if guard_block_age_s >= self.guard_stop_confirm_s:
+                            self.state = self.AVOIDING_BLOCKED
+                            stop_required = True
+                        else:
+                            # Debounce a single tracking-jitter overlap.  At the
+                            # current 3 m/s test speed, 0.30 s is < 1 m travel.
+                            self.state = self.AVOIDING
+                            stop_required = False
+                            rospy.logwarn_throttle(
+                                0.5,
+                                "Committed guard overlap pending id=%s dist=%s age=%.2fs/%.2fs",
+                                str(collision_id),
+                                (
+                                    "n/a"
+                                    if guard_collision_distance_m is None
+                                    else "%.1fm" % guard_collision_distance_m
+                                ),
+                                guard_block_age_s,
+                                self.guard_stop_confirm_s,
+                            )
                 else:
+                    self.guard_collision_started_at = None
+                    self.last_guard_collision_id = None
                     self.state = self.AVOIDING
 
             commit_age = (
@@ -672,6 +804,17 @@ class AvoidancePathManager:
                     else None
                 ),
                 "guard_collision_id": guard_collision_id,
+                "guard_collision_distance_m": (
+                    round(guard_collision_distance_m, 2)
+                    if guard_collision_distance_m is not None
+                    else None
+                ),
+                "guard_block_age_s": (
+                    round(guard_block_age_s, 3)
+                    if guard_block_age_s is not None
+                    else None
+                ),
+                "guard_refresh_count": self.guard_refresh_count,
             },
         }
         self.state_pub.publish(
