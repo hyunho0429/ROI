@@ -266,15 +266,11 @@ class AvoidanceFrenetDebugNode:
         self.escape_prefix_m = float(rospy.get_param("~escape_prefix_m", 3.0))
         self.plan_seq = 0
 
-        self.global_pub = rospy.Publisher("~global_path", RosPath, queue_size=1, latch=True)
-        self.candidate_pub = rospy.Publisher("~candidate_paths", MarkerArray, queue_size=1)
-        self.corridor_pub = rospy.Publisher("~candidate_corridors", MarkerArray, queue_size=1)
-        self.obstacle_pub = rospy.Publisher("~obstacles", MarkerArray, queue_size=1)
-        self.link_pub = rospy.Publisher("~mgeo_links", MarkerArray, queue_size=1)
-        self.ego_pub = rospy.Publisher("~ego_footprint", MarkerArray, queue_size=1)
+        # Control/diagnostic outputs stay in the planner's map frame.
+        # RViz geometry is published only on the morai_lidar visualization namespace
+        # below, avoiding duplicate map-frame visualization topics.
         self.debug_pub = rospy.Publisher("~frenet_debug", String, queue_size=1)
         self.selected_path_pub = rospy.Publisher("~selected_path", RosPath, queue_size=1)
-        self.evaluation_pub = rospy.Publisher("~candidate_evaluations", MarkerArray, queue_size=1)
 
         # Small control-facing status topics.  They deliberately use standard
         # messages so the path manager can remain independent of custom msgs.
@@ -324,13 +320,12 @@ class AvoidanceFrenetDebugNode:
             self.obstacle_topic, LidarObstacleArray, self._obstacle_callback, queue_size=1
         )
 
-        self._publish_global_path()
         self.timer = rospy.Timer(
             rospy.Duration(1.0 / max(self.rate_hz, 1.0)), self._timer_callback
         )
 
         rospy.loginfo(
-            "Frenet avoidance F6: ego_d-continuous replanning + start-overlap escape prefix + atomic plan status; NO /ctrl_cmd. "
+            "Frenet avoidance F6.3: F6 control + morai_lidar-only RViz geometry; NO /ctrl_cmd. "
             "vehicle=%.3fx%.3fx%.3f center_from_base=%.2f",
             self.vehicle_length_m,
             self.vehicle_width_m,
@@ -1158,15 +1153,9 @@ class AvoidanceFrenetDebugNode:
         candidate_markers = self._candidate_markers(candidates)
         corridor_markers = self._candidate_corridor_markers(candidates)
 
-        # Original map-frame outputs stay untouched for planner-centric RViz.
-        self.ego_pub.publish(ego_markers)
-        self.obstacle_pub.publish(obstacle_markers)
-        self.link_pub.publish(link_markers)
-        self.candidate_pub.publish(candidate_markers)
-        self.corridor_pub.publish(corridor_markers)
-        self.evaluation_pub.publish(evaluation_markers)
-
-        # Second visualization-only copy in the moving LiDAR frame.
+        # RViz geometry is published only in the moving LiDAR frame.
+        # The map-frame selected_path remains available as the Path Manager's
+        # control-facing interface; scalar/JSON diagnostics remain unchanged.
         if self.publish_lidar_visualization:
             self.lidar_global_pub.publish(
                 self._lidar_local_global_path(ego_projection.s, self.latest_odom)
