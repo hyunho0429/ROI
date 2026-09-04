@@ -75,14 +75,45 @@ from morai_camera import DEFAULT_IP, DEFAULT_PORT, CameraStream
 # 창에서 q/ESC 를 누르면 그리기만 멈추고 값 출력은 계속된다.
 # ==========================================================================
 class _Preview:
-    def __init__(self, detector, every, scale):
+    def __init__(self, detector, every, scale, udp_label=None):
         import cv2                       # 지연 import - 블록을 지우면 같이 사라진다
         from lane_viz import draw
         self._cv2, self._draw = cv2, draw
         self.det, self.every, self.scale = detector, max(every, 1), scale
+        self.udp_label = udp_label
         self.i = self.n = 0
         self.ms = 0.0
         self.on = True
+
+    def _value_strip(self, img, res):
+        """**제어로 나가는 값을 화면 아래에 띄운다.**
+
+        lane_viz.draw 의 상단 HUD 는 차선 ID·클래스만 보여준다. 이 스크립트는
+        제어값을 내보내는 게 본업이므로, 실제로 전송되는 숫자를 같이 봐야
+        "화면은 멀쩡한데 값이 이상한" 경우를 잡을 수 있다.
+        lane_viz 를 고치지 않고 여기서 덧그리는 이유는, 그 파일이 세 스크립트
+        공용이고 이 블록만 지우면 원래대로 돌아가야 하기 때문이다.
+        """
+        cv2 = self._cv2
+        h, w = img.shape[:2]
+        le, he = res.lateral_error(), res.heading_error()
+        items = [
+            ("lateral", f"{le:+.2f} m" if le is not None else "-", le is not None),
+            ("heading", f"{he:+.3f} rad" if he is not None else "-", he is not None),
+            ("stopline", f"{res.stopline_dist:.1f} m"
+             if res.stopline_dist is not None else "-", res.stopline_dist is not None),
+            ("send", self.udp_label or "stdout", True),
+        ]
+        bar = 34
+        cv2.rectangle(img, (0, h - bar), (w, h), (0, 0, 0), -1)
+        x = 10
+        for name, val, ok in items:
+            cv2.putText(img, name, (x, h - bar + 13), cv2.FONT_HERSHEY_SIMPLEX,
+                        0.4, (150, 150, 150), 1)
+            cv2.putText(img, val, (x, h - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.55,
+                        (120, 255, 140) if ok else (110, 110, 200), 1)
+            x += max(len(val) * 11, len(name) * 8) + 34
+        return img
 
     def show(self, frame, res):
         if not self.on:
@@ -92,6 +123,7 @@ class _Preview:
             return
         t0 = time.time()
         img = self._draw(res, frame, self.det)
+        img = self._value_strip(img, res)
         if self.scale != 1.0:
             img = self._cv2.resize(img, None, fx=self.scale, fy=self.scale)
         self._cv2.imshow("lane preview (q=닫기, 값 출력은 계속)", img)
@@ -124,7 +156,8 @@ def _preview_make(args, detector):
     if not getattr(args, "preview", False):
         return None
     print(f"[preview] 켜짐 - {args.preview_every}프레임마다 그림", file=sys.stderr)
-    return _Preview(detector, args.preview_every, args.preview_scale)
+    return _Preview(detector, args.preview_every, args.preview_scale,
+                    udp_label=args.udp)
 # ==========================================================================
 # PREVIEW 블록 끝
 # ==========================================================================
