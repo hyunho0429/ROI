@@ -43,9 +43,9 @@
     <arg name="trigger_lateral_margin_m" value="0.35" />
     <arg name="candidate_corridor_margin_m" value="0.45" />
 
-    <arg name="bypass_lateral_margin_m" value="0.85" />
+    <arg name="bypass_lateral_margin_m" value="1.15" />
     <arg name="bypass_longitudinal_margin_m" value="3.0" />
-    <arg name="bypass_departure_length_m" value="16.0" />
+    <arg name="bypass_departure_length_m" value="14.0" />
     <arg name="bypass_return_length_m" value="14.0" />
     <arg name="bypass_extra_clearances_m" value="[0.0, 0.4, 0.8]" />
     <arg name="bypass_max_abs_d_m" value="3.8" />
