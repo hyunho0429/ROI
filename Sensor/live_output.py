@@ -10,20 +10,29 @@ C:/Users/user/anaconda3/envs/vision_env/python.exe live_output.py --udp 127.0.0.
   화면으로만 보기    --udp 를 지운다 (표준출력에 JSON 한 줄씩)
   전송만 하기        --quiet 추가
   점열까지 보내기    --points 추가
+  미리보기 창        --preview        (제어값 출력은 그대로, 그림만 곁들임)
   GPU 로            --device cuda
 ===========================================================================
 
-**오버레이도 저장도 하지 않는다.** 실주행에서 제어에 넘길 값만 뽑는 경로다.
-그림이 필요하면 live_overlay.py, 저장이 필요하면 offline_test.py 를 쓴다.
+**저장은 하지 않는다.** 실주행에서 제어에 넘길 값을 뽑는 경로다.
+저장이 필요하면 offline_test.py 를 쓴다.
 
-후처리는 lane_pipeline.LanePipeline.run() 하나만 쓴다. 세 스크립트가 같은
+후처리는 lane_detection.LaneDetector.run() 하나만 쓴다. 세 스크립트가 같은
 코드를 부르므로 **집에서 본 결과와 실주행 결과가 갈릴 일이 없다.**
+
+--------------------------------------------------------------------------
+미리보기는 언제든 떼어낼 수 있게 격리해 두었다
+--------------------------------------------------------------------------
+`--preview` 는 기본 꺼짐이고, 켜도 **값 전송이 먼저 끝난 뒤에** 그린다.
+그리기 코드는 아래 `PREVIEW 블록`과 `# [PREVIEW]` 가 붙은 네 줄에만 있다 —
+그 블록과 그 네 줄만 지우면 lane_viz 를 import 조차 하지 않는 순수 제어
+경로로 정확히 되돌아간다 (지운 뒤 남는 코드는 그대로 동작한다).
 
 --------------------------------------------------------------------------
 출력 규격은 아직 미정이다
 --------------------------------------------------------------------------
-지금은 LaneResult.as_dict() 를 통째로 보낸다. 제어팀과 정하고 나면
-lane_pipeline.LaneResult.as_dict() 한 곳만 줄이면 세 스크립트에 다 반영된다.
+지금은 DetectionResult.as_dict() 를 통째로 보낸다. 제어팀과 정하고 나면
+lane_detection.DetectionResult.as_dict() 한 곳만 줄이면 세 스크립트에 다 반영된다.
 
 들어 있는 것:
     left / right        자차 좌우 차선 경계, 자차 좌표계 점열 [[x, y], ...]
@@ -45,10 +54,80 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-# **lane_viz 를 import 하지 않는다.** 실주행에서 제어로 값만 보내는 경로라
-# 시각화 코드가 들어올 이유가 없다.
+# **여기서는 lane_viz 를 import 하지 않는다.** 제어 경로에 시각화 코드가
+# 상시로 들어오지 않게 하려는 것이다. 미리보기는 아래 PREVIEW 블록 안에서만
+# 지연 import 한다 (--preview 를 안 주면 모듈이 로드조차 되지 않는다).
 from lane_detection import LaneDetector, default_checkpoint
 from morai_camera import DEFAULT_IP, DEFAULT_PORT, CameraStream
+
+
+# ==========================================================================
+# PREVIEW 블록 시작 - 미리보기 (없어도 되는 기능)
+# --------------------------------------------------------------------------
+# **떼어내는 방법**: 이 블록 전체와, 아래에서 `# [PREVIEW]` 가 붙은 네 줄을
+# 지우면 끝이다. 나머지 코드는 preview 를 전혀 참조하지 않으므로 그대로 돈다.
+#
+# 설계 원칙 두 가지:
+#   1. **값이 먼저다.** 메인 루프에서 UDP 전송·표준출력이 끝난 뒤에 그린다.
+#      그리기가 늦어도 제어로 가는 값의 지연은 늘어나지 않는다.
+#   2. **솎아서 그린다.** CPU 에서는 그리기가 프레임을 잡아먹으므로 기본
+#      2프레임에 1번만 그린다 (--preview-every).
+# 창에서 q/ESC 를 누르면 그리기만 멈추고 값 출력은 계속된다.
+# ==========================================================================
+class _Preview:
+    def __init__(self, detector, every, scale):
+        import cv2                       # 지연 import - 블록을 지우면 같이 사라진다
+        from lane_viz import draw
+        self._cv2, self._draw = cv2, draw
+        self.det, self.every, self.scale = detector, max(every, 1), scale
+        self.i = self.n = 0
+        self.ms = 0.0
+        self.on = True
+
+    def show(self, frame, res):
+        if not self.on:
+            return
+        self.i += 1
+        if self.i % self.every:
+            return
+        t0 = time.time()
+        img = self._draw(res, frame, self.det)
+        if self.scale != 1.0:
+            img = self._cv2.resize(img, None, fx=self.scale, fy=self.scale)
+        self._cv2.imshow("lane preview (q=닫기, 값 출력은 계속)", img)
+        if (self._cv2.waitKey(1) & 0xFF) in (ord("q"), 27):
+            self.close()
+            print("[preview] 창을 닫았습니다. 값 출력은 계속됩니다.", file=sys.stderr)
+            return
+        self.ms += (time.time() - t0) * 1000.0
+        self.n += 1
+
+    def close(self):
+        if not self.on:
+            return
+        self.on = False
+        self._cv2.destroyAllWindows()
+        if self.n:
+            print(f"[preview] 그리기 평균 {self.ms / self.n:.0f}ms x {self.n}회",
+                  file=sys.stderr)
+
+
+def _preview_add_args(ap):
+    ap.add_argument("--preview", action="store_true",
+                    help="미리보기 창을 띄운다 (값 출력은 그대로. 창의 q 로 닫힘)")
+    ap.add_argument("--preview-every", type=int, default=2,
+                    help="N 프레임마다 한 번만 그린다 (기본 2)")
+    ap.add_argument("--preview-scale", type=float, default=1.0, help="창 크기 배율")
+
+
+def _preview_make(args, detector):
+    if not getattr(args, "preview", False):
+        return None
+    print(f"[preview] 켜짐 - {args.preview_every}프레임마다 그림", file=sys.stderr)
+    return _Preview(detector, args.preview_every, args.preview_scale)
+# ==========================================================================
+# PREVIEW 블록 끝
+# ==========================================================================
 
 
 def build_arg_parser():
@@ -71,6 +150,7 @@ def build_arg_parser():
                          "점열이 프레임당 수십 개라 UDP 패킷이 커진다)")
     ap.add_argument("--stats-sec", type=float, default=2.0,
                     help="통계를 몇 초마다 stderr 로 찍을지 (0=안 찍음)")
+    _preview_add_args(ap)                                          # [PREVIEW]
     return ap
 
 
@@ -89,6 +169,8 @@ def main(argv=None):
                         device=args.device, track=not args.no_track)
     print(f"[out] epoch {pipe.ckpt_info['epoch']} ({pipe.ckpt_info['backbone']}) "
           f"device={pipe.device} 보닛 {pipe.bonnet_source}", file=sys.stderr)
+
+    preview = _preview_make(args, pipe)                            # [PREVIEW]
 
     cam = CameraStream(args.ip, args.port).start()
     print(f"[out] {args.ip}:{args.port} 대기 중...", file=sys.stderr)
@@ -120,6 +202,9 @@ def main(argv=None):
             if not args.quiet:
                 print(line, flush=True)
 
+            if preview:                                            # [PREVIEW]
+                preview.show(frame, res)                           # [PREVIEW]
+
             n += 1
             n_left += res.ego_left is not None
             n_right += res.ego_right is not None
@@ -138,6 +223,8 @@ def main(argv=None):
         pass
     finally:
         cam.stop()
+        if preview:                                                # [PREVIEW]
+            preview.close()                                        # [PREVIEW]
         if sender is not None:
             sender[0].close()
         print("[out] 종료", file=sys.stderr)
