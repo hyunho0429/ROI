@@ -51,9 +51,9 @@
   <arg name="always_show_lane_candidates" default="false" />
 
   <!-- One-lane/free-space bypass sampling. This does NOT yet check road polygons. -->
-  <arg name="bypass_lateral_margin_m" default="0.85" />
+  <arg name="bypass_lateral_margin_m" default="1.15" />
   <arg name="bypass_longitudinal_margin_m" default="3.0" />
-  <arg name="bypass_departure_length_m" default="16.0" />
+  <arg name="bypass_departure_length_m" default="14.0" />
   <arg name="bypass_return_length_m" default="14.0" />
   <arg name="bypass_extra_clearances_m" default="[0.0, 0.4, 0.8]" />
   <arg name="bypass_max_abs_d_m" default="3.8" />
