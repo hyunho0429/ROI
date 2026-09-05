@@ -820,7 +820,8 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
 | `car_detection_hold_s` | `2.0` | 일시적인 YOLO 누락 시 car 조건 유지시간 |
 | `enable_pedestrian_crossing` | `true` | YOLO person 기반 정지·재출발 제어 |
 | `person_clear_confirmation_s` | `0.5` | person 미검출 후 재출발까지 연속 확인 시간 |
-| `stopline_clear_confirmation_s` | `0.5` | 정지선 미검출 후 정지 요청 해제 확인 시간 |
+| `stopline_stop_distance_m` | `1.0` | 검출된 정지선이 이 거리 이내일 때만 정지 요청 [m] |
+| `stopline_clear_confirmation_s` | `0.5` | 정지 조건 미충족 후 정지 요청 해제 확인 시간 |
 | `enable_intersection_detection` | `true` | 카메라·LiDAR 교차로 판정 노드 실행 |
 | `intersection_minimum_speed_mps` | `1.0` | 수직 이동 동적 객체의 최소 속력 [m/s] |
 | `intersection_maximum_range_m` | `40.0` | 교차로 LiDAR 후보 최대 거리 [m] |

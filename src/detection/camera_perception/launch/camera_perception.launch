@@ -26,6 +26,7 @@
   <arg name="stopline_detected_topic" default="/perception/camera/stopline_detected" />
   <arg name="stopline_distance_topic" default="/perception/camera/stopline_distance_m" />
   <arg name="stopline_stop_topic" default="/perception/stopline/stop_required" />
+  <arg name="stopline_stop_distance_m" default="1.0" />
   <arg name="stopline_clear_confirmation_s" default="0.5" />
   <arg name="highway_environment_topic" default="/perception/camera/highway_environment" />
   <arg name="enable_highway_gate" default="$(arg enable_yolo)" />
@@ -59,7 +60,7 @@
         name="lane_camera"
         output="screen"
         respawn="false"
-        args="--mode lane --camera-stack-root $(arg camera_stack_root) --cam-ip $(arg camera_ip) --cam-port $(arg lane_port) --lane-checkpoint $(arg lane_checkpoint) --lane-cam-set $(arg lane_cam_set) --lane-device $(arg lane_device) --lane-every $(arg lane_every) --lane-scale $(arg lane_scale) --lane-ros-publish --dashed-lane-topic $(arg dashed_lane_topic) --stopline-detected-topic $(arg stopline_detected_topic) --stopline-distance-topic $(arg stopline_distance_topic) --stopline-stop-topic $(arg stopline_stop_topic) --stopline-clear-confirmation-s $(arg stopline_clear_confirmation_s)" />
+        args="--mode lane --camera-stack-root $(arg camera_stack_root) --cam-ip $(arg camera_ip) --cam-port $(arg lane_port) --lane-checkpoint $(arg lane_checkpoint) --lane-cam-set $(arg lane_cam_set) --lane-device $(arg lane_device) --lane-every $(arg lane_every) --lane-scale $(arg lane_scale) --lane-ros-publish --dashed-lane-topic $(arg dashed_lane_topic) --stopline-detected-topic $(arg stopline_detected_topic) --stopline-distance-topic $(arg stopline_distance_topic) --stopline-stop-topic $(arg stopline_stop_topic) --stopline-stop-distance-m $(arg stopline_stop_distance_m) --stopline-clear-confirmation-s $(arg stopline_clear_confirmation_s)" />
 
   <node if="$(arg enable_yolo)"
         pkg="camera_perception"

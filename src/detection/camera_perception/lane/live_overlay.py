@@ -37,7 +37,10 @@ import cv2
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__))), "src"))
 
+from camera_perception.stopline import stopline_requires_stop
 from lane_detection import LaneDetector, default_checkpoint
 from lane_viz import draw, draw_bev
 from morai_camera import DEFAULT_IP, DEFAULT_PORT, CameraStream
@@ -93,8 +96,10 @@ def build_arg_parser():
                     default="/perception/camera/stopline_distance_m")
     ap.add_argument("--stopline-stop-topic",
                     default="/perception/stopline/stop_required")
+    ap.add_argument("--stopline-stop-distance-m", type=float, default=1.0,
+                    help="이 거리 이내의 정지선만 정지 요청 (기본 1.0m)")
     ap.add_argument("--stopline-clear-confirmation-s", type=float, default=0.5,
-                    help="정지선 미검출이 이 시간 지속되어야 정지 요청 해제")
+                    help="정지 조건 미충족이 이 시간 지속되어야 정지 요청 해제")
     return ap
 
 
@@ -166,7 +171,11 @@ def main(argv=None):
                                 and res.ego_left.is_dashed
                             )
                             stopline_detected = res.stopline_dist is not None
-                            if stopline_detected:
+                            stopline_in_stop_range = stopline_requires_stop(
+                                res.stopline_dist,
+                                args.stopline_stop_distance_m,
+                            )
+                            if stopline_in_stop_range:
                                 stopline_stop_required = True
                                 stopline_clear_since = None
                             elif stopline_stop_required:

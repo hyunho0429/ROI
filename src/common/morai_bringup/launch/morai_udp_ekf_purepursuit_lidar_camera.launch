@@ -44,6 +44,7 @@
   <arg name="stopline_detected_topic" default="/perception/camera/stopline_detected" />
   <arg name="stopline_distance_topic" default="/perception/camera/stopline_distance_m" />
   <arg name="stopline_stop_topic" default="/perception/stopline/stop_required" />
+  <arg name="stopline_stop_distance_m" default="1.0" />
   <arg name="stopline_clear_confirmation_s" default="0.5" />
   <arg name="highway_environment_topic" default="/perception/camera/highway_environment" />
   <arg name="enable_highway_gate" default="$(arg enable_yolo)" />
@@ -119,6 +120,7 @@
     <arg name="stopline_detected_topic" value="$(arg stopline_detected_topic)" />
     <arg name="stopline_distance_topic" value="$(arg stopline_distance_topic)" />
     <arg name="stopline_stop_topic" value="$(arg stopline_stop_topic)" />
+    <arg name="stopline_stop_distance_m" value="$(arg stopline_stop_distance_m)" />
     <arg name="stopline_clear_confirmation_s" value="$(arg stopline_clear_confirmation_s)" />
     <arg name="highway_environment_topic" value="$(arg highway_environment_topic)" />
     <arg name="enable_highway_gate" value="$(arg enable_highway_gate)" />
