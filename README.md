@@ -1,6 +1,6 @@
 # MORAI 대회 자율주행
 
-`dev/merged_sensor` 브랜치는 MORAI 25.S4 대회 환경에서 전역 경로를 추종하는
+`dev/merged_code` 브랜치는 MORAI 25.S4 대회 환경에서 전역 경로를 추종하는
 UDP 기반 자율주행 코드에 LiDAR와 카메라 인식을 통합한 브랜치이다.
 
 - 횡방향 제어: Pure Pursuit
@@ -72,7 +72,7 @@ hostname -I
 
 ```bash
 cd ~
-git clone -b dev/merged_sensor --single-branch https://github.com/hyunho0429/ROI.git
+git clone -b dev/merged_code --single-branch https://github.com/hyunho0429/ROI.git
 cd ROI
 ```
 
@@ -81,11 +81,11 @@ cd ROI
 ```bash
 cd ~/ROI
 git fetch origin
-git switch dev/merged_sensor
-git pull origin dev/merged_sensor
+git switch dev/merged_code
+git pull origin dev/merged_code
 ```
 
-구버전 Git에서 `git switch`가 지원되지 않으면 `git checkout dev/merged_sensor`를
+구버전 Git에서 `git switch`가 지원되지 않으면 `git checkout dev/merged_code`를
 사용한다.
 
 ## 2. 최초 빌드
@@ -618,7 +618,7 @@ roslaunch path_planning kcity_2025_dijkstra.launch \
 
 ### 기능
 
-`dev/merged_sensor`는 `feat/lidar`의 주행 및 LiDAR 코드를 그대로 유지하면서
+`dev/merged_code`는 `feat/lidar`의 주행 및 LiDAR 코드를 그대로 유지하면서
 `feature-camera`의 카메라 기능을 ROS launch로 함께 실행한다.
 
 - GPS/IMU 기반 위치 추정과 Pure Pursuit 경로 추종
@@ -630,6 +630,9 @@ roslaunch path_planning kcity_2025_dijkstra.launch \
 - `feature-camera`의 YOLOv8 기본 객체 탐지와 `best0902.pt` 커스텀 탐지
 - 신호등과 카메라 장애물 객체 배열 및 기존 car/person 호환 토픽 동시 발행
 - YOLO person 단독 인식 기반 보행자 즉시 정지 및 재출발
+- YOLO 차량과 ego 진행방향에 수직인 LiDAR 동적 객체를 결합한 교차로 판정
+- YOLO 차량과 왼쪽 점선을 결합한 고속도로·끼어들기 환경 판정
+- 카메라 정지선 검출 결과 발행 및 Pure Pursuit 즉시 정지
 - LiDAR/RViz, 차선 인식, YOLO 화면을 하나의 `roslaunch`로 실행
 
 차선과 YOLO는 각각 독립 프로세스로 실행된다. 한 카메라 프로세스에 문제가 생겨도
@@ -672,9 +675,11 @@ morai_udp_ekf_purepursuit_lidar_camera.launch
     ├── lane_camera  → lane/live_overlay.py (별도 차선 오버레이 창)
     ├── yolo_camera  → scripts/camera_object_detection_node.py
     ├── highway_environment_gate
-    │    car/bus/truck AND 왼쪽 평행 주행 동적 객체 → merge-gap 활성화 후 유지
+    │    car/bus/truck AND 왼쪽 점선 → merge-gap 활성화 후 유지
+    ├── intersection_environment
+    │    car/bus/truck AND 수직 이동 LiDAR 동적 객체 → 교차로 주행 가능/불가능
     └── pedestrian_crossing_fusion
-         person_detected AND 가까운 동적 LiDAR 객체 → 정지/재출발
+         person_detected → 정지/재출발
 ```
 
 ### 센서 및 모델 준비
@@ -702,6 +707,14 @@ MORAI 센서 설정의 포트가 위 값과 일치해야 하며 Ubuntu 방화벽
 |---|---|---|
 | 차량 인식 상태 | `/perception/camera/car_detected` | `std_msgs/Bool` |
 | 보행자 인식 상태 | `/perception/camera/person_detected` | `std_msgs/Bool` |
+| 왼쪽 점선 인식 | `/perception/camera/dashed_lane_detected` | `std_msgs/Bool` |
+| 정지선 인식 | `/perception/camera/stopline_detected` | `std_msgs/Bool` |
+| 정지선 거리 | `/perception/camera/stopline_distance_m` | `std_msgs/Float64` |
+| 정지선 정지 요청 | `/perception/stopline/stop_required` | `std_msgs/Bool` |
+| 교차로 인식 | `/perception/intersection/detected` | `std_msgs/Bool` |
+| 교차로 주행 가능 | `/perception/intersection/driving_allowed` | `std_msgs/Bool` |
+| 교차로 주행 불가능 | `/perception/intersection/driving_unavailable` | `std_msgs/Bool` |
+| 교차로 상세 상태 | `/perception/intersection/status` | `std_msgs/String` (JSON) |
 | 신호등 탐지 결과 | `/detection/traffic_light` | `common/ObjectInfoArray` |
 | 카메라 장애물 결과 | `/detection/obstacle` | `common/ObjectInfoArray` |
 
@@ -721,8 +734,8 @@ MORAI 센서 설정의 포트가 위 값과 일치해야 하며 Ubuntu 방화벽
 ```bash
 cd ~/ROI
 git fetch origin
-git switch dev/merged_sensor
-git pull origin dev/merged_sensor
+git switch dev/merged_code
+git pull origin dev/merged_code
 
 source /opt/ros/noetic/setup.bash
 python3 -m pip install -r src/control/path_planning/requirements.txt
@@ -800,13 +813,18 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
 | `camera_display_fps` | `0.0` | `0`은 MORAI 카메라 수신 속도를 그대로 사용 |
 | `yolo_cpu_threads` | `1` | YOLO에 사용하는 PyTorch CPU 스레드 수 |
 | `enable_highway_gate` | `true` | 카메라 기반 고속도로 환경 게이트 실행 |
-| `require_dashed_lane` | `false` | `true`이면 car와 점선이 모두 탐지되어야 활성화 |
-| `require_left_parallel_dynamic` | `true` | YOLO car/bus/truck과 왼쪽 차선 평행 주행 동적 객체가 모두 있어야 최초 활성화 |
+| `require_dashed_lane` | `true` | YOLO car/bus/truck과 왼쪽 점선이 모두 탐지되어야 활성화 |
+| `require_left_parallel_dynamic` | `false` | 기존 평행 주행 LiDAR 고속도로 조건은 사용하지 않음 |
 | `left_parallel_dynamic_hold_s` | `0.5` | 일시적인 LiDAR 추적 누락 허용시간 |
 | `highway_latch_once` | `true` | 고속도로 상태가 한 번 활성화되면 노드 종료 전까지 유지 |
 | `car_detection_hold_s` | `2.0` | 일시적인 YOLO 누락 시 car 조건 유지시간 |
 | `enable_pedestrian_crossing` | `true` | YOLO person 기반 정지·재출발 제어 |
 | `person_clear_confirmation_s` | `0.5` | person 미검출 후 재출발까지 연속 확인 시간 |
+| `stopline_clear_confirmation_s` | `0.5` | 정지선 미검출 후 정지 요청 해제 확인 시간 |
+| `enable_intersection_detection` | `true` | 카메라·LiDAR 교차로 판정 노드 실행 |
+| `intersection_minimum_speed_mps` | `1.0` | 수직 이동 동적 객체의 최소 속력 [m/s] |
+| `intersection_maximum_range_m` | `40.0` | 교차로 LiDAR 후보 최대 거리 [m] |
+| `intersection_perpendicular_error_deg` | `20.0` | ego 수직 90도에서 허용하는 방향 오차 [deg] |
 | `merge_available_topic` | `/perception/merge_gap/available` | 왼쪽 차선 끼어들기 가능 토픽 |
 | `merge_unavailable_topic` | `/perception/merge_gap/unavailable` | 왼쪽 차선 끼어들기 불가능 토픽 |
 | `merge_adjacent_obstacle_topic` | `/perception/merge_gap/left_lane_obstacles` | 끼어들기 판단 중 왼쪽 옆 차선 객체 상태 배열 |

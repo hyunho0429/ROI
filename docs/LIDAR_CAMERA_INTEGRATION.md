@@ -62,8 +62,8 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch enable_con
 | `camera_display_fps` | `0.0` | `0`은 MORAI 수신 프레임율로 즉시 표시 |
 | `yolo_cpu_threads` | `1` | YOLO에 사용하는 PyTorch CPU 스레드 수 |
 | `enable_highway_gate` | `true` | YOLO 기반 고속도로 환경 게이트 |
-| `require_dashed_lane` | `false` | 점선 인식 구현 후 `true`로 전환 |
-| `require_left_parallel_dynamic` | `true` | 왼쪽 차선 평행 주행 동적 객체 LiDAR 조건 사용 |
+| `require_dashed_lane` | `true` | YOLO 차량과 왼쪽 점선 조건 사용 |
+| `require_left_parallel_dynamic` | `false` | 기존 평행 주행 LiDAR 고속도로 조건은 사용하지 않음 |
 | `left_parallel_dynamic_hold_s` | `0.5` | LiDAR 조건의 짧은 추적 누락 허용시간 |
 | `highway_latch_once` | `true` | 최초 고속도로 인지 후 상태를 노드 종료까지 유지 |
 | `car_detection_hold_s` | `2.0` | YOLO car 조건 유지시간 |

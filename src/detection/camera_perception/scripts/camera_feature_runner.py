@@ -32,6 +32,24 @@ def main():
     parser.add_argument("--lane-every", type=int, default=1)
     parser.add_argument("--lane-scale", type=float, default=1.0)
     parser.add_argument("--lane-bev", action="store_true")
+    parser.add_argument("--lane-ros-publish", action="store_true")
+    parser.add_argument(
+        "--dashed-lane-topic",
+        default="/perception/camera/dashed_lane_detected",
+    )
+    parser.add_argument(
+        "--stopline-detected-topic",
+        default="/perception/camera/stopline_detected",
+    )
+    parser.add_argument(
+        "--stopline-distance-topic",
+        default="/perception/camera/stopline_distance_m",
+    )
+    parser.add_argument(
+        "--stopline-stop-topic",
+        default="/perception/stopline/stop_required",
+    )
+    parser.add_argument("--stopline-clear-confirmation-s", type=float, default=0.5)
     parser.add_argument(
         "--car-detected-topic", default="/perception/camera/car_detected"
     )
@@ -63,6 +81,18 @@ def main():
             target_args.extend(("--device", args.lane_device))
         if args.lane_bev:
             target_args.append("--bev")
+        if args.lane_ros_publish:
+            target_args.extend(
+                (
+                    "--ros-publish",
+                    "--dashed-lane-topic", args.dashed_lane_topic,
+                    "--stopline-detected-topic", args.stopline_detected_topic,
+                    "--stopline-distance-topic", args.stopline_distance_topic,
+                    "--stopline-stop-topic", args.stopline_stop_topic,
+                    "--stopline-clear-confirmation-s",
+                    str(args.stopline_clear_confirmation_s),
+                )
+            )
     else:
         target = package_root / "scripts" / "camera_object_detection_node.py"
         target_args = [

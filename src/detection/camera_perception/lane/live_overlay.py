@@ -83,11 +83,47 @@ def build_arg_parser():
     ap.add_argument("--scale", type=float, default=1.0, help="표시 배율")
     ap.add_argument("--every", type=int, default=1,
                     help="N 프레임마다 추론 (CPU 처럼 느린 환경에서 화면을 부드럽게)")
+    ap.add_argument("--ros-publish", action="store_true",
+                    help="점선·정지선 결과를 ROS 토픽으로 발행")
+    ap.add_argument("--dashed-lane-topic",
+                    default="/perception/camera/dashed_lane_detected")
+    ap.add_argument("--stopline-detected-topic",
+                    default="/perception/camera/stopline_detected")
+    ap.add_argument("--stopline-distance-topic",
+                    default="/perception/camera/stopline_distance_m")
+    ap.add_argument("--stopline-stop-topic",
+                    default="/perception/stopline/stop_required")
+    ap.add_argument("--stopline-clear-confirmation-s", type=float, default=0.5,
+                    help="정지선 미검출이 이 시간 지속되어야 정지 요청 해제")
     return ap
 
 
 def main(argv=None):
     args = build_arg_parser().parse_args(argv)
+
+    rospy = None
+    dashed_publisher = None
+    stopline_detected_publisher = None
+    stopline_distance_publisher = None
+    stopline_stop_publisher = None
+    if args.ros_publish:
+        import rospy as rospy_module
+        from std_msgs.msg import Bool, Float64
+
+        rospy = rospy_module
+        rospy.init_node("camera_lane_perception", anonymous=False)
+        dashed_publisher = rospy.Publisher(
+            args.dashed_lane_topic, Bool, queue_size=1
+        )
+        stopline_detected_publisher = rospy.Publisher(
+            args.stopline_detected_topic, Bool, queue_size=1
+        )
+        stopline_distance_publisher = rospy.Publisher(
+            args.stopline_distance_topic, Float64, queue_size=1
+        )
+        stopline_stop_publisher = rospy.Publisher(
+            args.stopline_stop_topic, Bool, queue_size=1
+        )
 
     pipe = LaneDetector(args.checkpoint, cam_set=args.cam_set,
                         bonnet_mask=False if args.no_bonnet else args.bonnet,
@@ -107,12 +143,14 @@ def main(argv=None):
     show_bev = args.bev
     bev_open = False
     paused = False
+    stopline_stop_required = False
+    stopline_clear_since = None
     last_seq, res, frame = -1, None, None
     t_prev, fps = time.time(), 0.0
     n_since = 0
 
     try:
-        while True:
+        while rospy is None or not rospy.is_shutdown():
             if not paused:
                 f, seq = cam.latest()
                 if f is not None and seq != last_seq:
@@ -122,6 +160,41 @@ def main(argv=None):
                         n_since = 0
                         frame = f
                         res = pipe.run(frame)
+                        if rospy is not None:
+                            left_dashed = bool(
+                                res.ego_left is not None
+                                and res.ego_left.is_dashed
+                            )
+                            stopline_detected = res.stopline_dist is not None
+                            if stopline_detected:
+                                stopline_stop_required = True
+                                stopline_clear_since = None
+                            elif stopline_stop_required:
+                                now_monotonic = time.monotonic()
+                                if stopline_clear_since is None:
+                                    stopline_clear_since = now_monotonic
+                                elif (
+                                    now_monotonic - stopline_clear_since
+                                    >= args.stopline_clear_confirmation_s
+                                ):
+                                    stopline_stop_required = False
+                                    stopline_clear_since = None
+                            dashed_publisher.publish(Bool(data=left_dashed))
+                            stopline_detected_publisher.publish(
+                                Bool(data=stopline_detected)
+                            )
+                            stopline_distance_publisher.publish(
+                                Float64(
+                                    data=(
+                                        float(res.stopline_dist)
+                                        if stopline_detected
+                                        else float("nan")
+                                    )
+                                )
+                            )
+                            stopline_stop_publisher.publish(
+                                Bool(data=stopline_stop_required)
+                            )
                         now = time.time()
                         dt = now - t_prev
                         t_prev = now
@@ -166,6 +239,13 @@ def main(argv=None):
     except KeyboardInterrupt:
         pass
     finally:
+        if rospy is not None:
+            try:
+                dashed_publisher.publish(Bool(data=False))
+                stopline_detected_publisher.publish(Bool(data=False))
+                stopline_stop_publisher.publish(Bool(data=False))
+            except rospy.ROSException:
+                pass
         cam.stop()
         cv2.destroyAllWindows()
         print("[live] 종료")

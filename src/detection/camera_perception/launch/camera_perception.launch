@@ -23,10 +23,14 @@
   <arg name="traffic_light_topic" default="/detection/traffic_light" />
   <arg name="camera_obstacle_topic" default="/detection/obstacle" />
   <arg name="dashed_lane_topic" default="/perception/camera/dashed_lane_detected" />
+  <arg name="stopline_detected_topic" default="/perception/camera/stopline_detected" />
+  <arg name="stopline_distance_topic" default="/perception/camera/stopline_distance_m" />
+  <arg name="stopline_stop_topic" default="/perception/stopline/stop_required" />
+  <arg name="stopline_clear_confirmation_s" default="0.5" />
   <arg name="highway_environment_topic" default="/perception/camera/highway_environment" />
   <arg name="enable_highway_gate" default="$(arg enable_yolo)" />
-  <!-- 점선 인식이 구현되면 true로 바꾸면 car AND dashed 조건이 된다. -->
-  <arg name="require_dashed_lane" default="false" />
+  <!-- 고속도로 환경 = YOLO car/bus/truck AND 왼쪽 점선. -->
+  <arg name="require_dashed_lane" default="true" />
   <arg name="left_parallel_dynamic_topic" default="/perception/lidar/left_lane_parallel_dynamic_detected" />
   <arg name="require_left_parallel_dynamic" default="false" />
   <arg name="left_parallel_dynamic_hold_s" default="0.5" />
@@ -37,6 +41,17 @@
   <arg name="pedestrian_resume_topic" default="/perception/pedestrian_crossing/resume_allowed" />
   <arg name="pedestrian_status_topic" default="/perception/pedestrian_crossing/status" />
   <arg name="person_clear_confirmation_s" default="0.5" />
+  <arg name="enable_intersection_detection" default="$(arg enable_yolo)" />
+  <arg name="dynamic_obstacle_topic" default="/detection/dynamic_obstacles" />
+  <arg name="odometry_topic" default="/localization/odometry" />
+  <arg name="intersection_detected_topic" default="/perception/intersection/detected" />
+  <arg name="intersection_driving_allowed_topic" default="/perception/intersection/driving_allowed" />
+  <arg name="intersection_driving_unavailable_topic" default="/perception/intersection/driving_unavailable" />
+  <arg name="intersection_status_topic" default="/perception/intersection/status" />
+  <arg name="intersection_minimum_speed_mps" default="1.0" />
+  <arg name="intersection_maximum_range_m" default="40.0" />
+  <arg name="intersection_perpendicular_error_deg" default="20.0" />
+  <arg name="intersection_camera_clear_confirmation_s" default="0.5" />
 
   <node if="$(arg enable_lane)"
         pkg="camera_perception"
@@ -44,7 +59,7 @@
         name="lane_camera"
         output="screen"
         respawn="false"
-        args="--mode lane --camera-stack-root $(arg camera_stack_root) --cam-ip $(arg camera_ip) --cam-port $(arg lane_port) --lane-checkpoint $(arg lane_checkpoint) --lane-cam-set $(arg lane_cam_set) --lane-device $(arg lane_device) --lane-every $(arg lane_every) --lane-scale $(arg lane_scale)" />
+        args="--mode lane --camera-stack-root $(arg camera_stack_root) --cam-ip $(arg camera_ip) --cam-port $(arg lane_port) --lane-checkpoint $(arg lane_checkpoint) --lane-cam-set $(arg lane_cam_set) --lane-device $(arg lane_device) --lane-every $(arg lane_every) --lane-scale $(arg lane_scale) --lane-ros-publish --dashed-lane-topic $(arg dashed_lane_topic) --stopline-detected-topic $(arg stopline_detected_topic) --stopline-distance-topic $(arg stopline_distance_topic) --stopline-stop-topic $(arg stopline_stop_topic) --stopline-clear-confirmation-s $(arg stopline_clear_confirmation_s)" />
 
   <node if="$(arg enable_yolo)"
         pkg="camera_perception"
@@ -82,6 +97,27 @@
     <param name="resume_topic" value="$(arg pedestrian_resume_topic)" />
     <param name="status_topic" value="$(arg pedestrian_status_topic)" />
     <param name="person_clear_confirmation_s" value="$(arg person_clear_confirmation_s)" />
+    <param name="input_stale_timeout_s" value="0.5" />
+    <param name="publish_rate_hz" value="20.0" />
+  </node>
+
+  <node if="$(arg enable_intersection_detection)"
+        pkg="camera_perception"
+        type="intersection_environment_node.py"
+        name="intersection_environment"
+        output="screen">
+    <param name="car_topic" value="$(arg car_detected_topic)" />
+    <param name="dynamic_obstacle_topic" value="$(arg dynamic_obstacle_topic)" />
+    <param name="odometry_topic" value="$(arg odometry_topic)" />
+    <param name="detected_topic" value="$(arg intersection_detected_topic)" />
+    <param name="driving_allowed_topic" value="$(arg intersection_driving_allowed_topic)" />
+    <param name="driving_unavailable_topic" value="$(arg intersection_driving_unavailable_topic)" />
+    <param name="status_topic" value="$(arg intersection_status_topic)" />
+    <param name="minimum_speed_mps" value="$(arg intersection_minimum_speed_mps)" />
+    <param name="maximum_range_m" value="$(arg intersection_maximum_range_m)" />
+    <param name="maximum_perpendicular_error_deg" value="$(arg intersection_perpendicular_error_deg)" />
+    <param name="camera_clear_confirmation_s" value="$(arg intersection_camera_clear_confirmation_s)" />
+    <param name="clear_hold_s" value="2.0" />
     <param name="input_stale_timeout_s" value="0.5" />
     <param name="publish_rate_hz" value="20.0" />
   </node>

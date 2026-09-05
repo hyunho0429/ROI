@@ -59,15 +59,26 @@ class PurePursuitNode:
             "~pedestrian_stop_topic",
             "/perception/pedestrian_crossing/stop_required",
         )
+        self.stopline_stop_topic = rospy.get_param(
+            "~stopline_stop_topic",
+            "/perception/stopline/stop_required",
+        )
         self.map_frame = rospy.get_param("~map_frame", "map")
         self.latest_odom: Optional[Odometry] = None
         self.pedestrian_stop_required = False
+        self.stopline_stop_required = False
 
         rospy.Subscriber(self.pose_topic, Odometry, self.odom_callback, queue_size=10)
         rospy.Subscriber(
             self.pedestrian_stop_topic,
             Bool,
             self.pedestrian_stop_callback,
+            queue_size=1,
+        )
+        rospy.Subscriber(
+            self.stopline_stop_topic,
+            Bool,
+            self.stopline_stop_callback,
             queue_size=1,
         )
         self.command_pub = rospy.Publisher(self.command_topic, CtrlCmd, queue_size=1)
@@ -99,6 +110,15 @@ class PurePursuitNode:
                 self.pedestrian_stop_required,
             )
 
+    def stopline_stop_callback(self, msg: Bool) -> None:
+        previous = self.stopline_stop_required
+        self.stopline_stop_required = bool(msg.data)
+        if self.stopline_stop_required != previous:
+            rospy.logwarn(
+                "Stop-line control: stop_required=%s",
+                self.stopline_stop_required,
+            )
+
     def control_callback(self, _event: rospy.timer.TimerEvent) -> None:
         if self.latest_odom is None:
             rospy.logwarn_throttle(5.0, "Pure Pursuit가 /localization/odometry를 기다리는 중이다.")
@@ -123,7 +143,11 @@ class PurePursuitNode:
         )
         steering = max(-self.max_steering, min(self.max_steering, steering))
         path_stop = stop
-        stop = path_stop or self.pedestrian_stop_required
+        stop = (
+            path_stop
+            or self.pedestrian_stop_required
+            or self.stopline_stop_required
+        )
 
         target_msg = PointStamped()
         target_msg.header.stamp = rospy.Time.now()
@@ -141,13 +165,14 @@ class PurePursuitNode:
         rospy.loginfo_throttle(
             2.0,
             "Pure Pursuit index=%d lookahead=%.2f steering=%.4f "
-            "stop=%s path_stop=%s pedestrian_stop=%s",
+            "stop=%s path_stop=%s pedestrian_stop=%s stopline_stop=%s",
             target_index,
             lookahead,
             steering,
             stop,
             path_stop,
             self.pedestrian_stop_required,
+            self.stopline_stop_required,
         )
 
     def make_command(self, steering: float, stop: bool) -> CtrlCmd:
