@@ -62,18 +62,21 @@ TRAFFIC_KEYWORDS = (
 
 def _parse_traffic_signal(label):
     normalized = label.lower()
-    if "red" in normalized and "left" in normalized:
-        return "Red_Left", "RED + LEFT", (0, 165, 255)
-    if "red" in normalized and "right" in normalized:
-        return "Red_Right", "RED + RIGHT", (0, 165, 255)
-    if "red" in normalized and "arrow" in normalized:
-        return "Red_Arrow", "RED + ARROW", (0, 165, 255)
+    # GREEN has the highest priority, including ambiguous mixed-label names.
     if "green" in normalized and "left" in normalized:
         return "Green_Left", "GREEN + LEFT", (0, 255, 128)
     if "green" in normalized and "right" in normalized:
         return "Green_Right", "GREEN + RIGHT", (0, 255, 128)
     if "green" in normalized and "arrow" in normalized:
         return "Green_Arrow", "GREEN + ARROW", (0, 255, 128)
+    if "green" in normalized:
+        return "Green", "GREEN", (0, 255, 0)
+    if "red" in normalized and "left" in normalized:
+        return "Red_Left", "RED + LEFT", (0, 165, 255)
+    if "red" in normalized and "right" in normalized:
+        return "Red_Right", "RED + RIGHT", (0, 165, 255)
+    if "red" in normalized and "arrow" in normalized:
+        return "Red_Arrow", "RED + ARROW", (0, 165, 255)
     if "red" in normalized and "yellow" in normalized:
         return "Red_Yellow", "RED + YELLOW", (0, 128, 255)
     if "left" in normalized:
@@ -86,8 +89,6 @@ def _parse_traffic_signal(label):
         return "Red", "RED", (0, 0, 255)
     if "yellow" in normalized or "amber" in normalized:
         return "Yellow", "YELLOW", (0, 255, 255)
-    if "green" in normalized:
-        return "Green", "GREEN", (0, 255, 0)
     return None, None, None
 
 def _resolve_model_path(model_path):

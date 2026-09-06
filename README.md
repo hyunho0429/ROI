@@ -716,7 +716,7 @@ MORAI 센서 설정의 포트가 위 값과 일치해야 하며 Ubuntu 방화벽
 | 오른쪽 실선 인식 | `/perception/camera/right_solid_lane_detected` | `std_msgs/Bool` |
 | 정지선 인식 | `/perception/camera/stopline_detected` | `std_msgs/Bool` |
 | 정지선 거리 | `/perception/camera/stopline_distance_m` | `std_msgs/Float64` |
-| 신호등 정지 요청 | `/perception/traffic_light/stop_required` | `std_msgs/Bool` |
+| 신호등 정지 요청 | `/perception/traffic_light/stop_required` | `std_msgs/Bool` (`GREEN`, `Green_Left`, `RED_Green left` 등 이름에 GREEN이 포함된 모든 클래스 최우선, 그 외 단독 RED/Yellow에서 정지) |
 | 교차로 인식 | `/perception/intersection/detected` | `std_msgs/Bool` |
 | 교차로 주행 가능 | `/perception/intersection/driving_allowed` | `std_msgs/Bool` |
 | 교차로 주행 불가능 | `/perception/intersection/driving_unavailable` | `std_msgs/Bool` |
@@ -830,8 +830,8 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
 | `car_detection_hold_s` | `2.0` | 일시적인 YOLO 누락 시 car 조건 유지시간 |
 | `enable_pedestrian_crossing` | `true` | YOLO person 기반 정지·재출발 제어 |
 | `person_clear_confirmation_s` | `0.5` | person 미검출 후 재출발까지 연속 확인 시간 |
-| `traffic_light_stop_topic` | `/perception/traffic_light/stop_required` | YOLO 단독 RED 또는 Yellow/Amber 계열 신호등 정지 요청 |
-| `traffic_light_clear_confirmation_s` | `0.5` | RED/Yellow 미검출 후 제동 해제까지 연속 확인 시간 |
+| `traffic_light_stop_topic` | `/perception/traffic_light/stop_required` | GREEN을 최우선으로 적용하고, GREEN이 없을 때 YOLO 단독 RED 또는 Yellow/Amber 계열 신호등 정지 요청 |
+| `traffic_light_clear_confirmation_s` | `0.5` | 신호 미검출 시 제동 해제까지 연속 확인 시간(GREEN 검출 시에는 즉시 해제) |
 | `enable_intersection_detection` | `true` | 통합 `Car`, 왼쪽 노란 실선, 오른쪽 실선 기반 교차로 판정 노드 실행 |
 | `intersection_detected_topic` | `/perception/intersection/detected` | 교차로 상황 인지 상태 |
 | `intersection_driving_unavailable_topic` | `/perception/intersection/driving_unavailable` | 교차로 차량 잔존 시 제동 요청 |
@@ -843,7 +843,7 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
 
 대회 규정에 따라 Pure Pursuit는 평상시와 정지 상황 모두
 `longlCmdType=1`만 사용한다. 평상시에는 현재 속도와 목표 속도의 오차를 PID로
-계산해 `accel/brake` 페달을 제어한다. 보행자, 단독 RED 또는 Yellow 계열 신호등,
+계산해 `accel/brake` 페달을 제어한다. 신호등은 GREEN을 가장 우선한다. 보행자, GREEN이 없는 상태의 단독 RED 또는 Yellow 계열 신호등,
 교차로 주행 불가능 토픽이 활성화되면 `accel=0`, `brake=1`을 전송한다. 정지선은 차선 화면과
 검출·거리 토픽에는 계속 표시되지만 차량 정지 제어에는 사용하지 않는다.
 

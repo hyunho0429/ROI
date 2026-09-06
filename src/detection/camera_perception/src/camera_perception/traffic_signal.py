@@ -3,18 +3,34 @@
 import math
 
 
+GREEN_SIGNAL_KEYWORDS = ("green",)
 YELLOW_SIGNAL_KEYWORDS = ("yellow", "amber")
 TURN_SIGNAL_KEYWORDS = ("left", "right", "arrow", "좌회전", "우회전")
 
 
-def traffic_signal_requires_stop(class_names):
-    """단독 RED 또는 Yellow 계열 클래스가 있으면 True를 반환한다.
+def traffic_signal_has_green(class_names):
+    """GREEN 계열 클래스가 하나라도 있으면 True를 반환한다."""
 
+    normalized_names = [str(name).strip().lower() for name in class_names]
+    return any(
+        keyword in name
+        for name in normalized_names
+        for keyword in GREEN_SIGNAL_KEYWORDS
+    )
+
+
+def traffic_signal_requires_stop(class_names):
+    """GREEN 우선순위 적용 후 단독 RED/Yellow 정지 여부를 반환한다.
+
+    같은 프레임에서 GREEN이 다른 신호와 함께 검출되면 GREEN을 우선한다.
     RED는 같은 프레임에 좌·우회전 계열 신호가 없어야 정지 조건이다.
     Yellow/Amber 계열은 조합 클래스도 정지 조건으로 처리한다.
     """
 
     normalized_names = [str(name).strip().lower() for name in class_names]
+    if traffic_signal_has_green(normalized_names):
+        return False
+
     yellow_detected = any(
         keyword in name
         for name in normalized_names
@@ -33,7 +49,7 @@ def traffic_signal_requires_stop(class_names):
 
 
 class TrafficSignalStopLatch:
-    """단독 RED/Yellow는 즉시 정지하고 연속 정상 검출 뒤에만 해제한다."""
+    """GREEN은 즉시 해제하고, 그 외 정상 검출은 확인 후 해제한다."""
 
     def __init__(self, clear_confirmation_s=0.5):
         self.clear_confirmation_s = float(clear_confirmation_s)
@@ -46,7 +62,10 @@ class TrafficSignalStopLatch:
         now = float(timestamp_sec)
         if not math.isfinite(now):
             raise ValueError("timestamp_sec must be finite")
-        if traffic_signal_requires_stop(class_names):
+        if traffic_signal_has_green(class_names):
+            self.stop_required = False
+            self.clear_since = None
+        elif traffic_signal_requires_stop(class_names):
             self.stop_required = True
             self.clear_since = None
         elif self.stop_required:

@@ -2,6 +2,7 @@ import unittest
 
 from camera_perception.traffic_signal import (
     TrafficSignalStopLatch,
+    traffic_signal_has_green,
     traffic_signal_requires_stop,
 )
 
@@ -30,12 +31,40 @@ class TrafficSignalTest(unittest.TestCase):
         self.assertFalse(traffic_signal_requires_stop([]))
         self.assertFalse(traffic_signal_requires_stop(["Green", "Green_Left", "Left"]))
 
+    def test_green_has_priority_over_red_and_yellow(self):
+        green_classes = (
+            "Green",
+            "Green_Left",
+            "RED_Green left",
+            "RED_Green right",
+            "Yellow_Green_Arrow",
+        )
+        for class_name in green_classes:
+            self.assertTrue(traffic_signal_has_green([class_name]), msg=class_name)
+            self.assertFalse(
+                traffic_signal_requires_stop([class_name]),
+                msg=class_name,
+            )
+
+        self.assertTrue(traffic_signal_has_green(["Red", "Green", "Yellow"]))
+        self.assertFalse(
+            traffic_signal_requires_stop(["Red", "Green", "Yellow"])
+        )
+        self.assertFalse(
+            traffic_signal_requires_stop(["Red", "Green_Left"])
+        )
+
     def test_requires_continuous_clear_frames_before_release(self):
         latch = TrafficSignalStopLatch(clear_confirmation_s=0.5)
         self.assertTrue(latch.update(["Red"], 0.0))
         self.assertTrue(latch.update([], 0.1))
-        self.assertTrue(latch.update(["Green"], 0.5))
-        self.assertFalse(latch.update(["Green"], 0.6))
+        self.assertTrue(latch.update([], 0.5))
+        self.assertFalse(latch.update([], 0.6))
+
+    def test_green_releases_stop_immediately(self):
+        latch = TrafficSignalStopLatch(clear_confirmation_s=0.5)
+        self.assertTrue(latch.update(["Red"], 0.0))
+        self.assertFalse(latch.update(["Red", "Green", "Yellow"], 0.1))
 
 
 if __name__ == "__main__":

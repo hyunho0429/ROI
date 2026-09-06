@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""YOLO 신호등 객체를 단독 RED/Yellow 정지 Bool 토픽으로 변환한다."""
+"""YOLO 신호등 객체를 GREEN 우선 정지 Bool 토픽으로 변환한다."""
 
 import time
 
@@ -26,7 +26,7 @@ class TrafficLightStopNode:
         rospy.on_shutdown(self.shutdown)
         self.publisher.publish(Bool(data=False))
         rospy.logwarn(
-            "Traffic-light stop: input=%s output=%s classes=RED-only/Yellow/Amber "
+            "Traffic-light stop: input=%s output=%s priority=GREEN>RED-only/Yellow/Amber "
             "clear_confirmation=%.2fs",
             input_topic,
             output_topic,
@@ -39,7 +39,7 @@ class TrafficLightStopNode:
         if stop_required != self.stop_required:
             rospy.logwarn(
                 "[TRAFFIC LIGHT] %s classes=%s",
-                "STOP (RED-only/YELLOW)" if stop_required else "GO",
+                "STOP (RED-only/YELLOW)" if stop_required else "GO (GREEN priority/clear)",
                 ",".join(class_names) if class_names else "none",
             )
         self.stop_required = stop_required
