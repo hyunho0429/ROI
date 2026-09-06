@@ -831,6 +831,10 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
 계산해 `accel/brake` 페달을 제어하며, 정지선 또는 보행자 정지 요청이 활성화되면
 `accel=0`, `brake=1`을 전송한다. 차선 오버레이 HUD의 `STOP_REQ ON/OFF`와 launch
 터미널의 `[STOP LINE]` 로그에서 정지 요청 상태를 확인할 수 있다.
+정지선 요청은 제어 노드에서 다시 래치된다. 카메라가 정지선을 지나며 검출을
+잃더라도 차량 속도가 `0.15 m/s` 이하가 될 때까지 완전 제동하고, 1초간 정지를
+유지한 뒤 재출발한다. 같은 정지선은 카메라 입력이 1초 이상 해제된 후에만 다시
+정지 트리거로 사용할 수 있다.
 | `enable_intersection_detection` | `true` | 카메라·LiDAR 교차로 판정 노드 실행 |
 | `intersection_minimum_speed_mps` | `1.0` | 수직 이동 동적 객체의 최소 속력 [m/s] |
 | `intersection_maximum_range_m` | `40.0` | 교차로 LiDAR 후보 최대 거리 [m] |

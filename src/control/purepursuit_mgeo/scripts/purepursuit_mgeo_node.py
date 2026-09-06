@@ -14,6 +14,7 @@ from path_planning.longitudinal_controller import PedalSpeedController
 from std_msgs.msg import Bool, Float64
 
 from purepursuit_mgeo.path import MgeoPurePursuit, PathPoint, load_mgeo_path
+from purepursuit_mgeo.stopline_latch import StoplineBrakeLatch
 
 
 def quaternion_to_yaw(x: float, y: float, z: float, w: float) -> float:
@@ -48,6 +49,15 @@ class PurePursuitNode:
             nominal_dt=1.0 / max(self.rate_hz, 1.0),
             max_accel=float(rospy.get_param("~max_accel_pedal", 1.0)),
             max_brake=float(rospy.get_param("~max_brake_pedal", 1.0)),
+        )
+        self.stopline_latch = StoplineBrakeLatch(
+            stopped_speed_mps=float(
+                rospy.get_param("~stopline_stopped_speed_mps", 0.15)
+            ),
+            stop_hold_sec=float(rospy.get_param("~stopline_hold_sec", 1.0)),
+            rearm_clear_sec=float(
+                rospy.get_param("~stopline_rearm_clear_sec", 1.0)
+            ),
         )
 
         wheelbase = float(rospy.get_param("~wheelbase_m", 3.0))
@@ -153,11 +163,27 @@ class PurePursuitNode:
             speed,
         )
         steering = max(-self.max_steering, min(self.max_steering, steering))
+        now_sec = rospy.Time.now().to_sec()
+        previous_stopline_state = self.stopline_latch.state
+        stopline_brake_required = self.stopline_latch.update(
+            self.stopline_stop_required,
+            speed,
+            now_sec,
+        )
+        if self.stopline_latch.state != previous_stopline_state:
+            rospy.logwarn(
+                "Stop-line brake state: %s -> %s (raw=%s speed=%.3fm/s)",
+                previous_stopline_state,
+                self.stopline_latch.state,
+                self.stopline_stop_required,
+                speed,
+            )
+
         path_stop = stop
         stop = (
             path_stop
             or self.pedestrian_stop_required
-            or self.stopline_stop_required
+            or stopline_brake_required
         )
 
         target_msg = PointStamped()
@@ -177,7 +203,7 @@ class PurePursuitNode:
                 accel, brake = self.speed_controller.compute(
                     self.target_speed,
                     speed,
-                    rospy.Time.now().to_sec(),
+                    now_sec,
                 )
             command = self.make_command(steering, stop, accel, brake)
             self.command_pub.publish(command)
@@ -185,7 +211,8 @@ class PurePursuitNode:
         rospy.loginfo_throttle(
             2.0,
             "Pure Pursuit index=%d lookahead=%.2f steering=%.4f "
-            "stop=%s path_stop=%s pedestrian_stop=%s stopline_stop=%s",
+            "stop=%s path_stop=%s pedestrian_stop=%s stopline_raw=%s "
+            "stopline_state=%s",
             target_index,
             lookahead,
             steering,
@@ -193,6 +220,7 @@ class PurePursuitNode:
             path_stop,
             self.pedestrian_stop_required,
             self.stopline_stop_required,
+            self.stopline_latch.state,
         )
 
     def make_command(
