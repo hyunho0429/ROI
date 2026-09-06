@@ -10,6 +10,7 @@ import rospy
 from geometry_msgs.msg import PointStamped
 from morai_msgs.msg import CtrlCmd
 from nav_msgs.msg import Odometry
+from path_planning.longitudinal_controller import PedalSpeedController
 from std_msgs.msg import Bool, Float64
 
 from purepursuit_mgeo.path import MgeoPurePursuit, PathPoint, load_mgeo_path
@@ -36,8 +37,18 @@ class PurePursuitNode:
         )
         self.rate_hz = float(rospy.get_param("~control_rate_hz", 20.0))
         self.enable_control = bool(rospy.get_param("~enable_control", False))
-        self.longl_cmd_type = int(rospy.get_param("~longl_cmd_type", 2))
+        self.longl_cmd_type = int(rospy.get_param("~longl_cmd_type", 1))
         self.steering_sign = float(rospy.get_param("~steering_sign", 1.0))
+        if self.longl_cmd_type != 1:
+            raise ValueError("competition rules require longl_cmd_type=1")
+        self.speed_controller = PedalSpeedController(
+            kp=float(rospy.get_param("~speed_kp", 0.075)),
+            ki=float(rospy.get_param("~speed_ki", 0.0001)),
+            kd=float(rospy.get_param("~speed_kd", 0.025)),
+            nominal_dt=1.0 / max(self.rate_hz, 1.0),
+            max_accel=float(rospy.get_param("~max_accel_pedal", 1.0)),
+            max_brake=float(rospy.get_param("~max_brake_pedal", 1.0)),
+        )
 
         wheelbase = float(rospy.get_param("~wheelbase_m", 3.0))
         lookahead_min = float(rospy.get_param("~lookahead_min_m", 4.0))
@@ -159,7 +170,16 @@ class PurePursuitNode:
         self.steering_preview_pub.publish(Float64(steering))
 
         if self.enable_control:
-            command = self.make_command(steering, stop)
+            if stop:
+                self.speed_controller.reset()
+                accel, brake = 0.0, 1.0
+            else:
+                accel, brake = self.speed_controller.compute(
+                    self.target_speed,
+                    speed,
+                    rospy.Time.now().to_sec(),
+                )
+            command = self.make_command(steering, stop, accel, brake)
             self.command_pub.publish(command)
 
         rospy.loginfo_throttle(
@@ -175,20 +195,27 @@ class PurePursuitNode:
             self.stopline_stop_required,
         )
 
-    def make_command(self, steering: float, stop: bool) -> CtrlCmd:
+    def make_command(
+        self,
+        steering: float,
+        stop: bool,
+        accel: float = 0.0,
+        brake: float = 0.0,
+    ) -> CtrlCmd:
         command = CtrlCmd()
         if hasattr(command, "longlCmdType"):
-            command.longlCmdType = self.longl_cmd_type
+            command.longlCmdType = 1
         if hasattr(command, "steering"):
             command.steering = 0.0 if stop else steering
         if hasattr(command, "brake"):
-            command.brake = 1.0 if stop else 0.0
+            command.brake = 1.0 if stop else brake
         if hasattr(command, "accel"):
-            command.accel = 0.0 if stop else 0.0
+            command.accel = 0.0 if stop else accel
         if hasattr(command, "acceleration"):
             command.acceleration = 0.0 if stop else 0.0
         if hasattr(command, "velocity"):
-            command.velocity = 0.0 if stop else self.target_speed
+            # longlCmdType=1에서는 velocity 필드가 비활성이다.
+            command.velocity = 0.0
         return command
 
 

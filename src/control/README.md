@@ -21,6 +21,9 @@ MGeo 해석, 대회 경로 생성, 경로 인덱싱, 속도·조향 제어, 안�
 
 beta_drive CtrlCmd의 필드명은 longlCmdType, accel, brake, steering,
 velocity, acceleration이다. steering은 rad 기준으로 처리한다.
+대회 주행에서는 `longlCmdType=1`을 고정하고 `accel`과 `brake`로 종방향을
+제어한다. 따라서 `velocity` 값은 전송하지 않으며, 안전 정지는
+`accel=0`, `brake=1`로 명령한다.
 
 ## 예정 패키지
 

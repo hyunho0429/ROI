@@ -193,14 +193,20 @@ class MoraiUdpDriveBridge:
         is_fresh = message is not None and time.monotonic() - self.last_command_time <= self.command_timeout_sec
 
         if not is_fresh:
-            packet = build_ego_ctrl_cmd(cmd_type=2, velocity_kmh=0.0, brake=1.0)
+            packet = build_ego_ctrl_cmd(cmd_type=1, velocity_kmh=0.0, brake=1.0)
         else:
-            cmd_type = int(getattr(message, "longlCmdType", 2))
+            requested_cmd_type = int(getattr(message, "longlCmdType", 1))
+            if requested_cmd_type != 1:
+                rospy.logerr_throttle(
+                    5.0,
+                    "대회 규정 위반 CtrlCmd(longlCmdType=%d): UDP 송신은 type 1로 강제한다.",
+                    requested_cmd_type,
+                )
             steering_rad = float(getattr(message, "steering", 0.0))
             steer_normalized = steering_rad / max(self.max_wheel_angle_rad, 1e-6)
             packet = build_ego_ctrl_cmd(
-                cmd_type=cmd_type,
-                velocity_kmh=max(0.0, float(getattr(message, "velocity", 0.0)) * 3.6),
+                cmd_type=1,
+                velocity_kmh=0.0,
                 acceleration_mps2=float(getattr(message, "acceleration", 0.0)),
                 accel=float(getattr(message, "accel", 0.0)),
                 brake=float(getattr(message, "brake", 0.0)),
@@ -217,7 +223,7 @@ class MoraiUdpDriveBridge:
     def shutdown(self) -> None:
         self.stop_event.set()
         try:
-            stop_packet = build_ego_ctrl_cmd(cmd_type=2, velocity_kmh=0.0, brake=1.0)
+            stop_packet = build_ego_ctrl_cmd(cmd_type=1, velocity_kmh=0.0, brake=1.0)
             self.send_socket.sendto(stop_packet, (self.control_remote_ip, self.control_remote_port))
             self.send_socket.close()
         except OSError:

@@ -5,6 +5,7 @@ find_package(catkin REQUIRED COMPONENTS
   geometry_msgs
   morai_msgs
   nav_msgs
+  path_planning
   rospy
   std_msgs
 )

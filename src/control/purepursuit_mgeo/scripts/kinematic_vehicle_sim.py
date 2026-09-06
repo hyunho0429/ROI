@@ -73,6 +73,9 @@ class KinematicVehicleSim:
         self.yaw = path_yaw(points, start_index)
         self.speed_mps = float(rospy.get_param("~initial_speed_mps", 0.0))
         self.target_speed_mps = 0.0
+        self.command_type = 1
+        self.accel_pedal = 0.0
+        self.brake_pedal = 1.0
         self.steering_rad = 0.0
         self.last_command_time: Optional[float] = None
         self.last_update_time = rospy.Time.now().to_sec()
@@ -95,18 +98,19 @@ class KinematicVehicleSim:
             min(self.max_steering_rad, float(getattr(message, "steering", 0.0))),
         )
 
-        brake = max(0.0, float(getattr(message, "brake", 0.0)))
+        self.command_type = int(getattr(message, "longlCmdType", 1))
+        self.accel_pedal = max(
+            0.0,
+            min(1.0, float(getattr(message, "accel", 0.0))),
+        )
+        self.brake_pedal = max(
+            0.0,
+            min(1.0, float(getattr(message, "brake", 0.0))),
+        )
         velocity = max(0.0, float(getattr(message, "velocity", 0.0)))
-        acceleration = float(getattr(message, "acceleration", 0.0))
-        accel = float(getattr(message, "accel", 0.0))
 
-        # 현재 Pure Pursuit는 longlCmdType=2와 velocity를 사용한다.
-        if int(getattr(message, "longlCmdType", 2)) == 2:
+        if self.command_type == 2:
             self.target_speed_mps = velocity
-        else:
-            self.target_speed_mps = max(0.0, self.speed_mps + max(acceleration, accel))
-        if brake > 0.0:
-            self.target_speed_mps = 0.0
 
     def update(self, _event: rospy.timer.TimerEvent) -> None:
         now = rospy.Time.now().to_sec()
@@ -115,16 +119,25 @@ class KinematicVehicleSim:
         if not 0.0 < dt <= 0.2:
             return
 
-        if self.last_command_time is None or now - self.last_command_time > self.command_timeout_sec:
-            target_speed = 0.0
+        command_stale = (
+            self.last_command_time is None
+            or now - self.last_command_time > self.command_timeout_sec
+        )
+        if command_stale:
             self.steering_rad = 0.0
+            acceleration = -self.max_decel_mps2
+        elif self.command_type == 1:
+            acceleration = (
+                self.accel_pedal * self.max_accel_mps2
+                - self.brake_pedal * self.max_decel_mps2
+            )
         else:
-            target_speed = self.target_speed_mps
-
-        speed_error = target_speed - self.speed_mps
-        max_delta = self.max_accel_mps2 * dt if speed_error >= 0.0 else self.max_decel_mps2 * dt
-        speed_delta = max(-max_delta, min(max_delta, speed_error))
-        self.speed_mps = max(0.0, self.speed_mps + speed_delta)
+            speed_error = self.target_speed_mps - self.speed_mps
+            acceleration = max(
+                -self.max_decel_mps2,
+                min(self.max_accel_mps2, speed_error / max(self.speed_time_constant, 1e-3)),
+            )
+        self.speed_mps = max(0.0, self.speed_mps + acceleration * dt)
 
         self.x += self.speed_mps * math.cos(self.yaw) * dt
         self.y += self.speed_mps * math.sin(self.yaw) * dt

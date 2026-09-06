@@ -17,12 +17,19 @@ from morai_udp_drive_bridge.protocol import (
 class EgoProtocolTest(unittest.TestCase):
     def test_control_packet(self):
         packet = build_ego_ctrl_cmd(
-            cmd_type=2,
-            velocity_kmh=7.2,
+            cmd_type=1,
+            accel=0.25,
             steer_normalized=0.5,
         )
         self.assertEqual(len(packet), EGO_CTRL_CMD_PACKET_SIZE)
         self.assertEqual(packet[:14], b"#MoraiCtrlCmd$")
+
+    def test_full_brake_packet_uses_competition_pedal_mode(self):
+        packet = build_ego_ctrl_cmd(cmd_type=1, accel=0.0, brake=1.0)
+        values = struct.unpack("<14s i 3i 3b 5f 2s", packet)
+        self.assertEqual(values[7], 1)
+        self.assertEqual(values[10], 0.0)
+        self.assertEqual(values[11], 1.0)
 
     @staticmethod
     def make_competition_status_packet(packet_size):

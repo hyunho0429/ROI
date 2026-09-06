@@ -12,6 +12,7 @@
   <depend>geometry_msgs</depend>
   <depend>morai_msgs</depend>
   <depend>nav_msgs</depend>
+  <depend>path_planning</depend>
   <depend>rospy</depend>
   <depend>std_msgs</depend>
 
