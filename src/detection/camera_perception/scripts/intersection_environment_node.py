@@ -179,7 +179,22 @@ class IntersectionEnvironmentNode:
             String(data=json.dumps(status, separators=(",", ":")))
         )
         if decision.state != self.last_state:
-            rospy.logwarn("Intersection state changed: %s", status)
+            if decision.state == "BLOCKED":
+                driving_notice = "[INTERSECTION] 주행 불가능 (STOP)"
+            elif decision.state == "CLEAR":
+                driving_notice = "[INTERSECTION] 주행 가능 (GO)"
+            else:
+                driving_notice = "[INTERSECTION] 교차로 상황 해제 (IDLE)"
+            rospy.logwarn(
+                "\n============================================================\n"
+                "%s\n"
+                "camera_vehicle=%s | perpendicular_lidar=%s | objects=%d\n"
+                "============================================================",
+                driving_notice,
+                status["camera_vehicle_detected"],
+                status["perpendicular_dynamic_detected"],
+                status["perpendicular_object_count"],
+            )
             self.last_state = decision.state
 
     def _shutdown(self):

@@ -50,7 +50,7 @@ def main():
         "--stopline-stop-topic",
         default="/perception/stopline/stop_required",
     )
-    parser.add_argument("--stopline-stop-distance-m", type=float, default=1.0)
+    parser.add_argument("--stopline-stop-distance-m", type=float, default=2.0)
     parser.add_argument("--stopline-clear-confirmation-s", type=float, default=0.5)
     parser.add_argument(
         "--car-detected-topic", default="/perception/camera/car_detected"

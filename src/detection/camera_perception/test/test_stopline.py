@@ -13,12 +13,12 @@ from camera_perception.stopline import stopline_requires_stop
 
 
 class StoplineControlTest(unittest.TestCase):
-    def test_stops_at_or_inside_one_meter(self):
-        self.assertTrue(stopline_requires_stop(1.0))
+    def test_stops_at_or_inside_two_meters(self):
+        self.assertTrue(stopline_requires_stop(2.0))
         self.assertTrue(stopline_requires_stop(0.25))
 
     def test_does_not_stop_for_far_or_missing_line(self):
-        self.assertFalse(stopline_requires_stop(1.01))
+        self.assertFalse(stopline_requires_stop(2.01))
         self.assertFalse(stopline_requires_stop(None))
         self.assertFalse(stopline_requires_stop(float("nan")))
 

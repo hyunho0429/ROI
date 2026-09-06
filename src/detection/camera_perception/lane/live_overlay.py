@@ -96,8 +96,8 @@ def build_arg_parser():
                     default="/perception/camera/stopline_distance_m")
     ap.add_argument("--stopline-stop-topic",
                     default="/perception/stopline/stop_required")
-    ap.add_argument("--stopline-stop-distance-m", type=float, default=1.0,
-                    help="이 거리 이내의 정지선만 정지 요청 (기본 1.0m)")
+    ap.add_argument("--stopline-stop-distance-m", type=float, default=2.0,
+                    help="이 거리 이내의 정지선만 정지 요청 (기본 2.0m)")
     ap.add_argument("--stopline-clear-confirmation-s", type=float, default=0.5,
                     help="정지 조건 미충족이 이 시간 지속되어야 정지 요청 해제")
     return ap

@@ -3,7 +3,7 @@
 import math
 
 
-def stopline_requires_stop(distance_m, maximum_distance_m=1.0):
+def stopline_requires_stop(distance_m, maximum_distance_m=2.0):
     """Return True only for a valid stop line at or inside the stop distance."""
     maximum_distance = float(maximum_distance_m)
     if not math.isfinite(maximum_distance) or maximum_distance <= 0.0:
