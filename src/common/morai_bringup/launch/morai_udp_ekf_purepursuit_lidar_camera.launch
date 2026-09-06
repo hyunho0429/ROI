@@ -46,10 +46,13 @@
   <arg name="dashed_lane_topic" default="/perception/camera/dashed_lane_detected" />
   <arg name="stopline_detected_topic" default="/perception/camera/stopline_detected" />
   <arg name="stopline_distance_topic" default="/perception/camera/stopline_distance_m" />
+  <arg name="stopline_target_distance_m" default="2.0" />
+  <arg name="stopline_comfort_decel_mps2" default="1.5" />
+  <arg name="stopline_stale_timeout_s" default="0.5" />
   <arg name="highway_environment_topic" default="/perception/camera/highway_environment" />
   <arg name="enable_highway_gate" default="$(arg enable_yolo)" />
   <arg name="merge_highway_gate_required" default="$(arg enable_highway_gate)" />
-  <!-- 끼어들기 환경 = YOLO car/bus/truck AND 카메라 왼쪽 점선. -->
+  <!-- 끼어들기 환경 = 정규화된 YOLO Car 클래스 AND 카메라 왼쪽 점선. -->
   <arg name="require_dashed_lane" default="true" />
   <arg name="left_parallel_dynamic_topic" default="/perception/lidar/left_lane_parallel_dynamic_detected" />
   <arg name="require_left_parallel_dynamic" default="false" />
@@ -93,6 +96,10 @@
     <arg name="pedestrian_stop_topic" value="$(arg pedestrian_stop_topic)" />
     <arg name="traffic_light_stop_topic" value="$(arg traffic_light_stop_topic)" />
     <arg name="intersection_stop_topic" value="$(arg intersection_driving_unavailable_topic)" />
+    <arg name="stopline_distance_topic" value="$(arg stopline_distance_topic)" />
+    <arg name="stopline_target_distance_m" value="$(arg stopline_target_distance_m)" />
+    <arg name="stopline_comfort_decel_mps2" value="$(arg stopline_comfort_decel_mps2)" />
+    <arg name="stopline_stale_timeout_s" value="$(arg stopline_stale_timeout_s)" />
   </include>
 
   <include file="$(find camera_perception)/launch/camera_perception.launch">

@@ -632,7 +632,7 @@ roslaunch path_planning kcity_2025_dijkstra.launch \
 - YOLO person 단독 인식 기반 보행자 즉시 정지 및 재출발
 - YOLO 차량과 ego 진행방향에 수직인 LiDAR 동적 객체를 결합한 교차로 판정
 - YOLO 차량과 왼쪽 점선을 결합한 고속도로·끼어들기 환경 판정
-- 카메라 정지선 검출 결과 발행 및 Pure Pursuit 즉시 정지
+- 신호등·교차로 인식 시에만 정지선 거리를 이용한 감속 및 정지
 - LiDAR/RViz, 차선 인식, YOLO 화면을 하나의 `roslaunch`로 실행
 
 차선과 YOLO는 각각 독립 프로세스로 실행된다. 한 카메라 프로세스에 문제가 생겨도
@@ -675,7 +675,7 @@ morai_udp_ekf_purepursuit_lidar_camera.launch
     ├── lane_camera  → lane/live_overlay.py (별도 차선 오버레이 창)
     ├── yolo_camera  → scripts/camera_object_detection_node.py
     ├── highway_environment_gate
-    │    car/bus/truck AND 왼쪽 점선 → merge-gap 활성화 후 유지
+    │    car 클래스 AND 왼쪽 점선 → merge-gap 활성화 후 유지
     ├── intersection_environment
     │    car/bus/truck AND 수직 이동 LiDAR 동적 객체 → 교차로 주행 가능/불가능
     └── pedestrian_crossing_fusion
@@ -720,7 +720,9 @@ MORAI 센서 설정의 포트가 위 값과 일치해야 하며 Ubuntu 방화벽
 
 `ObjectInfo`에는 `class_name`, `conf`, `x_center`, `y_center`, `width`,
 `height`가 포함되며 위치와 크기는 카메라 영상의 픽셀 좌표다.
-정지선 인식·거리 토픽은 표시와 확인용이며 차량 제어에는 연결하지 않는다.
+정지선 인식·거리 토픽은 평상시에는 표시와 확인에만 사용한다. 단독 RED/Yellow
+신호등 또는 교차로 주행 불가능 상태가 먼저 활성화된 경우에만 거리 기반 감속·정지
+제어에 사용한다.
 
 - `src/detection/camera_perception/lane/lane_seg_best.pt`: 차선 모델
 - `src/detection/camera_perception/models/yolov8n.pt`: COCO 객체 모델
@@ -817,7 +819,7 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
 | `show_raw_camera_preview` | `0` | `0`은 원본 창을 숨기고 YOLO 결과 창만 표시 |
 | `yolo_cpu_threads` | `1` | YOLO에 사용하는 PyTorch CPU 스레드 수 |
 | `enable_highway_gate` | `true` | 카메라 기반 고속도로 환경 게이트 실행 |
-| `require_dashed_lane` | `true` | YOLO car/bus/truck과 왼쪽 점선이 모두 탐지되어야 활성화 |
+| `require_dashed_lane` | `true` | 정규화된 YOLO Car 클래스와 왼쪽 점선이 모두 탐지되어야 활성화 |
 | `require_left_parallel_dynamic` | `false` | 기존 평행 주행 LiDAR 고속도로 조건은 사용하지 않음 |
 | `left_parallel_dynamic_hold_s` | `0.5` | 일시적인 LiDAR 추적 누락 허용시간 |
 | `highway_latch_once` | `true` | 고속도로 상태가 한 번 활성화되면 노드 종료 전까지 유지 |
@@ -828,12 +830,17 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
 | `traffic_light_clear_confirmation_s` | `0.5` | RED/Yellow 미검출 후 제동 해제까지 연속 확인 시간 |
 | `intersection_detected_topic` | `/perception/intersection/detected` | 카메라·LiDAR 교차로 상황 인지 상태 |
 | `intersection_driving_unavailable_topic` | `/perception/intersection/driving_unavailable` | 교차로 차량 잔존 시 제동 요청 |
+| `stopline_target_distance_m` | `2.0` | 정지선과 이 목표 거리만큼 간격을 두고 완전 정지 [m] |
+| `stopline_comfort_decel_mps2` | `1.5` | 거리 기반 목표 속도를 계산하는 감속도 [m/s²] |
+| `stopline_stale_timeout_s` | `0.5` | 한번 잡은 정지선 거리 입력이 끊겼을 때 안전 제동까지의 시간 |
 
 대회 규정에 따라 Pure Pursuit는 평상시와 정지 상황 모두
 `longlCmdType=1`만 사용한다. 평상시에는 현재 속도와 목표 속도의 오차를 PID로
-계산해 `accel/brake` 페달을 제어한다. 보행자, 단독 RED 또는 Yellow 계열 신호등,
-교차로 주행 불가능 토픽이 활성화되면 `accel=0`, `brake=1`을 전송한다. 정지선은 차선 화면과
-검출·거리 토픽에는 계속 표시되지만 차량 정지 제어에는 사용하지 않는다.
+계산해 `accel/brake` 페달을 제어한다. 보행자는 즉시 완전 제동한다. 단독 RED 또는
+Yellow 계열 신호등이나 교차로 주행 불가능 토픽이 활성화되면 정지선 거리 제어를
+활성화한다. 남은 거리에 따라 `sqrt(2*a*d)`로 목표 속도를 낮추고 기본값 2.0m에
+도달하면 `accel=0`, `brake=1`을 전송한다. 신호등·교차로 조건이 없으면 화면에
+정지선이 보여도 제어에는 사용하지 않는다.
 | `enable_intersection_detection` | `true` | 카메라·LiDAR 교차로 판정 노드 실행 |
 | `intersection_minimum_speed_mps` | `1.0` | 수직 이동 동적 객체의 최소 속력 [m/s] |
 | `intersection_maximum_range_m` | `40.0` | 교차로 LiDAR 후보 최대 거리 [m] |
@@ -992,20 +999,16 @@ rostopic echo /perception/merge_gap/unavailable
 ```
 
 두 토픽은 모두 `std_msgs/Bool`이며 왼쪽 차선만 판단한다. 통합 카메라 launch에서는
-YOLO가 COCO `car`, `bus`, `truck` 중 하나를 탐지하고, 동시에 LiDAR가 왼쪽 옆
-차선의 앞·옆·뒤 40m 범위에서
-ego와 같은 방향으로 주행하는 동적 객체를 확인해야
+YOLO 원본 `car`, `bus`, `truck`, `motorcycle`, `bicycle`을 모두 단일 `Car` 상태로
+정규화한다. 이 `Car` 상태와 카메라 왼쪽 점선을 동시에 탐지해야
 `/perception/camera/highway_environment=true`가 된다. 이때만 끼어들기 판단과 RViz
-왼쪽 선이 활성화된다. LiDAR 조건은 `/detection/obstacle_states`에서 `MOVING`만
-허용하고, 1.0m/s 미만, 진행방향 오차 30도 초과, 횡속도 1.5m/s 초과 객체를 제외하며
-3회 연속 검출을 요구한다. 따라서 `STATIC`, `STOPPED`, `UNKNOWN`, 교차 이동 및
-역주행 객체는 게이트를 켜지 않는다. 정상 활성 상태에서는 가능/불가능 두 값이 항상
-반대다. 게이트가 꺼질 때는 이전 가능 상태를 남기지 않도록 한 번
+왼쪽 선이 활성화된다. 정상 활성 상태에서는 가능/불가능 두 값이 항상 반대다. 게이트가 꺼질
+때는 이전 가능 상태를 남기지 않도록 한 번
 `available=false`, `unavailable=true`를 발행한 뒤 판단 출력을 중단한다. 기본
 `highway_latch_once=true`에서는 최초 활성화 이후 고속도로 상태를 계속 유지하므로
 이 비활성 전환은 노드 재시작/종료 때만 발생한다. 이전처럼 입력에 따라 다시 꺼지게
-하려면 `highway_latch_once:=false`로 실행한다. HD MAP과 점선 조건은 사용하지
-않으며 기존 주행 제어에는 연결하지 않는다.
+하려면 `highway_latch_once:=false`로 실행한다. 끼어들기 환경 인식에는 HD MAP이나
+평행 주행 LiDAR 조건을 사용하지 않으며 기존 주행 제어에는 연결하지 않는다.
 
 ### 보행자 정지 및 재출발
 

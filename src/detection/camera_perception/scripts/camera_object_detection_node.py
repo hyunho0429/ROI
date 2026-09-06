@@ -376,8 +376,7 @@ def main(ip=IP, port=PORT, base_model_path=BASE_MODEL_PATH,
                         fps=smoothed_fps,
                     )
 
-                # Preserve the existing topic name for compatibility. Its
-                # highway-gate meaning now covers car, bus, and truck.
+                # Every supported road-vehicle label is exposed as one Car state.
                 car_detected = highway_vehicle_detected(detected_labels)
                 person_detected = "person" in detected_labels
                 with detection_state_lock:
