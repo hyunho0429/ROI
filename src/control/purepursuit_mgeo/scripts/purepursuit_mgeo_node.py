@@ -14,7 +14,6 @@ from path_planning.longitudinal_controller import PedalSpeedController
 from std_msgs.msg import Bool, Float64
 
 from purepursuit_mgeo.path import MgeoPurePursuit, PathPoint, load_mgeo_path
-from purepursuit_mgeo.stopline_approach import StoplineApproachController
 
 
 def quaternion_to_yaw(x: float, y: float, z: float, w: float) -> float:
@@ -50,20 +49,6 @@ class PurePursuitNode:
             max_accel=float(rospy.get_param("~max_accel_pedal", 1.0)),
             max_brake=float(rospy.get_param("~max_brake_pedal", 1.0)),
         )
-        self.stopline_approach = StoplineApproachController(
-            target_distance_m=float(
-                rospy.get_param("~stopline_target_distance_m", 2.0)
-            ),
-            comfortable_decel_mps2=float(
-                rospy.get_param("~stopline_comfort_decel_mps2", 1.5)
-            ),
-            stale_timeout_s=float(
-                rospy.get_param("~stopline_stale_timeout_s", 0.5)
-            ),
-            maximum_detection_distance_m=float(
-                rospy.get_param("~stopline_maximum_distance_m", 40.0)
-            ),
-        )
 
         wheelbase = float(rospy.get_param("~wheelbase_m", 3.0))
         lookahead_min = float(rospy.get_param("~lookahead_min_m", 4.0))
@@ -93,10 +78,6 @@ class PurePursuitNode:
             "~intersection_stop_topic",
             "/perception/intersection/driving_unavailable",
         )
-        self.stopline_distance_topic = rospy.get_param(
-            "~stopline_distance_topic",
-            "/perception/camera/stopline_distance_m",
-        )
         self.map_frame = rospy.get_param("~map_frame", "map")
         self.latest_odom: Optional[Odometry] = None
         self.pedestrian_stop_required = False
@@ -120,12 +101,6 @@ class PurePursuitNode:
             self.intersection_stop_topic,
             Bool,
             self.intersection_stop_callback,
-            queue_size=1,
-        )
-        rospy.Subscriber(
-            self.stopline_distance_topic,
-            Float64,
-            self.stopline_distance_callback,
             queue_size=1,
         )
         self.command_pub = rospy.Publisher(self.command_topic, CtrlCmd, queue_size=1)
@@ -175,16 +150,6 @@ class PurePursuitNode:
                 self.intersection_stop_required,
             )
 
-    def stopline_distance_callback(self, msg: Float64) -> None:
-        regulatory_trigger = (
-            self.traffic_light_stop_required or self.intersection_stop_required
-        )
-        if regulatory_trigger:
-            self.stopline_approach.observe_distance(
-                msg.data,
-                rospy.Time.now().to_sec(),
-            )
-
     def control_callback(self, _event: rospy.timer.TimerEvent) -> None:
         if self.latest_odom is None:
             rospy.logwarn_throttle(5.0, "Pure Pursuit가 /localization/odometry를 기다리는 중이다.")
@@ -210,18 +175,11 @@ class PurePursuitNode:
         steering = max(-self.max_steering, min(self.max_steering, steering))
         now_sec = rospy.Time.now().to_sec()
         path_stop = stop
-        regulatory_trigger = (
-            self.traffic_light_stop_required or self.intersection_stop_required
-        )
-        stopline_decision = self.stopline_approach.update(
-            regulatory_trigger,
-            self.target_speed,
-            now_sec,
-        )
         stop = (
             path_stop
             or self.pedestrian_stop_required
-            or stopline_decision.full_stop
+            or self.traffic_light_stop_required
+            or self.intersection_stop_required
         )
 
         target_msg = PointStamped()
@@ -239,7 +197,7 @@ class PurePursuitNode:
                 accel, brake = 0.0, 1.0
             else:
                 accel, brake = self.speed_controller.compute(
-                    stopline_decision.target_speed_mps,
+                    self.target_speed,
                     speed,
                     now_sec,
                 )
@@ -250,7 +208,7 @@ class PurePursuitNode:
             2.0,
             "Pure Pursuit index=%d lookahead=%.2f steering=%.4f "
             "stop=%s path_stop=%s pedestrian_stop=%s traffic_light_stop=%s "
-            "intersection_stop=%s stopline=%s distance=%.2f target_speed=%.2f",
+            "intersection_stop=%s",
             target_index,
             lookahead,
             steering,
@@ -259,9 +217,6 @@ class PurePursuitNode:
             self.pedestrian_stop_required,
             self.traffic_light_stop_required,
             self.intersection_stop_required,
-            stopline_decision.reason,
-            stopline_decision.distance_m,
-            stopline_decision.target_speed_mps,
         )
 
     def make_command(

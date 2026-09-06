@@ -30,7 +30,7 @@
   <arg name="stopline_distance_topic" default="/perception/camera/stopline_distance_m" />
   <arg name="highway_environment_topic" default="/perception/camera/highway_environment" />
   <arg name="enable_highway_gate" default="$(arg enable_yolo)" />
-  <!-- 고속도로 환경 = 정규화된 YOLO Car 클래스 AND 왼쪽 점선. -->
+  <!-- 고속도로 환경 = YOLO car/bus/truck AND 왼쪽 점선. -->
   <arg name="require_dashed_lane" default="true" />
   <arg name="left_parallel_dynamic_topic" default="/perception/lidar/left_lane_parallel_dynamic_detected" />
   <arg name="require_left_parallel_dynamic" default="false" />

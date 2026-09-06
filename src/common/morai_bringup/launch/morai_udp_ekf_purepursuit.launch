@@ -18,10 +18,6 @@
   <arg name="pedestrian_stop_topic" default="/perception/pedestrian_crossing/stop_required" />
   <arg name="traffic_light_stop_topic" default="/perception/traffic_light/stop_required" />
   <arg name="intersection_stop_topic" default="/perception/intersection/driving_unavailable" />
-  <arg name="stopline_distance_topic" default="/perception/camera/stopline_distance_m" />
-  <arg name="stopline_target_distance_m" default="2.0" />
-  <arg name="stopline_comfort_decel_mps2" default="1.5" />
-  <arg name="stopline_stale_timeout_s" default="0.5" />
 
   <!-- 1. MORAI GPS·IMU UDP -> /gps, /Imu -->
   <include file="$(find morai_udp_bridge)/launch/morai_udp_bridge.launch">
@@ -77,9 +73,5 @@
     <arg name="pedestrian_stop_topic" value="$(arg pedestrian_stop_topic)" />
     <arg name="traffic_light_stop_topic" value="$(arg traffic_light_stop_topic)" />
     <arg name="intersection_stop_topic" value="$(arg intersection_stop_topic)" />
-    <arg name="stopline_distance_topic" value="$(arg stopline_distance_topic)" />
-    <arg name="stopline_target_distance_m" value="$(arg stopline_target_distance_m)" />
-    <arg name="stopline_comfort_decel_mps2" value="$(arg stopline_comfort_decel_mps2)" />
-    <arg name="stopline_stale_timeout_s" value="$(arg stopline_stale_timeout_s)" />
   </include>
 </launch>

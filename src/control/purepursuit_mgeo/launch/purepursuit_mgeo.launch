@@ -10,10 +10,6 @@
   <arg name="pedestrian_stop_topic" default="/perception/pedestrian_crossing/stop_required" />
   <arg name="traffic_light_stop_topic" default="/perception/traffic_light/stop_required" />
   <arg name="intersection_stop_topic" default="/perception/intersection/driving_unavailable" />
-  <arg name="stopline_distance_topic" default="/perception/camera/stopline_distance_m" />
-  <arg name="stopline_target_distance_m" default="2.0" />
-  <arg name="stopline_comfort_decel_mps2" default="1.5" />
-  <arg name="stopline_stale_timeout_s" default="0.5" />
 
   <node pkg="purepursuit_mgeo"
         type="purepursuit_mgeo_node.py"
@@ -28,10 +24,6 @@
     <param name="pedestrian_stop_topic" value="$(arg pedestrian_stop_topic)" />
     <param name="traffic_light_stop_topic" value="$(arg traffic_light_stop_topic)" />
     <param name="intersection_stop_topic" value="$(arg intersection_stop_topic)" />
-    <param name="stopline_distance_topic" value="$(arg stopline_distance_topic)" />
-    <param name="stopline_target_distance_m" value="$(arg stopline_target_distance_m)" />
-    <param name="stopline_comfort_decel_mps2" value="$(arg stopline_comfort_decel_mps2)" />
-    <param name="stopline_stale_timeout_s" value="$(arg stopline_stale_timeout_s)" />
     <param name="lookahead_min_m" value="4.0" />
     <param name="lookahead_gain" value="0.35" />
     <param name="goal_tolerance_m" value="1.5" />

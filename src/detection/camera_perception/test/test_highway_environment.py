@@ -19,16 +19,17 @@ from camera_perception.highway_vehicle import highway_vehicle_detected
 
 
 class HighwayVehicleDetectionTest(unittest.TestCase):
-    def test_all_normalized_car_types_activate_vehicle_condition(self):
-        for label in ("car", "bus", "truck", "motorcycle", "bicycle"):
+    def test_car_bus_and_truck_each_activate_vehicle_condition(self):
+        for label in ("car", "bus", "truck"):
             with self.subTest(label=label):
                 self.assertTrue(highway_vehicle_detected({label}))
 
     def test_non_vehicle_classes_do_not_activate(self):
-        self.assertFalse(highway_vehicle_detected({"person", "dog"}))
+        self.assertFalse(highway_vehicle_detected({"person", "bicycle"}))
 
     def test_class_names_are_normalized(self):
         self.assertTrue(highway_vehicle_detected({" Truck "}))
+
 
 class HighwayEnvironmentLatchTest(unittest.TestCase):
     def test_once_active_remains_active(self):
