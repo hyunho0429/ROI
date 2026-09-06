@@ -27,6 +27,7 @@
   <arg name="camera_obstacle_topic" default="/detection/obstacle" />
   <arg name="dashed_lane_topic" default="/perception/camera/dashed_lane_detected" />
   <arg name="left_solid_lane_topic" default="/perception/camera/left_solid_lane_detected" />
+  <arg name="left_yellow_solid_lane_topic" default="/perception/camera/left_yellow_solid_lane_detected" />
   <arg name="right_solid_lane_topic" default="/perception/camera/right_solid_lane_detected" />
   <arg name="stopline_detected_topic" default="/perception/camera/stopline_detected" />
   <arg name="stopline_distance_topic" default="/perception/camera/stopline_distance_m" />
@@ -49,6 +50,14 @@
   <arg name="intersection_driving_allowed_topic" default="/perception/intersection/driving_allowed" />
   <arg name="intersection_driving_unavailable_topic" default="/perception/intersection/driving_unavailable" />
   <arg name="intersection_status_topic" default="/perception/intersection/status" />
+  <arg name="dynamic_obstacle_topic" default="/detection/dynamic_obstacles" />
+  <arg name="odometry_topic" default="/localization/odometry" />
+  <arg name="intersection_minimum_crossing_speed_mps" default="1.0" />
+  <arg name="intersection_minimum_rightward_speed_mps" default="0.5" />
+  <arg name="intersection_maximum_forward_distance_m" default="40.0" />
+  <arg name="intersection_maximum_abs_lateral_distance_m" default="20.0" />
+  <arg name="intersection_ego_vehicle_width_m" default="1.892" />
+  <arg name="intersection_right_pass_clearance_m" default="0.2" />
   <arg name="intersection_camera_clear_confirmation_s" default="0.5" />
 
   <node if="$(arg enable_lane)"
@@ -57,7 +66,7 @@
         name="lane_camera"
         output="screen"
         respawn="false"
-        args="--mode lane --camera-stack-root $(arg camera_stack_root) --cam-ip $(arg camera_ip) --cam-port $(arg lane_port) --lane-checkpoint $(arg lane_checkpoint) --lane-cam-set $(arg lane_cam_set) --lane-device $(arg lane_device) --lane-every $(arg lane_every) --lane-scale $(arg lane_scale) --lane-ros-publish --dashed-lane-topic $(arg dashed_lane_topic) --left-solid-lane-topic $(arg left_solid_lane_topic) --right-solid-lane-topic $(arg right_solid_lane_topic) --stopline-detected-topic $(arg stopline_detected_topic) --stopline-distance-topic $(arg stopline_distance_topic)" />
+        args="--mode lane --camera-stack-root $(arg camera_stack_root) --cam-ip $(arg camera_ip) --cam-port $(arg lane_port) --lane-checkpoint $(arg lane_checkpoint) --lane-cam-set $(arg lane_cam_set) --lane-device $(arg lane_device) --lane-every $(arg lane_every) --lane-scale $(arg lane_scale) --lane-ros-publish --dashed-lane-topic $(arg dashed_lane_topic) --left-solid-lane-topic $(arg left_solid_lane_topic) --left-yellow-solid-lane-topic $(arg left_yellow_solid_lane_topic) --right-solid-lane-topic $(arg right_solid_lane_topic) --stopline-detected-topic $(arg stopline_detected_topic) --stopline-distance-topic $(arg stopline_distance_topic)" />
 
   <node if="$(arg enable_yolo)"
         pkg="camera_perception"
@@ -116,12 +125,20 @@
         name="intersection_environment"
         output="screen">
     <param name="car_topic" value="$(arg car_detected_topic)" />
-    <param name="left_solid_lane_topic" value="$(arg left_solid_lane_topic)" />
+    <param name="left_yellow_solid_lane_topic" value="$(arg left_yellow_solid_lane_topic)" />
     <param name="right_solid_lane_topic" value="$(arg right_solid_lane_topic)" />
+    <param name="dynamic_obstacle_topic" value="$(arg dynamic_obstacle_topic)" />
+    <param name="odometry_topic" value="$(arg odometry_topic)" />
     <param name="detected_topic" value="$(arg intersection_detected_topic)" />
     <param name="driving_allowed_topic" value="$(arg intersection_driving_allowed_topic)" />
     <param name="driving_unavailable_topic" value="$(arg intersection_driving_unavailable_topic)" />
     <param name="status_topic" value="$(arg intersection_status_topic)" />
+    <param name="minimum_crossing_speed_mps" value="$(arg intersection_minimum_crossing_speed_mps)" />
+    <param name="minimum_rightward_speed_mps" value="$(arg intersection_minimum_rightward_speed_mps)" />
+    <param name="maximum_forward_distance_m" value="$(arg intersection_maximum_forward_distance_m)" />
+    <param name="maximum_abs_lateral_distance_m" value="$(arg intersection_maximum_abs_lateral_distance_m)" />
+    <param name="ego_vehicle_width_m" value="$(arg intersection_ego_vehicle_width_m)" />
+    <param name="right_pass_clearance_m" value="$(arg intersection_right_pass_clearance_m)" />
     <param name="camera_clear_confirmation_s" value="$(arg intersection_camera_clear_confirmation_s)" />
     <param name="clear_hold_s" value="2.0" />
     <param name="input_stale_timeout_s" value="0.5" />

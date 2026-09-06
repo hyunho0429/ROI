@@ -43,6 +43,10 @@ def main():
         default="/perception/camera/left_solid_lane_detected",
     )
     parser.add_argument(
+        "--left-yellow-solid-lane-topic",
+        default="/perception/camera/left_yellow_solid_lane_detected",
+    )
+    parser.add_argument(
         "--right-solid-lane-topic",
         default="/perception/camera/right_solid_lane_detected",
     )
@@ -91,6 +95,8 @@ def main():
                     "--ros-publish",
                     "--dashed-lane-topic", args.dashed_lane_topic,
                     "--left-solid-lane-topic", args.left_solid_lane_topic,
+                    "--left-yellow-solid-lane-topic",
+                    args.left_yellow_solid_lane_topic,
                     "--right-solid-lane-topic", args.right_solid_lane_topic,
                     "--stopline-detected-topic", args.stopline_detected_topic,
                     "--stopline-distance-topic", args.stopline_distance_topic,

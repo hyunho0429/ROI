@@ -91,6 +91,8 @@ def build_arg_parser():
                     default="/perception/camera/dashed_lane_detected")
     ap.add_argument("--left-solid-lane-topic",
                     default="/perception/camera/left_solid_lane_detected")
+    ap.add_argument("--left-yellow-solid-lane-topic",
+                    default="/perception/camera/left_yellow_solid_lane_detected")
     ap.add_argument("--right-solid-lane-topic",
                     default="/perception/camera/right_solid_lane_detected")
     ap.add_argument("--stopline-detected-topic",
@@ -106,6 +108,7 @@ def main(argv=None):
     rospy = None
     dashed_publisher = None
     left_solid_publisher = None
+    left_yellow_solid_publisher = None
     right_solid_publisher = None
     stopline_detected_publisher = None
     stopline_distance_publisher = None
@@ -120,6 +123,9 @@ def main(argv=None):
         )
         left_solid_publisher = rospy.Publisher(
             args.left_solid_lane_topic, Bool, queue_size=1
+        )
+        left_yellow_solid_publisher = rospy.Publisher(
+            args.left_yellow_solid_lane_topic, Bool, queue_size=1
         )
         right_solid_publisher = rospy.Publisher(
             args.right_solid_lane_topic, Bool, queue_size=1
@@ -174,6 +180,10 @@ def main(argv=None):
                                 and res.ego_left.name
                                 in ("white_solid", "yellow")
                             )
+                            left_yellow_solid = bool(
+                                res.ego_left is not None
+                                and res.ego_left.name == "yellow"
+                            )
                             right_solid = bool(
                                 res.ego_right is not None
                                 and res.ego_right.name
@@ -182,6 +192,9 @@ def main(argv=None):
                             stopline_detected = res.stopline_dist is not None
                             dashed_publisher.publish(Bool(data=left_dashed))
                             left_solid_publisher.publish(Bool(data=left_solid))
+                            left_yellow_solid_publisher.publish(
+                                Bool(data=left_yellow_solid)
+                            )
                             right_solid_publisher.publish(Bool(data=right_solid))
                             stopline_detected_publisher.publish(
                                 Bool(data=stopline_detected)
@@ -243,6 +256,7 @@ def main(argv=None):
             try:
                 dashed_publisher.publish(Bool(data=False))
                 left_solid_publisher.publish(Bool(data=False))
+                left_yellow_solid_publisher.publish(Bool(data=False))
                 right_solid_publisher.publish(Bool(data=False))
                 stopline_detected_publisher.publish(Bool(data=False))
             except rospy.ROSException:

@@ -630,7 +630,8 @@ roslaunch path_planning kcity_2025_dijkstra.launch \
 - `feature-camera`의 YOLOv8 기본 객체 탐지와 `best0902.pt` 커스텀 탐지
 - 신호등과 카메라 장애물 객체 배열 및 기존 car/person 호환 토픽 동시 발행
 - YOLO person 단독 인식 기반 보행자 즉시 정지 및 재출발
-- YOLO 통합 `Car`와 좌·우 실선을 결합한 교차로 판정 및 제동
+- YOLO 통합 `Car`, 왼쪽 노란 실선, 오른쪽 실선을 결합한 교차로 판정 및 제동
+- LiDAR Tracking ID로 좌→우 횡단 차량의 우측 통과를 확인한 뒤 주행 재개
 - YOLO 통합 `Car`와 왼쪽 점선을 결합한 고속도로·끼어들기 환경 판정
 - 교차로 우선 상호 배제로 고속도로·끼어들기 동시 활성화 방지
 - 카메라 정지선 검출 결과 발행(표시·확인용)
@@ -678,7 +679,8 @@ morai_udp_ekf_purepursuit_lidar_camera.launch
     ├── highway_environment_gate
     │    Car AND 왼쪽 점선 → merge-gap 활성화 후 유지
     ├── intersection_environment
-    │    Car AND 왼쪽 실선 AND 오른쪽 실선 → 교차로 제동
+    │    Car AND 왼쪽 노란 실선 AND 오른쪽 실선 → 교차로 제동
+    │    동일 LiDAR ID가 에고 오른쪽을 통과 → 전역 경로 주행 재개
     └── pedestrian_crossing_fusion
          person_detected → 정지/재출발
 ```
@@ -710,6 +712,7 @@ MORAI 센서 설정의 포트가 위 값과 일치해야 하며 Ubuntu 방화벽
 | 보행자 인식 상태 | `/perception/camera/person_detected` | `std_msgs/Bool` |
 | 왼쪽 점선 인식 | `/perception/camera/dashed_lane_detected` | `std_msgs/Bool` |
 | 왼쪽 실선 인식 | `/perception/camera/left_solid_lane_detected` | `std_msgs/Bool` |
+| 왼쪽 노란 실선 인식 | `/perception/camera/left_yellow_solid_lane_detected` | `std_msgs/Bool` |
 | 오른쪽 실선 인식 | `/perception/camera/right_solid_lane_detected` | `std_msgs/Bool` |
 | 정지선 인식 | `/perception/camera/stopline_detected` | `std_msgs/Bool` |
 | 정지선 거리 | `/perception/camera/stopline_distance_m` | `std_msgs/Float64` |
@@ -829,9 +832,12 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
 | `person_clear_confirmation_s` | `0.5` | person 미검출 후 재출발까지 연속 확인 시간 |
 | `traffic_light_stop_topic` | `/perception/traffic_light/stop_required` | YOLO 단독 RED 또는 Yellow/Amber 계열 신호등 정지 요청 |
 | `traffic_light_clear_confirmation_s` | `0.5` | RED/Yellow 미검출 후 제동 해제까지 연속 확인 시간 |
-| `enable_intersection_detection` | `true` | 통합 `Car`와 양쪽 실선 기반 교차로 판정 노드 실행 |
-| `intersection_detected_topic` | `/perception/intersection/detected` | `Car + 좌·우 실선` 교차로 상황 인지 상태 |
+| `enable_intersection_detection` | `true` | 통합 `Car`, 왼쪽 노란 실선, 오른쪽 실선 기반 교차로 판정 노드 실행 |
+| `intersection_detected_topic` | `/perception/intersection/detected` | 교차로 상황 인지 상태 |
 | `intersection_driving_unavailable_topic` | `/perception/intersection/driving_unavailable` | 교차로 차량 잔존 시 제동 요청 |
+| `intersection_minimum_crossing_speed_mps` | `1.0` | 좌→우 횡단 객체 최소 속력 [m/s] |
+| `intersection_minimum_rightward_speed_mps` | `0.5` | 에고 기준 오른쪽 방향 최소 횡속도 [m/s] |
+| `intersection_right_pass_clearance_m` | `0.2` | NPC BBox가 에고 우측 경계를 벗어난 뒤 요구하는 추가 여유 [m] |
 | `merge_available_topic` | `/perception/merge_gap/available` | 왼쪽 차선 끼어들기 가능 토픽 |
 | `merge_unavailable_topic` | `/perception/merge_gap/unavailable` | 왼쪽 차선 끼어들기 불가능 토픽 |
 | `merge_adjacent_obstacle_topic` | `/perception/merge_gap/left_lane_obstacles` | 끼어들기 판단 중 왼쪽 옆 차선 객체 상태 배열 |
@@ -994,7 +1000,7 @@ rostopic echo /perception/merge_gap/unavailable
 두 토픽은 모두 `std_msgs/Bool`이며 왼쪽 차선만 판단한다. 통합 카메라 launch에서는
 YOLO의 통합 `car` 클래스와 왼쪽 점선이 동시에 탐지되면
 `/perception/camera/highway_environment=true`가 된다. 이때만 끼어들기 판단과 RViz
-왼쪽 선이 활성화된다. 교차로 조건인 `Car + 좌·우 실선`이 성립하면 교차로 상태가
+왼쪽 선이 활성화된다. 교차로 조건인 `Car + 왼쪽 노란 실선 + 오른쪽 실선`이 성립하면 교차로 상태가
 우선되어 고속도로 토픽은 즉시 `false`가 되고 끼어들기 판단도 비활성화된다.
 정상 활성 상태에서는 가능/불가능 두 값이 항상
 반대다. 게이트가 꺼질 때는 이전 가능 상태를 남기지 않도록 한 번
