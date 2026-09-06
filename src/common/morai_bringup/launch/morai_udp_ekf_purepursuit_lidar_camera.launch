@@ -35,6 +35,7 @@
   <arg name="yolo_confidence" default="0.4" />
   <arg name="yolo_inference_size" default="320" />
   <arg name="camera_display_fps" default="0.0" />
+  <arg name="show_raw_camera_preview" default="0" />
   <arg name="yolo_cpu_threads" default="1" />
   <arg name="car_detected_topic" default="/perception/camera/car_detected" />
   <arg name="person_detected_topic" default="/perception/camera/person_detected" />
@@ -111,6 +112,7 @@
     <arg name="yolo_confidence" value="$(arg yolo_confidence)" />
     <arg name="yolo_inference_size" value="$(arg yolo_inference_size)" />
     <arg name="camera_display_fps" value="$(arg camera_display_fps)" />
+    <arg name="show_raw_camera_preview" value="$(arg show_raw_camera_preview)" />
     <arg name="yolo_cpu_threads" value="$(arg yolo_cpu_threads)" />
     <arg name="car_detected_topic" value="$(arg car_detected_topic)" />
     <arg name="person_detected_topic" value="$(arg person_detected_topic)" />

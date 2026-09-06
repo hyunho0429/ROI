@@ -770,8 +770,10 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch
 
 1. LiDAR tracking 및 merge-gap 상태를 표시하는 RViz
 2. 차선 mask·차선 종류·횡/방위 오차를 표시하는 `lane overlay` 창
-3. 카메라 실시간 화면
-4. 입력 프레임과 bounding box가 일치하는 YOLO 검출 화면
+3. 입력 프레임과 bounding box가 일치하는 YOLO 검출 화면
+
+원본 카메라 미리보기 창은 기본적으로 표시하지 않는다. 디버깅 목적으로 필요한
+경우에만 `show_raw_camera_preview:=1`을 지정한다.
 
 종료할 때는 launch 터미널에서 `Ctrl+C`를 누른다. OpenCV 창에서 누르는
 `q` 또는 `Esc`는 해당 카메라 프로세스만 종료할 수 있다.
@@ -811,6 +813,7 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
 | `yolo_confidence` | `0.4` | YOLO confidence 임계값 |
 | `yolo_inference_size` | `320` | YOLO 추론 입력 크기 |
 | `camera_display_fps` | `0.0` | `0`은 MORAI 카메라 수신 속도를 그대로 사용 |
+| `show_raw_camera_preview` | `0` | `0`은 원본 창을 숨기고 YOLO 결과 창만 표시 |
 | `yolo_cpu_threads` | `1` | YOLO에 사용하는 PyTorch CPU 스레드 수 |
 | `enable_highway_gate` | `true` | 카메라 기반 고속도로 환경 게이트 실행 |
 | `require_dashed_lane` | `true` | YOLO car/bus/truck과 왼쪽 점선이 모두 탐지되어야 활성화 |

@@ -24,6 +24,7 @@ def main():
     parser.add_argument("--inference-size", type=int, default=416)
     parser.add_argument("--display-fps", type=float, default=0.0)
     parser.add_argument("--cpu-threads", type=int, default=0)
+    parser.add_argument("--show-raw-preview", type=int, choices=(0, 1), default=0)
     parser.add_argument("--traffic-light-topic", default="/detection/traffic_light")
     parser.add_argument("--obstacle-topic", default="/detection/obstacle")
     parser.add_argument("--lane-checkpoint", default="")
@@ -107,6 +108,7 @@ def main():
             "--inference-size", str(args.inference_size),
             "--display-fps", str(args.display_fps),
             "--cpu-threads", str(args.cpu_threads),
+            "--show-raw-preview", str(args.show_raw_preview),
             "--car-detected-topic", args.car_detected_topic,
             "--person-detected-topic", args.person_detected_topic,
             "--traffic-light-topic", args.traffic_light_topic,

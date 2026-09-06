@@ -90,7 +90,7 @@ def main(ip=IP, port=PORT, base_model_path=BASE_MODEL_PATH,
          traffic_light_topic="/detection/traffic_light",
          obstacle_topic="/detection/obstacle",
          inference_size=INFERENCE_SIZE, display_fps=DISPLAY_FPS,
-         cpu_threads=CPU_THREADS):
+         cpu_threads=CPU_THREADS, show_raw_preview=False):
     """Cam 4 UDP receive, asynchronous YOLO inference, and live display.
 
     Camera receive/display must not wait for model inference.  The inference
@@ -102,6 +102,8 @@ def main(ip=IP, port=PORT, base_model_path=BASE_MODEL_PATH,
     from std_msgs.msg import Bool, Header
     from common.msg import ObjectInfo, ObjectInfoArray
     from ultralytics import YOLO
+
+    show_raw_preview = bool(show_raw_preview)
 
     # PyTorch otherwise tends to occupy every vCPU in a small VirtualBox VM,
     # starving the UDP/decode/GUI thread as soon as the first inference starts.
@@ -478,30 +480,29 @@ def main(ip=IP, port=PORT, base_model_path=BASE_MODEL_PATH,
                         stale_for,
                         health,
                     )
-                    waiting = (
-                        last_live_image.copy()
-                        if last_live_image is not None
-                        else np.zeros((480, 640, 3), dtype=np.uint8)
-                    )
-                    cv2.rectangle(
-                        waiting,
-                        (0, 0),
-                        (waiting.shape[1], 38),
-                        (0, 0, 180),
-                        -1,
-                    )
-                    cv2.putText(
-                        waiting,
-                        "NO NEW CAMERA FRAME - check MORAI UDP",
-                        (8, 26),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.62,
-                        (255, 255, 255),
-                        2,
-                    )
-                    cv2.imshow(
-                        live_window, waiting
-                    )
+                    if show_raw_preview:
+                        waiting = (
+                            last_live_image.copy()
+                            if last_live_image is not None
+                            else np.zeros((480, 640, 3), dtype=np.uint8)
+                        )
+                        cv2.rectangle(
+                            waiting,
+                            (0, 0),
+                            (waiting.shape[1], 38),
+                            (0, 0, 180),
+                            -1,
+                        )
+                        cv2.putText(
+                            waiting,
+                            "NO NEW CAMERA FRAME - check MORAI UDP",
+                            (8, 26),
+                            cv2.FONT_HERSHEY_SIMPLEX,
+                            0.62,
+                            (255, 255, 255),
+                            2,
+                        )
+                        cv2.imshow(live_window, waiting)
                 if cv2.waitKey(1) & 0xFF == ord('q'):
                     break
                 continue
@@ -514,7 +515,8 @@ def main(ip=IP, port=PORT, base_model_path=BASE_MODEL_PATH,
             image = cv2.imdecode(image_np, cv2.IMREAD_COLOR)
             if image is None or image.size == 0:
                 continue
-            last_live_image = image
+            if show_raw_preview:
+                last_live_image = image
             last_live_frame_at = time.monotonic()
 
             # Replace the pending inference job instead of queueing this frame.
@@ -546,36 +548,37 @@ def main(ip=IP, port=PORT, base_model_path=BASE_MODEL_PATH,
             # for the exact source frame used by its YOLO inference.
             with result_lock:
                 shown_result = dict(latest_result)
-            display_frame = image.copy()
             result_age_ms = (
                 (time.monotonic() - shown_result["completed_at"]) * 1000.0
                 if shown_result["completed_at"] > 0.0
                 else 0.0
             )
-            status = (
-                f"LIVE {smoothed_live_fps:.1f} FPS | "
-                f"YOLO {shown_result['fps']:.1f} FPS | "
-                f"infer {shown_result['inference_ms']:.0f} ms | "
-                f"latency {shown_result['latency_ms']:.0f} ms | "
-                f"age {result_age_ms:.0f} ms"
-            )
-            cv2.rectangle(
-                display_frame,
-                (0, 0),
-                (display_frame.shape[1], 30),
-                (0, 0, 0),
-                -1,
-            )
-            cv2.putText(
-                display_frame,
-                status,
-                (8, 21),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.55,
-                (255, 255, 255),
-                1,
-            )
-            cv2.imshow(live_window, display_frame)
+            if show_raw_preview:
+                display_frame = image.copy()
+                status = (
+                    f"LIVE {smoothed_live_fps:.1f} FPS | "
+                    f"YOLO {shown_result['fps']:.1f} FPS | "
+                    f"infer {shown_result['inference_ms']:.0f} ms | "
+                    f"latency {shown_result['latency_ms']:.0f} ms | "
+                    f"age {result_age_ms:.0f} ms"
+                )
+                cv2.rectangle(
+                    display_frame,
+                    (0, 0),
+                    (display_frame.shape[1], 30),
+                    (0, 0, 0),
+                    -1,
+                )
+                cv2.putText(
+                    display_frame,
+                    status,
+                    (8, 21),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.55,
+                    (255, 255, 255),
+                    1,
+                )
+                cv2.imshow(live_window, display_frame)
 
             # A BASE revision is displayed as soon as the primary detector
             # finishes. If configured, BASE+CUSTOM follows on the same exact
@@ -679,8 +682,16 @@ if __name__ == "__main__":
         default=CPU_THREADS,
         help="PyTorch CPU threads; 0 reserves at least one vCPU for camera/GUI",
     )
+    parser.add_argument(
+        "--show-raw-preview",
+        type=int,
+        choices=(0, 1),
+        default=0,
+        help="show the unprocessed camera window (0 disables it)",
+    )
     args = parser.parse_args()
     main(args.cam_ip, args.cam_port, args.base_model, args.custom_model,
          args.confidence, args.car_detected_topic, args.person_detected_topic,
          args.traffic_light_topic, args.obstacle_topic,
-         args.inference_size, args.display_fps, args.cpu_threads)
+         args.inference_size, args.display_fps, args.cpu_threads,
+         bool(args.show_raw_preview))
