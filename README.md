@@ -826,12 +826,13 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
 | `person_clear_confirmation_s` | `0.5` | person 미검출 후 재출발까지 연속 확인 시간 |
 | `traffic_light_stop_topic` | `/perception/traffic_light/stop_required` | YOLO 단독 RED 또는 Yellow/Amber 계열 신호등 정지 요청 |
 | `traffic_light_clear_confirmation_s` | `0.5` | RED/Yellow 미검출 후 제동 해제까지 연속 확인 시간 |
-| `intersection_detected_topic` | `/perception/intersection/detected` | 카메라·LiDAR 교차로 상황 인지 및 정지 요청 |
+| `intersection_detected_topic` | `/perception/intersection/detected` | 카메라·LiDAR 교차로 상황 인지 상태 |
+| `intersection_driving_unavailable_topic` | `/perception/intersection/driving_unavailable` | 교차로 차량 잔존 시 제동 요청 |
 
 대회 규정에 따라 Pure Pursuit는 평상시와 정지 상황 모두
 `longlCmdType=1`만 사용한다. 평상시에는 현재 속도와 목표 속도의 오차를 PID로
-계산해 `accel/brake` 페달을 제어한다. 보행자, 단독 RED 또는 Yellow 계열 신호등, 교차로
-상황 토픽이 활성화되면 `accel=0`, `brake=1`을 전송한다. 정지선은 차선 화면과
+계산해 `accel/brake` 페달을 제어한다. 보행자, 단독 RED 또는 Yellow 계열 신호등,
+교차로 주행 불가능 토픽이 활성화되면 `accel=0`, `brake=1`을 전송한다. 정지선은 차선 화면과
 검출·거리 토픽에는 계속 표시되지만 차량 정지 제어에는 사용하지 않는다.
 | `enable_intersection_detection` | `true` | 카메라·LiDAR 교차로 판정 노드 실행 |
 | `intersection_minimum_speed_mps` | `1.0` | 수직 이동 동적 객체의 최소 속력 [m/s] |

@@ -76,7 +76,7 @@ class PurePursuitNode:
         )
         self.intersection_stop_topic = rospy.get_param(
             "~intersection_stop_topic",
-            "/perception/intersection/detected",
+            "/perception/intersection/driving_unavailable",
         )
         self.map_frame = rospy.get_param("~map_frame", "map")
         self.latest_odom: Optional[Odometry] = None

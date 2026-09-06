@@ -92,7 +92,7 @@
     <arg name="highway_gate_topic" value="$(arg highway_environment_topic)" />
     <arg name="pedestrian_stop_topic" value="$(arg pedestrian_stop_topic)" />
     <arg name="traffic_light_stop_topic" value="$(arg traffic_light_stop_topic)" />
-    <arg name="intersection_stop_topic" value="$(arg intersection_detected_topic)" />
+    <arg name="intersection_stop_topic" value="$(arg intersection_driving_unavailable_topic)" />
   </include>
 
   <include file="$(find camera_perception)/launch/camera_perception.launch">

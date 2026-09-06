@@ -17,7 +17,7 @@
   <arg name="target_speed_mps" default="6.0" />
   <arg name="pedestrian_stop_topic" default="/perception/pedestrian_crossing/stop_required" />
   <arg name="traffic_light_stop_topic" default="/perception/traffic_light/stop_required" />
-  <arg name="intersection_stop_topic" default="/perception/intersection/detected" />
+  <arg name="intersection_stop_topic" default="/perception/intersection/driving_unavailable" />
 
   <!-- 1. MORAI GPS·IMU UDP -> /gps, /Imu -->
   <include file="$(find morai_udp_bridge)/launch/morai_udp_bridge.launch">
