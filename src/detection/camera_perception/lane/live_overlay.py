@@ -40,13 +40,12 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))), "src"))
 
-from camera_perception.stopline import stopline_requires_stop
 from lane_detection import LaneDetector, default_checkpoint
 from lane_viz import draw, draw_bev
 from morai_camera import DEFAULT_IP, DEFAULT_PORT, CameraStream
 
 
-def draw_values(vis, res, stop_required=False, y=46):
+def draw_values(vis, res, y=46):
     """제어로 나가는 값을 HUD 두 번째 띠에 찍는다.
 
     lane_viz.draw() 가 위 46px 를 검은 띠로 쓰므로 그 아래에 이어 붙인다.
@@ -59,16 +58,12 @@ def draw_values(vis, res, stop_required=False, y=46):
         "lat " + ("--" if le is None else f"{le:+.2f}m"),
         "head " + ("--" if he is None else f"{np.degrees(he):+.1f}deg"),
         "stop " + ("--" if sd is None else f"{sd:.1f}m"),
-        "STOP_REQ " + ("ON" if stop_required else "OFF"),
         "L " + (l.name[:6] if l else "--"),
         "R " + (r.name[:6] if r else "--"),
     ))
     cv2.rectangle(vis, (0, y), (vis.shape[1], y + 20), (0, 0, 0), -1)
     # 차로 중심을 못 잡은 프레임은 회색으로 - 값이 없다는 걸 한눈에 본다.
-    if stop_required:
-        col = (0, 0, 255)
-    else:
-        col = (0, 255, 0) if (le is not None and he is not None) else (150, 150, 150)
+    col = (0, 255, 0) if (le is not None and he is not None) else (150, 150, 150)
     cv2.putText(vis, txt, (8, y + 15), cv2.FONT_HERSHEY_SIMPLEX, 0.5, col, 1)
 
 
@@ -98,12 +93,6 @@ def build_arg_parser():
                     default="/perception/camera/stopline_detected")
     ap.add_argument("--stopline-distance-topic",
                     default="/perception/camera/stopline_distance_m")
-    ap.add_argument("--stopline-stop-topic",
-                    default="/perception/stopline/stop_required")
-    ap.add_argument("--stopline-stop-distance-m", type=float, default=2.0,
-                    help="이 거리 이내의 정지선만 정지 요청 (기본 2.0m)")
-    ap.add_argument("--stopline-clear-confirmation-s", type=float, default=0.5,
-                    help="정지 조건 미충족이 이 시간 지속되어야 정지 요청 해제")
     return ap
 
 
@@ -114,7 +103,6 @@ def main(argv=None):
     dashed_publisher = None
     stopline_detected_publisher = None
     stopline_distance_publisher = None
-    stopline_stop_publisher = None
     if args.ros_publish:
         import rospy as rospy_module
         from std_msgs.msg import Bool, Float64
@@ -129,9 +117,6 @@ def main(argv=None):
         )
         stopline_distance_publisher = rospy.Publisher(
             args.stopline_distance_topic, Float64, queue_size=1
-        )
-        stopline_stop_publisher = rospy.Publisher(
-            args.stopline_stop_topic, Bool, queue_size=1
         )
 
     pipe = LaneDetector(args.checkpoint, cam_set=args.cam_set,
@@ -152,8 +137,6 @@ def main(argv=None):
     show_bev = args.bev
     bev_open = False
     paused = False
-    stopline_stop_required = False
-    stopline_clear_since = None
     last_seq, res, frame = -1, None, None
     t_prev, fps = time.time(), 0.0
     n_since = 0
@@ -175,40 +158,6 @@ def main(argv=None):
                                 and res.ego_left.is_dashed
                             )
                             stopline_detected = res.stopline_dist is not None
-                            stopline_in_stop_range = stopline_requires_stop(
-                                res.stopline_dist,
-                                args.stopline_stop_distance_m,
-                            )
-                            previous_stop_required = stopline_stop_required
-                            if stopline_in_stop_range:
-                                stopline_stop_required = True
-                                stopline_clear_since = None
-                            elif stopline_stop_required:
-                                now_monotonic = time.monotonic()
-                                if stopline_clear_since is None:
-                                    stopline_clear_since = now_monotonic
-                                elif (
-                                    now_monotonic - stopline_clear_since
-                                    >= args.stopline_clear_confirmation_s
-                                ):
-                                    stopline_stop_required = False
-                                    stopline_clear_since = None
-                            if stopline_stop_required != previous_stop_required:
-                                if stopline_stop_required:
-                                    rospy.logwarn(
-                                        "\n============================================================\n"
-                                        "[STOP LINE] 정지 요청 ON - FULL BRAKE\n"
-                                        "distance=%.2fm | threshold=%.2fm\n"
-                                        "============================================================",
-                                        float(res.stopline_dist),
-                                        args.stopline_stop_distance_m,
-                                    )
-                                else:
-                                    rospy.logwarn(
-                                        "\n============================================================\n"
-                                        "[STOP LINE] 정지 요청 OFF - 주행 재개\n"
-                                        "============================================================"
-                                    )
                             dashed_publisher.publish(Bool(data=left_dashed))
                             stopline_detected_publisher.publish(
                                 Bool(data=stopline_detected)
@@ -222,9 +171,6 @@ def main(argv=None):
                                     )
                                 )
                             )
-                            stopline_stop_publisher.publish(
-                                Bool(data=stopline_stop_required)
-                            )
                         now = time.time()
                         dt = now - t_prev
                         t_prev = now
@@ -235,7 +181,7 @@ def main(argv=None):
                 vis = draw(res, frame, pipe, show_mask=show_mask,
                            show_lanes=show_lanes)
                 if show_values:
-                    draw_values(vis, res, stopline_stop_required)
+                    draw_values(vis, res)
                 cv2.putText(vis, f"{fps:.1f} FPS" + ("  [PAUSED]" if paused else ""),
                             (vis.shape[1] - 190, 18), cv2.FONT_HERSHEY_SIMPLEX,
                             0.55, (0, 255, 255), 1)
@@ -273,7 +219,6 @@ def main(argv=None):
             try:
                 dashed_publisher.publish(Bool(data=False))
                 stopline_detected_publisher.publish(Bool(data=False))
-                stopline_stop_publisher.publish(Bool(data=False))
             except rospy.ROSException:
                 pass
         cam.stop()

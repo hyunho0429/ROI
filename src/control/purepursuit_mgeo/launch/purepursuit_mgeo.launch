@@ -8,10 +8,8 @@
   <arg name="speed_ki" default="0.0001" />
   <arg name="speed_kd" default="0.025" />
   <arg name="pedestrian_stop_topic" default="/perception/pedestrian_crossing/stop_required" />
-  <arg name="stopline_stop_topic" default="/perception/stopline/stop_required" />
-  <arg name="stopline_stopped_speed_mps" default="0.15" />
-  <arg name="stopline_hold_sec" default="1.0" />
-  <arg name="stopline_rearm_clear_sec" default="1.0" />
+  <arg name="traffic_light_stop_topic" default="/perception/traffic_light/stop_required" />
+  <arg name="intersection_stop_topic" default="/perception/intersection/detected" />
 
   <node pkg="purepursuit_mgeo"
         type="purepursuit_mgeo_node.py"
@@ -24,10 +22,8 @@
     <param name="wheelbase_m" value="$(arg wheelbase_m)" />
     <param name="target_speed_mps" value="$(arg target_speed_mps)" />
     <param name="pedestrian_stop_topic" value="$(arg pedestrian_stop_topic)" />
-    <param name="stopline_stop_topic" value="$(arg stopline_stop_topic)" />
-    <param name="stopline_stopped_speed_mps" value="$(arg stopline_stopped_speed_mps)" />
-    <param name="stopline_hold_sec" value="$(arg stopline_hold_sec)" />
-    <param name="stopline_rearm_clear_sec" value="$(arg stopline_rearm_clear_sec)" />
+    <param name="traffic_light_stop_topic" value="$(arg traffic_light_stop_topic)" />
+    <param name="intersection_stop_topic" value="$(arg intersection_stop_topic)" />
     <param name="lookahead_min_m" value="4.0" />
     <param name="lookahead_gain" value="0.35" />
     <param name="goal_tolerance_m" value="1.5" />

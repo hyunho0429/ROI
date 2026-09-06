@@ -22,13 +22,12 @@
   <arg name="car_detected_topic" default="/perception/camera/car_detected" />
   <arg name="person_detected_topic" default="/perception/camera/person_detected" />
   <arg name="traffic_light_topic" default="/detection/traffic_light" />
+  <arg name="traffic_light_stop_topic" default="/perception/traffic_light/stop_required" />
+  <arg name="traffic_light_clear_confirmation_s" default="0.5" />
   <arg name="camera_obstacle_topic" default="/detection/obstacle" />
   <arg name="dashed_lane_topic" default="/perception/camera/dashed_lane_detected" />
   <arg name="stopline_detected_topic" default="/perception/camera/stopline_detected" />
   <arg name="stopline_distance_topic" default="/perception/camera/stopline_distance_m" />
-  <arg name="stopline_stop_topic" default="/perception/stopline/stop_required" />
-  <arg name="stopline_stop_distance_m" default="2.0" />
-  <arg name="stopline_clear_confirmation_s" default="0.5" />
   <arg name="highway_environment_topic" default="/perception/camera/highway_environment" />
   <arg name="enable_highway_gate" default="$(arg enable_yolo)" />
   <!-- 고속도로 환경 = YOLO car/bus/truck AND 왼쪽 점선. -->
@@ -61,7 +60,7 @@
         name="lane_camera"
         output="screen"
         respawn="false"
-        args="--mode lane --camera-stack-root $(arg camera_stack_root) --cam-ip $(arg camera_ip) --cam-port $(arg lane_port) --lane-checkpoint $(arg lane_checkpoint) --lane-cam-set $(arg lane_cam_set) --lane-device $(arg lane_device) --lane-every $(arg lane_every) --lane-scale $(arg lane_scale) --lane-ros-publish --dashed-lane-topic $(arg dashed_lane_topic) --stopline-detected-topic $(arg stopline_detected_topic) --stopline-distance-topic $(arg stopline_distance_topic) --stopline-stop-topic $(arg stopline_stop_topic) --stopline-stop-distance-m $(arg stopline_stop_distance_m) --stopline-clear-confirmation-s $(arg stopline_clear_confirmation_s)" />
+        args="--mode lane --camera-stack-root $(arg camera_stack_root) --cam-ip $(arg camera_ip) --cam-port $(arg lane_port) --lane-checkpoint $(arg lane_checkpoint) --lane-cam-set $(arg lane_cam_set) --lane-device $(arg lane_device) --lane-every $(arg lane_every) --lane-scale $(arg lane_scale) --lane-ros-publish --dashed-lane-topic $(arg dashed_lane_topic) --stopline-detected-topic $(arg stopline_detected_topic) --stopline-distance-topic $(arg stopline_distance_topic)" />
 
   <node if="$(arg enable_yolo)"
         pkg="camera_perception"
@@ -70,6 +69,16 @@
         output="screen"
         respawn="false"
         args="--mode yolo --camera-stack-root $(arg camera_stack_root) --cam-ip $(arg camera_ip) --cam-port $(arg yolo_port) --base-model $(arg base_model_path) --custom-model $(arg custom_model_path) --confidence $(arg yolo_confidence) --inference-size $(arg yolo_inference_size) --display-fps $(arg camera_display_fps) --cpu-threads $(arg yolo_cpu_threads) --show-raw-preview $(arg show_raw_camera_preview) --car-detected-topic $(arg car_detected_topic) --person-detected-topic $(arg person_detected_topic) --traffic-light-topic $(arg traffic_light_topic) --obstacle-topic $(arg camera_obstacle_topic)" />
+
+  <node if="$(arg enable_yolo)"
+        pkg="camera_perception"
+        type="traffic_light_stop_node.py"
+        name="traffic_light_stop"
+        output="screen">
+    <param name="input_topic" value="$(arg traffic_light_topic)" />
+    <param name="output_topic" value="$(arg traffic_light_stop_topic)" />
+    <param name="clear_confirmation_s" value="$(arg traffic_light_clear_confirmation_s)" />
+  </node>
 
   <node if="$(arg enable_highway_gate)"
         pkg="camera_perception"

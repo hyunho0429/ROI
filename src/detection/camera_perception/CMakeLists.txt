@@ -13,6 +13,7 @@ catkin_install_python(PROGRAMS
   scripts/highway_environment_gate_node.py
   scripts/intersection_environment_node.py
   scripts/pedestrian_crossing_fusion_node.py
+  scripts/traffic_light_stop_node.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 

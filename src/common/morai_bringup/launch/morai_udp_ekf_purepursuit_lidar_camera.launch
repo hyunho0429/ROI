@@ -40,13 +40,12 @@
   <arg name="car_detected_topic" default="/perception/camera/car_detected" />
   <arg name="person_detected_topic" default="/perception/camera/person_detected" />
   <arg name="traffic_light_topic" default="/detection/traffic_light" />
+  <arg name="traffic_light_stop_topic" default="/perception/traffic_light/stop_required" />
+  <arg name="traffic_light_clear_confirmation_s" default="0.5" />
   <arg name="camera_obstacle_topic" default="/detection/obstacle" />
   <arg name="dashed_lane_topic" default="/perception/camera/dashed_lane_detected" />
   <arg name="stopline_detected_topic" default="/perception/camera/stopline_detected" />
   <arg name="stopline_distance_topic" default="/perception/camera/stopline_distance_m" />
-  <arg name="stopline_stop_topic" default="/perception/stopline/stop_required" />
-  <arg name="stopline_stop_distance_m" default="2.0" />
-  <arg name="stopline_clear_confirmation_s" default="0.5" />
   <arg name="highway_environment_topic" default="/perception/camera/highway_environment" />
   <arg name="enable_highway_gate" default="$(arg enable_yolo)" />
   <arg name="merge_highway_gate_required" default="$(arg enable_highway_gate)" />
@@ -92,7 +91,8 @@
     <arg name="merge_highway_gate_required" value="$(arg merge_highway_gate_required)" />
     <arg name="highway_gate_topic" value="$(arg highway_environment_topic)" />
     <arg name="pedestrian_stop_topic" value="$(arg pedestrian_stop_topic)" />
-    <arg name="stopline_stop_topic" value="$(arg stopline_stop_topic)" />
+    <arg name="traffic_light_stop_topic" value="$(arg traffic_light_stop_topic)" />
+    <arg name="intersection_stop_topic" value="$(arg intersection_detected_topic)" />
   </include>
 
   <include file="$(find camera_perception)/launch/camera_perception.launch">
@@ -117,13 +117,12 @@
     <arg name="car_detected_topic" value="$(arg car_detected_topic)" />
     <arg name="person_detected_topic" value="$(arg person_detected_topic)" />
     <arg name="traffic_light_topic" value="$(arg traffic_light_topic)" />
+    <arg name="traffic_light_stop_topic" value="$(arg traffic_light_stop_topic)" />
+    <arg name="traffic_light_clear_confirmation_s" value="$(arg traffic_light_clear_confirmation_s)" />
     <arg name="camera_obstacle_topic" value="$(arg camera_obstacle_topic)" />
     <arg name="dashed_lane_topic" value="$(arg dashed_lane_topic)" />
     <arg name="stopline_detected_topic" value="$(arg stopline_detected_topic)" />
     <arg name="stopline_distance_topic" value="$(arg stopline_distance_topic)" />
-    <arg name="stopline_stop_topic" value="$(arg stopline_stop_topic)" />
-    <arg name="stopline_stop_distance_m" value="$(arg stopline_stop_distance_m)" />
-    <arg name="stopline_clear_confirmation_s" value="$(arg stopline_clear_confirmation_s)" />
     <arg name="highway_environment_topic" value="$(arg highway_environment_topic)" />
     <arg name="enable_highway_gate" value="$(arg enable_highway_gate)" />
     <arg name="require_dashed_lane" value="$(arg require_dashed_lane)" />

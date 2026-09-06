@@ -14,7 +14,6 @@ from path_planning.longitudinal_controller import PedalSpeedController
 from std_msgs.msg import Bool, Float64
 
 from purepursuit_mgeo.path import MgeoPurePursuit, PathPoint, load_mgeo_path
-from purepursuit_mgeo.stopline_latch import StoplineBrakeLatch
 
 
 def quaternion_to_yaw(x: float, y: float, z: float, w: float) -> float:
@@ -50,15 +49,6 @@ class PurePursuitNode:
             max_accel=float(rospy.get_param("~max_accel_pedal", 1.0)),
             max_brake=float(rospy.get_param("~max_brake_pedal", 1.0)),
         )
-        self.stopline_latch = StoplineBrakeLatch(
-            stopped_speed_mps=float(
-                rospy.get_param("~stopline_stopped_speed_mps", 0.15)
-            ),
-            stop_hold_sec=float(rospy.get_param("~stopline_hold_sec", 1.0)),
-            rearm_clear_sec=float(
-                rospy.get_param("~stopline_rearm_clear_sec", 1.0)
-            ),
-        )
 
         wheelbase = float(rospy.get_param("~wheelbase_m", 3.0))
         lookahead_min = float(rospy.get_param("~lookahead_min_m", 4.0))
@@ -80,14 +70,19 @@ class PurePursuitNode:
             "~pedestrian_stop_topic",
             "/perception/pedestrian_crossing/stop_required",
         )
-        self.stopline_stop_topic = rospy.get_param(
-            "~stopline_stop_topic",
-            "/perception/stopline/stop_required",
+        self.traffic_light_stop_topic = rospy.get_param(
+            "~traffic_light_stop_topic",
+            "/perception/traffic_light/stop_required",
+        )
+        self.intersection_stop_topic = rospy.get_param(
+            "~intersection_stop_topic",
+            "/perception/intersection/detected",
         )
         self.map_frame = rospy.get_param("~map_frame", "map")
         self.latest_odom: Optional[Odometry] = None
         self.pedestrian_stop_required = False
-        self.stopline_stop_required = False
+        self.traffic_light_stop_required = False
+        self.intersection_stop_required = False
 
         rospy.Subscriber(self.pose_topic, Odometry, self.odom_callback, queue_size=10)
         rospy.Subscriber(
@@ -97,9 +92,15 @@ class PurePursuitNode:
             queue_size=1,
         )
         rospy.Subscriber(
-            self.stopline_stop_topic,
+            self.traffic_light_stop_topic,
             Bool,
-            self.stopline_stop_callback,
+            self.traffic_light_stop_callback,
+            queue_size=1,
+        )
+        rospy.Subscriber(
+            self.intersection_stop_topic,
+            Bool,
+            self.intersection_stop_callback,
             queue_size=1,
         )
         self.command_pub = rospy.Publisher(self.command_topic, CtrlCmd, queue_size=1)
@@ -131,13 +132,22 @@ class PurePursuitNode:
                 self.pedestrian_stop_required,
             )
 
-    def stopline_stop_callback(self, msg: Bool) -> None:
-        previous = self.stopline_stop_required
-        self.stopline_stop_required = bool(msg.data)
-        if self.stopline_stop_required != previous:
+    def traffic_light_stop_callback(self, msg: Bool) -> None:
+        previous = self.traffic_light_stop_required
+        self.traffic_light_stop_required = bool(msg.data)
+        if self.traffic_light_stop_required != previous:
             rospy.logwarn(
-                "Stop-line control: stop_required=%s",
-                self.stopline_stop_required,
+                "Traffic-light control: stop_required=%s",
+                self.traffic_light_stop_required,
+            )
+
+    def intersection_stop_callback(self, msg: Bool) -> None:
+        previous = self.intersection_stop_required
+        self.intersection_stop_required = bool(msg.data)
+        if self.intersection_stop_required != previous:
+            rospy.logwarn(
+                "Intersection control: stop_required=%s",
+                self.intersection_stop_required,
             )
 
     def control_callback(self, _event: rospy.timer.TimerEvent) -> None:
@@ -164,26 +174,12 @@ class PurePursuitNode:
         )
         steering = max(-self.max_steering, min(self.max_steering, steering))
         now_sec = rospy.Time.now().to_sec()
-        previous_stopline_state = self.stopline_latch.state
-        stopline_brake_required = self.stopline_latch.update(
-            self.stopline_stop_required,
-            speed,
-            now_sec,
-        )
-        if self.stopline_latch.state != previous_stopline_state:
-            rospy.logwarn(
-                "Stop-line brake state: %s -> %s (raw=%s speed=%.3fm/s)",
-                previous_stopline_state,
-                self.stopline_latch.state,
-                self.stopline_stop_required,
-                speed,
-            )
-
         path_stop = stop
         stop = (
             path_stop
             or self.pedestrian_stop_required
-            or stopline_brake_required
+            or self.traffic_light_stop_required
+            or self.intersection_stop_required
         )
 
         target_msg = PointStamped()
@@ -211,16 +207,16 @@ class PurePursuitNode:
         rospy.loginfo_throttle(
             2.0,
             "Pure Pursuit index=%d lookahead=%.2f steering=%.4f "
-            "stop=%s path_stop=%s pedestrian_stop=%s stopline_raw=%s "
-            "stopline_state=%s",
+            "stop=%s path_stop=%s pedestrian_stop=%s traffic_light_stop=%s "
+            "intersection_stop=%s",
             target_index,
             lookahead,
             steering,
             stop,
             path_stop,
             self.pedestrian_stop_required,
-            self.stopline_stop_required,
-            self.stopline_latch.state,
+            self.traffic_light_stop_required,
+            self.intersection_stop_required,
         )
 
     def make_command(

@@ -53,19 +53,33 @@ CPU_THREADS = int(os.environ.get("MORAI_YOLO_CPU_THREADS", "0"))
 
 # feature-camera 브랜치의 탐지 대상과 신호등 분류 규칙.
 BASE_TARGET_CLASSES = [0, 1, 2, 3, 5, 7, 11]
-TRAFFIC_KEYWORDS = ("red", "green", "yellow", "left", "amber", "traffic")
+TRAFFIC_KEYWORDS = (
+    "red", "green", "yellow", "left", "right", "arrow", "amber", "traffic"
+)
 
 
 def _parse_traffic_signal(label):
     normalized = label.lower()
     if "red" in normalized and "left" in normalized:
         return "Red_Left", "RED + LEFT", (0, 165, 255)
+    if "red" in normalized and "right" in normalized:
+        return "Red_Right", "RED + RIGHT", (0, 165, 255)
+    if "red" in normalized and "arrow" in normalized:
+        return "Red_Arrow", "RED + ARROW", (0, 165, 255)
     if "green" in normalized and "left" in normalized:
         return "Green_Left", "GREEN + LEFT", (0, 255, 128)
+    if "green" in normalized and "right" in normalized:
+        return "Green_Right", "GREEN + RIGHT", (0, 255, 128)
+    if "green" in normalized and "arrow" in normalized:
+        return "Green_Arrow", "GREEN + ARROW", (0, 255, 128)
     if "red" in normalized and "yellow" in normalized:
         return "Red_Yellow", "RED + YELLOW", (0, 128, 255)
     if "left" in normalized:
         return "Left", "LEFT", (255, 255, 0)
+    if "right" in normalized:
+        return "Right", "RIGHT", (255, 255, 0)
+    if "arrow" in normalized:
+        return "Arrow", "ARROW", (255, 255, 0)
     if "red" in normalized:
         return "Red", "RED", (0, 0, 255)
     if "yellow" in normalized or "amber" in normalized:

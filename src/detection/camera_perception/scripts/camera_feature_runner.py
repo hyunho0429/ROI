@@ -47,12 +47,6 @@ def main():
         default="/perception/camera/stopline_distance_m",
     )
     parser.add_argument(
-        "--stopline-stop-topic",
-        default="/perception/stopline/stop_required",
-    )
-    parser.add_argument("--stopline-stop-distance-m", type=float, default=2.0)
-    parser.add_argument("--stopline-clear-confirmation-s", type=float, default=0.5)
-    parser.add_argument(
         "--car-detected-topic", default="/perception/camera/car_detected"
     )
     parser.add_argument(
@@ -90,11 +84,6 @@ def main():
                     "--dashed-lane-topic", args.dashed_lane_topic,
                     "--stopline-detected-topic", args.stopline_detected_topic,
                     "--stopline-distance-topic", args.stopline_distance_topic,
-                    "--stopline-stop-topic", args.stopline_stop_topic,
-                    "--stopline-stop-distance-m",
-                    str(args.stopline_stop_distance_m),
-                    "--stopline-clear-confirmation-s",
-                    str(args.stopline_clear_confirmation_s),
                 )
             )
     else:

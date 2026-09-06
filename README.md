@@ -710,7 +710,7 @@ MORAI 센서 설정의 포트가 위 값과 일치해야 하며 Ubuntu 방화벽
 | 왼쪽 점선 인식 | `/perception/camera/dashed_lane_detected` | `std_msgs/Bool` |
 | 정지선 인식 | `/perception/camera/stopline_detected` | `std_msgs/Bool` |
 | 정지선 거리 | `/perception/camera/stopline_distance_m` | `std_msgs/Float64` |
-| 정지선 정지 요청 | `/perception/stopline/stop_required` | `std_msgs/Bool` |
+| 신호등 정지 요청 | `/perception/traffic_light/stop_required` | `std_msgs/Bool` |
 | 교차로 인식 | `/perception/intersection/detected` | `std_msgs/Bool` |
 | 교차로 주행 가능 | `/perception/intersection/driving_allowed` | `std_msgs/Bool` |
 | 교차로 주행 불가능 | `/perception/intersection/driving_unavailable` | `std_msgs/Bool` |
@@ -720,6 +720,7 @@ MORAI 센서 설정의 포트가 위 값과 일치해야 하며 Ubuntu 방화벽
 
 `ObjectInfo`에는 `class_name`, `conf`, `x_center`, `y_center`, `width`,
 `height`가 포함되며 위치와 크기는 카메라 영상의 픽셀 좌표다.
+정지선 인식·거리 토픽은 표시와 확인용이며 차량 제어에는 연결하지 않는다.
 
 - `src/detection/camera_perception/lane/lane_seg_best.pt`: 차선 모델
 - `src/detection/camera_perception/models/yolov8n.pt`: COCO 객체 모델
@@ -823,18 +824,15 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
 | `car_detection_hold_s` | `2.0` | 일시적인 YOLO 누락 시 car 조건 유지시간 |
 | `enable_pedestrian_crossing` | `true` | YOLO person 기반 정지·재출발 제어 |
 | `person_clear_confirmation_s` | `0.5` | person 미검출 후 재출발까지 연속 확인 시간 |
-| `stopline_stop_distance_m` | `2.0` | 검출된 정지선이 이 거리 이내일 때만 정지 요청 [m] |
-| `stopline_clear_confirmation_s` | `0.5` | 정지 조건 미충족 후 정지 요청 해제 확인 시간 |
+| `traffic_light_stop_topic` | `/perception/traffic_light/stop_required` | YOLO 단독 RED 또는 Yellow/Amber 계열 신호등 정지 요청 |
+| `traffic_light_clear_confirmation_s` | `0.5` | RED/Yellow 미검출 후 제동 해제까지 연속 확인 시간 |
+| `intersection_detected_topic` | `/perception/intersection/detected` | 카메라·LiDAR 교차로 상황 인지 및 정지 요청 |
 
 대회 규정에 따라 Pure Pursuit는 평상시와 정지 상황 모두
 `longlCmdType=1`만 사용한다. 평상시에는 현재 속도와 목표 속도의 오차를 PID로
-계산해 `accel/brake` 페달을 제어하며, 정지선 또는 보행자 정지 요청이 활성화되면
-`accel=0`, `brake=1`을 전송한다. 차선 오버레이 HUD의 `STOP_REQ ON/OFF`와 launch
-터미널의 `[STOP LINE]` 로그에서 정지 요청 상태를 확인할 수 있다.
-정지선 요청은 제어 노드에서 다시 래치된다. 카메라가 정지선을 지나며 검출을
-잃더라도 차량 속도가 `0.15 m/s` 이하가 될 때까지 완전 제동하고, 1초간 정지를
-유지한 뒤 재출발한다. 같은 정지선은 카메라 입력이 1초 이상 해제된 후에만 다시
-정지 트리거로 사용할 수 있다.
+계산해 `accel/brake` 페달을 제어한다. 보행자, 단독 RED 또는 Yellow 계열 신호등, 교차로
+상황 토픽이 활성화되면 `accel=0`, `brake=1`을 전송한다. 정지선은 차선 화면과
+검출·거리 토픽에는 계속 표시되지만 차량 정지 제어에는 사용하지 않는다.
 | `enable_intersection_detection` | `true` | 카메라·LiDAR 교차로 판정 노드 실행 |
 | `intersection_minimum_speed_mps` | `1.0` | 수직 이동 동적 객체의 최소 속력 [m/s] |
 | `intersection_maximum_range_m` | `40.0` | 교차로 LiDAR 후보 최대 거리 [m] |
