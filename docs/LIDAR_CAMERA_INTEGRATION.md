@@ -30,15 +30,14 @@ MORAI 센서의 목적지 IP는 별도로 Ubuntu PC의 실제 IP로 설정해야
 ## 전체 실행
 
 다음 한 줄로 LiDAR/RViz, YOLO, 보행자 정지·재출발 및 차량 제어를 실행한다.
-기본값으로 차선 인식은 비활성화된다. 제어가 기본 활성화되어 있으므로 네트워크와
+기본값으로 차선 인식도 활성화된다. 제어가 기본 활성화되어 있으므로 네트워크와
 위치 정보가 정상 수신되면 차량이 바로 움직일 수 있다.
 
 ```bash
 roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch
 ```
 
-정상 실행 시 LiDAR tracking RViz와 카메라 실시간/YOLO 검출 화면이 나타난다.
-차선 인식 화면은 기본 실행에 포함되지 않는다.
+정상 실행 시 LiDAR tracking RViz, YOLO 검출 화면과 차선 오버레이가 나타난다.
 
 센서와 화면만 먼저 검증하려면 다음과 같이 제어 송신을 끈다.
 
@@ -51,7 +50,7 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch enable_con
 | 인자 | 기본값 | 설명 |
 |---|---:|---|
 | `rviz` | `true` | LiDAR RViz 표시 |
-| `enable_lane` | `false` | 차선 인식 프로세스 실행 |
+| `enable_lane` | `true` | 차선 인식 프로세스 실행 |
 | `lane_port` | `1101` | 차선 카메라 UDP 포트 |
 | `enable_yolo` | `true` | YOLO 프로세스 실행 |
 | `yolo_port` | `1131` | YOLO 카메라 UDP 포트 |
@@ -95,31 +94,18 @@ YOLO 수신/표시와 모델 추론은 서로 다른 스레드에서 동작한�
 새 UDP 프레임이 0.5초 이상 없으면 창의 이벤트 처리는 계속하면서
 `NO NEW CAMERA FRAME` watchdog 문구와 수신 상태를 로그로 표시한다.
 
-## 고속도로 환경 기반 끼어들기 활성화
+## 고속도로와 교차로 상황 판정
 
-통합 launch에서는 기본 YOLO의 COCO `car`, `bus`, `truck` 탐지 결과를 기존 호환
-토픽 `/perception/camera/car_detected`(`std_msgs/Bool`)로 발행한다. LiDAR 노드는 기존
-map-frame Kalman-Hungarian 결과에서 왼쪽 옆 차선의 앞·옆·뒤 40m 범위를 확인하고,
-ego와 같은 방향으로 움직이는 객체가 있으면
-`/perception/lidar/left_lane_parallel_dynamic_detected`를 발행한다. 두 값이 모두
-`true`일 때만 `/perception/camera/highway_environment=true`가 되며, 이 동안에만
-왼쪽 끼어들기 판단, 관련 Bool 결과와 RViz 선이 활성화된다. 기본값에서는 이 상태를
-한 번 인지하면 이후 카메라나 LiDAR 입력이 사라져도 노드 종료 전까지 유지한다.
+대회용 YOLO 클래스는 모든 차량 종류를 하나의 `car`로 통일한다.
+`car + 왼쪽 점선`이면 `/perception/camera/highway_environment=true`가 되어 기존
+LiDAR 왼쪽 끼어들기 공간 판단과 RViz 선을 활성화한다. 기본값에서는 한 번 인지한
+고속도로 후보를 노드 종료 전까지 기억한다.
 
-LiDAR 조건은 `motion_state=MOVING`, 속도 1.0m/s 이상, ego 진행방향 오차 30도 이내,
-횡속도 1.5m/s 이하를 모두 요구하고 3회 연속 확인한다. `STATIC`, `STOPPED`,
-`UNKNOWN`, 교차 이동 및 역주행 객체는 제외하므로 정적 장애물 토픽과 혼동해
-게이트를 켜지 않는다.
-
-점선 인식 토픽 `/perception/camera/dashed_lane_detected`는 향후 연결을 위해 미리
-정의되어 있지만 현재 발행 노드는 없다. 현재 기본값은 HD MAP과 점선 조건을 사용하지
-않는다. 향후 점선 인식 구현 후 다음 인자를 추가하면 기존 두 조건에 점선 조건까지
-AND로 결합된다.
-
-```bash
-roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
-  require_dashed_lane:=true
-```
+`car + 왼쪽 실선 + 오른쪽 실선`이면 `/perception/intersection/detected=true`,
+`/perception/intersection/driving_unavailable=true`를 발행하고 Pure Pursuit가
+`longlCmdType=1`, `accel=0`, `brake=1`로 제동한다. 교차로가 활성화된 동안에는
+고속도로 출력을 강제로 `false`로 만들어 두 상황이 동시에 켜지지 않게 한다.
+차량이 카메라에서 0.5초간 사라지면 교차로 주행 가능 상태로 전환한다.
 
 ## 보행자 횡단 정지
 

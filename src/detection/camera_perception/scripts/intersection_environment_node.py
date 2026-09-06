@@ -1,38 +1,30 @@
 #!/usr/bin/env python3
-"""Detect crossing traffic from YOLO vehicle state and map-frame LiDAR motion."""
+"""Detect intersections from unified Car and both solid lane boundaries."""
 
 import json
-import math
 import time
 
 import rospy
-from nav_msgs.msg import Odometry
 from std_msgs.msg import Bool, String
 
-from camera_perception.intersection import (
-    IntersectionStateMachine,
-    perpendicular_dynamic_obstacles,
-)
+from camera_perception.intersection import IntersectionStateMachine
 
 
 def _param(name, default):
     return rospy.get_param("~" + name, default)
 
 
-def _quaternion_to_yaw(orientation):
-    return math.atan2(
-        2.0 * (orientation.w * orientation.z + orientation.x * orientation.y),
-        1.0 - 2.0 * (orientation.y * orientation.y + orientation.z * orientation.z),
-    )
-
-
 class IntersectionEnvironmentNode:
     def __init__(self):
         self.car_topic = _param("car_topic", "/perception/camera/car_detected")
-        self.dynamic_obstacle_topic = _param(
-            "dynamic_obstacle_topic", "/detection/dynamic_obstacles"
+        self.left_solid_lane_topic = _param(
+            "left_solid_lane_topic",
+            "/perception/camera/left_solid_lane_detected",
         )
-        self.odometry_topic = _param("odometry_topic", "/localization/odometry")
+        self.right_solid_lane_topic = _param(
+            "right_solid_lane_topic",
+            "/perception/camera/right_solid_lane_detected",
+        )
         self.detected_topic = _param(
             "detected_topic", "/perception/intersection/detected"
         )
@@ -46,11 +38,6 @@ class IntersectionEnvironmentNode:
         self.status_topic = _param(
             "status_topic", "/perception/intersection/status"
         )
-        self.minimum_speed_mps = float(_param("minimum_speed_mps", 1.0))
-        self.maximum_range_m = float(_param("maximum_range_m", 40.0))
-        self.maximum_perpendicular_error_deg = float(
-            _param("maximum_perpendicular_error_deg", 20.0)
-        )
         self.input_stale_timeout_s = float(_param("input_stale_timeout_s", 0.5))
         self.publish_rate_hz = float(_param("publish_rate_hz", 20.0))
         self.state_machine = IntersectionStateMachine(
@@ -62,9 +49,10 @@ class IntersectionEnvironmentNode:
 
         self.camera_vehicle_detected = False
         self.camera_updated_at = None
-        self.perpendicular_count = 0
-        self.lidar_updated_at = None
-        self.latest_odom = None
+        self.left_solid_lane_detected = False
+        self.right_solid_lane_detected = False
+        self.left_lane_updated_at = None
+        self.right_lane_updated_at = None
         self.last_state = None
 
         self.detected_publisher = rospy.Publisher(
@@ -81,13 +69,16 @@ class IntersectionEnvironmentNode:
         )
         rospy.Subscriber(self.car_topic, Bool, self._car_callback, queue_size=1)
         rospy.Subscriber(
-            self.dynamic_obstacle_topic,
-            String,
-            self._dynamic_obstacle_callback,
+            self.left_solid_lane_topic,
+            Bool,
+            self._left_solid_lane_callback,
             queue_size=1,
         )
         rospy.Subscriber(
-            self.odometry_topic, Odometry, self._odometry_callback, queue_size=1
+            self.right_solid_lane_topic,
+            Bool,
+            self._right_solid_lane_callback,
+            queue_size=1,
         )
         self.timer = rospy.Timer(
             rospy.Duration(1.0 / max(self.publish_rate_hz, 1.0)),
@@ -95,13 +86,11 @@ class IntersectionEnvironmentNode:
         )
         rospy.on_shutdown(self._shutdown)
         rospy.logwarn(
-            "Intersection detector: YOLO=%s AND perpendicular dynamic LiDAR=%s; "
-            "angle=90+/-%.1fdeg speed>=%.2fm/s range<=%.1fm outputs=%s,%s,%s",
+            "Intersection detector: Car=%s AND left_solid=%s AND "
+            "right_solid=%s; outputs=%s,%s,%s",
             self.car_topic,
-            self.dynamic_obstacle_topic,
-            self.maximum_perpendicular_error_deg,
-            self.minimum_speed_mps,
-            self.maximum_range_m,
+            self.left_solid_lane_topic,
+            self.right_solid_lane_topic,
             self.detected_topic,
             self.driving_allowed_topic,
             self.driving_unavailable_topic,
@@ -111,32 +100,13 @@ class IntersectionEnvironmentNode:
         self.camera_vehicle_detected = bool(message.data)
         self.camera_updated_at = time.monotonic()
 
-    def _odometry_callback(self, message):
-        self.latest_odom = message
+    def _left_solid_lane_callback(self, message):
+        self.left_solid_lane_detected = bool(message.data)
+        self.left_lane_updated_at = time.monotonic()
 
-    def _dynamic_obstacle_callback(self, message):
-        now = time.monotonic()
-        self.lidar_updated_at = now
-        self.perpendicular_count = 0
-        if self.latest_odom is None:
-            return
-        try:
-            payload = json.loads(message.data)
-            obstacles = payload.get("obstacles", [])
-        except (TypeError, ValueError, AttributeError):
-            rospy.logwarn_throttle(2.0, "Invalid dynamic obstacle JSON")
-            return
-        pose = self.latest_odom.pose.pose
-        selected = perpendicular_dynamic_obstacles(
-            obstacles,
-            ego_x_map=float(pose.position.x),
-            ego_y_map=float(pose.position.y),
-            ego_yaw=_quaternion_to_yaw(pose.orientation),
-            minimum_speed_mps=self.minimum_speed_mps,
-            maximum_range_m=self.maximum_range_m,
-            maximum_perpendicular_error_deg=self.maximum_perpendicular_error_deg,
-        )
-        self.perpendicular_count = len(selected)
+    def _right_solid_lane_callback(self, message):
+        self.right_solid_lane_detected = bool(message.data)
+        self.right_lane_updated_at = time.monotonic()
 
     @staticmethod
     def _fresh(updated_at, now, timeout):
@@ -147,15 +117,20 @@ class IntersectionEnvironmentNode:
         camera_fresh = self._fresh(
             self.camera_updated_at, now, self.input_stale_timeout_s
         )
-        lidar_fresh = self._fresh(
-            self.lidar_updated_at, now, self.input_stale_timeout_s
+        left_lane_fresh = self._fresh(
+            self.left_lane_updated_at, now, self.input_stale_timeout_s
         )
-        perpendicular_detected = lidar_fresh and self.perpendicular_count > 0
+        right_lane_fresh = self._fresh(
+            self.right_lane_updated_at, now, self.input_stale_timeout_s
+        )
+        lane_fresh = left_lane_fresh and right_lane_fresh
         decision = self.state_machine.update(
             camera_vehicle_detected=self.camera_vehicle_detected,
-            perpendicular_dynamic_detected=perpendicular_detected,
+            left_solid_lane_detected=self.left_solid_lane_detected,
+            right_solid_lane_detected=self.right_solid_lane_detected,
             now=now,
             camera_fresh=camera_fresh,
+            lane_fresh=lane_fresh,
         )
         self.detected_publisher.publish(Bool(data=decision.detected))
         self.allowed_publisher.publish(Bool(data=decision.driving_allowed))
@@ -167,12 +142,15 @@ class IntersectionEnvironmentNode:
             "intersection_detected": decision.detected,
             "driving_allowed": decision.driving_allowed,
             "driving_unavailable": decision.driving_unavailable,
-            "camera_vehicle_detected": bool(
+            "recognition_rule": "CAR_AND_LEFT_SOLID_AND_RIGHT_SOLID",
+            "camera_car_detected": bool(
                 camera_fresh and self.camera_vehicle_detected
             ),
-            "perpendicular_dynamic_detected": bool(perpendicular_detected),
-            "perpendicular_object_count": int(
-                self.perpendicular_count if lidar_fresh else 0
+            "left_solid_lane_detected": bool(
+                lane_fresh and self.left_solid_lane_detected
+            ),
+            "right_solid_lane_detected": bool(
+                lane_fresh and self.right_solid_lane_detected
             ),
         }
         self.status_publisher.publish(
@@ -188,12 +166,12 @@ class IntersectionEnvironmentNode:
             rospy.logwarn(
                 "\n============================================================\n"
                 "%s\n"
-                "camera_vehicle=%s | perpendicular_lidar=%s | objects=%d\n"
+                "camera_car=%s | left_solid=%s | right_solid=%s\n"
                 "============================================================",
                 driving_notice,
-                status["camera_vehicle_detected"],
-                status["perpendicular_dynamic_detected"],
-                status["perpendicular_object_count"],
+                status["camera_car_detected"],
+                status["left_solid_lane_detected"],
+                status["right_solid_lane_detected"],
             )
             self.last_state = decision.state
 

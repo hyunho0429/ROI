@@ -13,3 +13,8 @@ class HighwayEnvironmentLatch:
         if conditions_met:
             self.latched = True
         return self.latched if self.latch_once else conditions_met
+
+
+def exclusive_highway_active(highway_candidate, intersection_active):
+    """Give intersection state priority over the highway/merge state."""
+    return bool(highway_candidate) and not bool(intersection_active)

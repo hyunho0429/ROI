@@ -86,9 +86,13 @@ def build_arg_parser():
     ap.add_argument("--every", type=int, default=1,
                     help="N 프레임마다 추론 (CPU 처럼 느린 환경에서 화면을 부드럽게)")
     ap.add_argument("--ros-publish", action="store_true",
-                    help="점선·정지선 결과를 ROS 토픽으로 발행")
+                    help="점선·양쪽 실선·정지선 결과를 ROS 토픽으로 발행")
     ap.add_argument("--dashed-lane-topic",
                     default="/perception/camera/dashed_lane_detected")
+    ap.add_argument("--left-solid-lane-topic",
+                    default="/perception/camera/left_solid_lane_detected")
+    ap.add_argument("--right-solid-lane-topic",
+                    default="/perception/camera/right_solid_lane_detected")
     ap.add_argument("--stopline-detected-topic",
                     default="/perception/camera/stopline_detected")
     ap.add_argument("--stopline-distance-topic",
@@ -101,6 +105,8 @@ def main(argv=None):
 
     rospy = None
     dashed_publisher = None
+    left_solid_publisher = None
+    right_solid_publisher = None
     stopline_detected_publisher = None
     stopline_distance_publisher = None
     if args.ros_publish:
@@ -111,6 +117,12 @@ def main(argv=None):
         rospy.init_node("camera_lane_perception", anonymous=False)
         dashed_publisher = rospy.Publisher(
             args.dashed_lane_topic, Bool, queue_size=1
+        )
+        left_solid_publisher = rospy.Publisher(
+            args.left_solid_lane_topic, Bool, queue_size=1
+        )
+        right_solid_publisher = rospy.Publisher(
+            args.right_solid_lane_topic, Bool, queue_size=1
         )
         stopline_detected_publisher = rospy.Publisher(
             args.stopline_detected_topic, Bool, queue_size=1
@@ -157,8 +169,20 @@ def main(argv=None):
                                 res.ego_left is not None
                                 and res.ego_left.is_dashed
                             )
+                            left_solid = bool(
+                                res.ego_left is not None
+                                and res.ego_left.name
+                                in ("white_solid", "yellow")
+                            )
+                            right_solid = bool(
+                                res.ego_right is not None
+                                and res.ego_right.name
+                                in ("white_solid", "yellow")
+                            )
                             stopline_detected = res.stopline_dist is not None
                             dashed_publisher.publish(Bool(data=left_dashed))
+                            left_solid_publisher.publish(Bool(data=left_solid))
+                            right_solid_publisher.publish(Bool(data=right_solid))
                             stopline_detected_publisher.publish(
                                 Bool(data=stopline_detected)
                             )
@@ -218,6 +242,8 @@ def main(argv=None):
         if rospy is not None:
             try:
                 dashed_publisher.publish(Bool(data=False))
+                left_solid_publisher.publish(Bool(data=False))
+                right_solid_publisher.publish(Bool(data=False))
                 stopline_detected_publisher.publish(Bool(data=False))
             except rospy.ROSException:
                 pass

@@ -44,12 +44,14 @@
   <arg name="traffic_light_clear_confirmation_s" default="0.5" />
   <arg name="camera_obstacle_topic" default="/detection/obstacle" />
   <arg name="dashed_lane_topic" default="/perception/camera/dashed_lane_detected" />
+  <arg name="left_solid_lane_topic" default="/perception/camera/left_solid_lane_detected" />
+  <arg name="right_solid_lane_topic" default="/perception/camera/right_solid_lane_detected" />
   <arg name="stopline_detected_topic" default="/perception/camera/stopline_detected" />
   <arg name="stopline_distance_topic" default="/perception/camera/stopline_distance_m" />
   <arg name="highway_environment_topic" default="/perception/camera/highway_environment" />
   <arg name="enable_highway_gate" default="$(arg enable_yolo)" />
   <arg name="merge_highway_gate_required" default="$(arg enable_highway_gate)" />
-  <!-- 끼어들기 환경 = YOLO car/bus/truck AND 카메라 왼쪽 점선. -->
+  <!-- 끼어들기 환경 = unified Car AND 카메라 왼쪽 점선. -->
   <arg name="require_dashed_lane" default="true" />
   <arg name="left_parallel_dynamic_topic" default="/perception/lidar/left_lane_parallel_dynamic_detected" />
   <arg name="require_left_parallel_dynamic" default="false" />
@@ -66,9 +68,6 @@
   <arg name="intersection_driving_allowed_topic" default="/perception/intersection/driving_allowed" />
   <arg name="intersection_driving_unavailable_topic" default="/perception/intersection/driving_unavailable" />
   <arg name="intersection_status_topic" default="/perception/intersection/status" />
-  <arg name="intersection_minimum_speed_mps" default="1.0" />
-  <arg name="intersection_maximum_range_m" default="40.0" />
-  <arg name="intersection_perpendicular_error_deg" default="20.0" />
   <arg name="intersection_camera_clear_confirmation_s" default="0.5" />
 
   <include file="$(find morai_bringup)/launch/morai_udp_ekf_purepursuit_lidar_tracking.launch">
@@ -121,6 +120,8 @@
     <arg name="traffic_light_clear_confirmation_s" value="$(arg traffic_light_clear_confirmation_s)" />
     <arg name="camera_obstacle_topic" value="$(arg camera_obstacle_topic)" />
     <arg name="dashed_lane_topic" value="$(arg dashed_lane_topic)" />
+    <arg name="left_solid_lane_topic" value="$(arg left_solid_lane_topic)" />
+    <arg name="right_solid_lane_topic" value="$(arg right_solid_lane_topic)" />
     <arg name="stopline_detected_topic" value="$(arg stopline_detected_topic)" />
     <arg name="stopline_distance_topic" value="$(arg stopline_distance_topic)" />
     <arg name="highway_environment_topic" value="$(arg highway_environment_topic)" />
@@ -137,15 +138,10 @@
     <arg name="pedestrian_status_topic" value="$(arg pedestrian_status_topic)" />
     <arg name="person_clear_confirmation_s" value="$(arg person_clear_confirmation_s)" />
     <arg name="enable_intersection_detection" value="$(arg enable_intersection_detection)" />
-    <arg name="dynamic_obstacle_topic" value="/detection/dynamic_obstacles" />
-    <arg name="odometry_topic" value="/localization/odometry" />
     <arg name="intersection_detected_topic" value="$(arg intersection_detected_topic)" />
     <arg name="intersection_driving_allowed_topic" value="$(arg intersection_driving_allowed_topic)" />
     <arg name="intersection_driving_unavailable_topic" value="$(arg intersection_driving_unavailable_topic)" />
     <arg name="intersection_status_topic" value="$(arg intersection_status_topic)" />
-    <arg name="intersection_minimum_speed_mps" value="$(arg intersection_minimum_speed_mps)" />
-    <arg name="intersection_maximum_range_m" value="$(arg intersection_maximum_range_m)" />
-    <arg name="intersection_perpendicular_error_deg" value="$(arg intersection_perpendicular_error_deg)" />
     <arg name="intersection_camera_clear_confirmation_s" value="$(arg intersection_camera_clear_confirmation_s)" />
   </include>
 </launch>

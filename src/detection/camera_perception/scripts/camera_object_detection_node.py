@@ -51,8 +51,10 @@ INFERENCE_SIZE = int(os.environ.get("MORAI_YOLO_INFERENCE_SIZE", "416"))
 DISPLAY_FPS = float(os.environ.get("MORAI_YOLO_DISPLAY_FPS", "0.0"))
 CPU_THREADS = int(os.environ.get("MORAI_YOLO_CPU_THREADS", "0"))
 
-# feature-camera 브랜치의 탐지 대상과 신호등 분류 규칙.
-BASE_TARGET_CLASSES = [0, 1, 2, 3, 5, 7, 11]
+# person, unified car, stop sign.  The competition dataset labels every
+# relevant vehicle (including bus/train) as ``car``, so raw COCO bus/truck
+# classes must not independently activate the situation gates.
+BASE_TARGET_CLASSES = [0, 2, 11]
 TRAFFIC_KEYWORDS = (
     "red", "green", "yellow", "left", "right", "arrow", "amber", "traffic"
 )
@@ -332,13 +334,7 @@ def main(ip=IP, port=PORT, base_model_path=BASE_MODEL_PATH,
                 base_objects = []
                 for box in base_boxes:
                     label = str(base_model.names[int(box.cls[0])]).lower()
-                    class_name = (
-                        "Car"
-                        if label in {
-                            "car", "bus", "truck", "motorcycle", "bicycle"
-                        }
-                        else label.capitalize()
-                    )
+                    class_name = "Car" if label == "car" else label.capitalize()
                     base_objects.append(object_message(box, base_model, class_name))
 
                 # Publish and display the COCO road-vehicle/person result immediately.
@@ -376,8 +372,8 @@ def main(ip=IP, port=PORT, base_model_path=BASE_MODEL_PATH,
                         fps=smoothed_fps,
                     )
 
-                # Preserve the existing topic name for compatibility. Its
-                # highway-gate meaning now covers car, bus, and truck.
+                # One shared unified-car state feeds both the highway and
+                # intersection situation gates.
                 car_detected = highway_vehicle_detected(detected_labels)
                 person_detected = "person" in detected_labels
                 with detection_state_lock:
@@ -389,7 +385,7 @@ def main(ip=IP, port=PORT, base_model_path=BASE_MODEL_PATH,
                 if car_detected:
                     rospy.loginfo_throttle(
                         1.0,
-                        "YOLO highway vehicle detected (%s); camera condition is true",
+                        "YOLO unified Car detected (%s); camera condition is true",
                         ",".join(
                             sorted(detected_labels.intersection(HIGHWAY_VEHICLE_CLASSES))
                         ),

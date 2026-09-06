@@ -630,9 +630,10 @@ roslaunch path_planning kcity_2025_dijkstra.launch \
 - `feature-camera`의 YOLOv8 기본 객체 탐지와 `best0902.pt` 커스텀 탐지
 - 신호등과 카메라 장애물 객체 배열 및 기존 car/person 호환 토픽 동시 발행
 - YOLO person 단독 인식 기반 보행자 즉시 정지 및 재출발
-- YOLO 차량과 ego 진행방향에 수직인 LiDAR 동적 객체를 결합한 교차로 판정
-- YOLO 차량과 왼쪽 점선을 결합한 고속도로·끼어들기 환경 판정
-- 카메라 정지선 검출 결과 발행 및 Pure Pursuit 즉시 정지
+- YOLO 통합 `Car`와 좌·우 실선을 결합한 교차로 판정 및 제동
+- YOLO 통합 `Car`와 왼쪽 점선을 결합한 고속도로·끼어들기 환경 판정
+- 교차로 우선 상호 배제로 고속도로·끼어들기 동시 활성화 방지
+- 카메라 정지선 검출 결과 발행(표시·확인용)
 - LiDAR/RViz, 차선 인식, YOLO 화면을 하나의 `roslaunch`로 실행
 
 차선과 YOLO는 각각 독립 프로세스로 실행된다. 한 카메라 프로세스에 문제가 생겨도
@@ -675,9 +676,9 @@ morai_udp_ekf_purepursuit_lidar_camera.launch
     ├── lane_camera  → lane/live_overlay.py (별도 차선 오버레이 창)
     ├── yolo_camera  → scripts/camera_object_detection_node.py
     ├── highway_environment_gate
-    │    car/bus/truck AND 왼쪽 점선 → merge-gap 활성화 후 유지
+    │    Car AND 왼쪽 점선 → merge-gap 활성화 후 유지
     ├── intersection_environment
-    │    car/bus/truck AND 수직 이동 LiDAR 동적 객체 → 교차로 주행 가능/불가능
+    │    Car AND 왼쪽 실선 AND 오른쪽 실선 → 교차로 제동
     └── pedestrian_crossing_fusion
          person_detected → 정지/재출발
 ```
@@ -708,6 +709,8 @@ MORAI 센서 설정의 포트가 위 값과 일치해야 하며 Ubuntu 방화벽
 | 차량 인식 상태 | `/perception/camera/car_detected` | `std_msgs/Bool` |
 | 보행자 인식 상태 | `/perception/camera/person_detected` | `std_msgs/Bool` |
 | 왼쪽 점선 인식 | `/perception/camera/dashed_lane_detected` | `std_msgs/Bool` |
+| 왼쪽 실선 인식 | `/perception/camera/left_solid_lane_detected` | `std_msgs/Bool` |
+| 오른쪽 실선 인식 | `/perception/camera/right_solid_lane_detected` | `std_msgs/Bool` |
 | 정지선 인식 | `/perception/camera/stopline_detected` | `std_msgs/Bool` |
 | 정지선 거리 | `/perception/camera/stopline_distance_m` | `std_msgs/Float64` |
 | 신호등 정지 요청 | `/perception/traffic_light/stop_required` | `std_msgs/Bool` |
@@ -817,7 +820,7 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
 | `show_raw_camera_preview` | `0` | `0`은 원본 창을 숨기고 YOLO 결과 창만 표시 |
 | `yolo_cpu_threads` | `1` | YOLO에 사용하는 PyTorch CPU 스레드 수 |
 | `enable_highway_gate` | `true` | 카메라 기반 고속도로 환경 게이트 실행 |
-| `require_dashed_lane` | `true` | YOLO car/bus/truck과 왼쪽 점선이 모두 탐지되어야 활성화 |
+| `require_dashed_lane` | `true` | YOLO 통합 `Car`와 왼쪽 점선이 모두 탐지되어야 활성화 |
 | `require_left_parallel_dynamic` | `false` | 기존 평행 주행 LiDAR 고속도로 조건은 사용하지 않음 |
 | `left_parallel_dynamic_hold_s` | `0.5` | 일시적인 LiDAR 추적 누락 허용시간 |
 | `highway_latch_once` | `true` | 고속도로 상태가 한 번 활성화되면 노드 종료 전까지 유지 |
@@ -826,21 +829,18 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
 | `person_clear_confirmation_s` | `0.5` | person 미검출 후 재출발까지 연속 확인 시간 |
 | `traffic_light_stop_topic` | `/perception/traffic_light/stop_required` | YOLO 단독 RED 또는 Yellow/Amber 계열 신호등 정지 요청 |
 | `traffic_light_clear_confirmation_s` | `0.5` | RED/Yellow 미검출 후 제동 해제까지 연속 확인 시간 |
-| `intersection_detected_topic` | `/perception/intersection/detected` | 카메라·LiDAR 교차로 상황 인지 상태 |
+| `enable_intersection_detection` | `true` | 통합 `Car`와 양쪽 실선 기반 교차로 판정 노드 실행 |
+| `intersection_detected_topic` | `/perception/intersection/detected` | `Car + 좌·우 실선` 교차로 상황 인지 상태 |
 | `intersection_driving_unavailable_topic` | `/perception/intersection/driving_unavailable` | 교차로 차량 잔존 시 제동 요청 |
+| `merge_available_topic` | `/perception/merge_gap/available` | 왼쪽 차선 끼어들기 가능 토픽 |
+| `merge_unavailable_topic` | `/perception/merge_gap/unavailable` | 왼쪽 차선 끼어들기 불가능 토픽 |
+| `merge_adjacent_obstacle_topic` | `/perception/merge_gap/left_lane_obstacles` | 끼어들기 판단 중 왼쪽 옆 차선 객체 상태 배열 |
 
 대회 규정에 따라 Pure Pursuit는 평상시와 정지 상황 모두
 `longlCmdType=1`만 사용한다. 평상시에는 현재 속도와 목표 속도의 오차를 PID로
 계산해 `accel/brake` 페달을 제어한다. 보행자, 단독 RED 또는 Yellow 계열 신호등,
 교차로 주행 불가능 토픽이 활성화되면 `accel=0`, `brake=1`을 전송한다. 정지선은 차선 화면과
 검출·거리 토픽에는 계속 표시되지만 차량 정지 제어에는 사용하지 않는다.
-| `enable_intersection_detection` | `true` | 카메라·LiDAR 교차로 판정 노드 실행 |
-| `intersection_minimum_speed_mps` | `1.0` | 수직 이동 동적 객체의 최소 속력 [m/s] |
-| `intersection_maximum_range_m` | `40.0` | 교차로 LiDAR 후보 최대 거리 [m] |
-| `intersection_perpendicular_error_deg` | `20.0` | ego 수직 90도에서 허용하는 방향 오차 [deg] |
-| `merge_available_topic` | `/perception/merge_gap/available` | 왼쪽 차선 끼어들기 가능 토픽 |
-| `merge_unavailable_topic` | `/perception/merge_gap/unavailable` | 왼쪽 차선 끼어들기 불가능 토픽 |
-| `merge_adjacent_obstacle_topic` | `/perception/merge_gap/left_lane_obstacles` | 끼어들기 판단 중 왼쪽 옆 차선 객체 상태 배열 |
 
 ### 끼어들기 대상 차선 객체 상태
 
@@ -992,20 +992,17 @@ rostopic echo /perception/merge_gap/unavailable
 ```
 
 두 토픽은 모두 `std_msgs/Bool`이며 왼쪽 차선만 판단한다. 통합 카메라 launch에서는
-YOLO가 COCO `car`, `bus`, `truck` 중 하나를 탐지하고, 동시에 LiDAR가 왼쪽 옆
-차선의 앞·옆·뒤 40m 범위에서
-ego와 같은 방향으로 주행하는 동적 객체를 확인해야
+YOLO의 통합 `car` 클래스와 왼쪽 점선이 동시에 탐지되면
 `/perception/camera/highway_environment=true`가 된다. 이때만 끼어들기 판단과 RViz
-왼쪽 선이 활성화된다. LiDAR 조건은 `/detection/obstacle_states`에서 `MOVING`만
-허용하고, 1.0m/s 미만, 진행방향 오차 30도 초과, 횡속도 1.5m/s 초과 객체를 제외하며
-3회 연속 검출을 요구한다. 따라서 `STATIC`, `STOPPED`, `UNKNOWN`, 교차 이동 및
-역주행 객체는 게이트를 켜지 않는다. 정상 활성 상태에서는 가능/불가능 두 값이 항상
+왼쪽 선이 활성화된다. 교차로 조건인 `Car + 좌·우 실선`이 성립하면 교차로 상태가
+우선되어 고속도로 토픽은 즉시 `false`가 되고 끼어들기 판단도 비활성화된다.
+정상 활성 상태에서는 가능/불가능 두 값이 항상
 반대다. 게이트가 꺼질 때는 이전 가능 상태를 남기지 않도록 한 번
 `available=false`, `unavailable=true`를 발행한 뒤 판단 출력을 중단한다. 기본
 `highway_latch_once=true`에서는 최초 활성화 이후 고속도로 상태를 계속 유지하므로
 이 비활성 전환은 노드 재시작/종료 때만 발생한다. 이전처럼 입력에 따라 다시 꺼지게
-하려면 `highway_latch_once:=false`로 실행한다. HD MAP과 점선 조건은 사용하지
-않으며 기존 주행 제어에는 연결하지 않는다.
+하려면 `highway_latch_once:=false`로 실행한다. 끼어들기 가능/불가능 결과 자체는
+기존 주행 제어에 직접 연결하지 않는다.
 
 ### 보행자 정지 및 재출발
 

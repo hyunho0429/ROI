@@ -14,21 +14,25 @@ for path in (PACKAGE_SRC, REPOSITORY_ROOT):
     if path not in sys.path:
         sys.path.insert(0, path)
 
-from camera_perception.highway_environment import HighwayEnvironmentLatch
+from camera_perception.highway_environment import (
+    HighwayEnvironmentLatch,
+    exclusive_highway_active,
+)
 from camera_perception.highway_vehicle import highway_vehicle_detected
 
 
 class HighwayVehicleDetectionTest(unittest.TestCase):
-    def test_car_bus_and_truck_each_activate_vehicle_condition(self):
-        for label in ("car", "bus", "truck"):
+    def test_only_unified_car_activates_vehicle_condition(self):
+        self.assertTrue(highway_vehicle_detected({"car"}))
+        for label in ("bus", "train", "truck", "motorcycle", "bicycle"):
             with self.subTest(label=label):
-                self.assertTrue(highway_vehicle_detected({label}))
+                self.assertFalse(highway_vehicle_detected({label}))
 
     def test_non_vehicle_classes_do_not_activate(self):
-        self.assertFalse(highway_vehicle_detected({"person", "bicycle"}))
+        self.assertFalse(highway_vehicle_detected({"person"}))
 
     def test_class_names_are_normalized(self):
-        self.assertTrue(highway_vehicle_detected({" Truck "}))
+        self.assertTrue(highway_vehicle_detected({" Car "}))
 
 
 class HighwayEnvironmentLatchTest(unittest.TestCase):
@@ -44,6 +48,13 @@ class HighwayEnvironmentLatchTest(unittest.TestCase):
 
         self.assertTrue(state.update(True))
         self.assertFalse(state.update(False))
+
+
+class SituationExclusionTest(unittest.TestCase):
+    def test_intersection_overrides_highway(self):
+        self.assertTrue(exclusive_highway_active(True, False))
+        self.assertFalse(exclusive_highway_active(True, True))
+        self.assertFalse(exclusive_highway_active(False, False))
 
 
 if __name__ == "__main__":

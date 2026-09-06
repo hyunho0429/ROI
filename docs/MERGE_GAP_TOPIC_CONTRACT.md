@@ -1,19 +1,18 @@
 # 왼쪽 차선 끼어들기 판단 토픽
 
 공간 판단은 LiDAR tracking의 장애물 위치, bounding box, 상대 속도, 앞뒤 여유
-거리와 TTC를 사용한다. 통합 카메라 launch에서는 YOLO `car`, `bus`, `truck` 중
-하나의 탐지와 왼쪽 옆 차선의
-카메라의 차량 탐지와 왼쪽 점선 탐지가 고속도로 환경을 활성화한 동안에만 이 판단 결과를 발행한다.
-HD MAP과 점선 조건은 사용하지 않는다.
+거리와 TTC를 사용한다. 카메라의 통합 `car` 탐지와 왼쪽 점선 탐지가 고속도로
+환경을 활성화한 동안에만 이 판단 결과를 발행한다. 교차로(`car + 양쪽 실선`)가
+활성화되면 고속도로 게이트가 강제로 꺼지므로 두 상황은 동시에 동작하지 않는다.
 
 | 기능 | 토픽 | 메시지 | 값 |
 |---|---|---|---|
 | 왼쪽 차선 끼어들기 가능 | `/perception/merge_gap/available` | `std_msgs/Bool` | 가능하면 `data: true` |
 | 왼쪽 차선 끼어들기 불가능 | `/perception/merge_gap/unavailable` | `std_msgs/Bool` | 불가능하면 `data: true` |
-| YOLO 도로 차량 탐지 | `/perception/camera/car_detected` | `std_msgs/Bool` | 현재 프레임에서 COCO `car`, `bus`, `truck` 중 하나 탐지(기존 토픽명 유지) |
+| YOLO 도로 차량 탐지 | `/perception/camera/car_detected` | `std_msgs/Bool` | 통합 `car` 클래스 탐지 |
 | 왼쪽 차선 평행 동적 객체 | `/perception/lidar/left_lane_parallel_dynamic_detected` | `std_msgs/Bool` | 왼쪽 앞·옆·뒤의 같은 방향 MOVING 객체를 3회 연속 확인 |
-| 고속도로 환경 게이트 | `/perception/camera/highway_environment` | `std_msgs/Bool` | YOLO car/bus/truck AND 왼쪽 차선 평행 동적 객체, 최초 ON 후 유지 |
-| 점선 탐지(예약) | `/perception/camera/dashed_lane_detected` | `std_msgs/Bool` | 현재 발행 노드 미구현 |
+| 고속도로 환경 게이트 | `/perception/camera/highway_environment` | `std_msgs/Bool` | `car AND 왼쪽 점선`, 최초 ON 후 유지(교차로 활성 시 강제 OFF) |
+| 왼쪽 점선 탐지 | `/perception/camera/dashed_lane_detected` | `std_msgs/Bool` | 현재 ego 왼쪽 경계가 점선이면 `true` |
 
 정상 입력에서는 두 값이 항상 반대다. RViz에서 왼쪽 공간이 확정된 초록색이면
 `available=true`이고, 빨간색 또는 확인 중인 노란색이면 `unavailable=true`다.

@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 """Build a stable highway-environment gate from camera and LiDAR states."""
 
+import threading
 import time
 
 import rospy
 from std_msgs.msg import Bool
 
-from camera_perception.highway_environment import HighwayEnvironmentLatch
+from camera_perception.highway_environment import (
+    HighwayEnvironmentLatch,
+    exclusive_highway_active,
+)
 
 
 def _param(name, default):
@@ -27,6 +31,9 @@ class HighwayEnvironmentGateNode:
         )
         self.output_topic = _param(
             "output_topic", "/perception/camera/highway_environment"
+        )
+        self.intersection_detected_topic = _param(
+            "intersection_detected_topic", "/perception/intersection/detected"
         )
         self.require_dashed_lane = bool(_param("require_dashed_lane", False))
         self.require_left_parallel_dynamic = bool(
@@ -52,6 +59,8 @@ class HighwayEnvironmentGateNode:
         self.last_dashed_lane_detected_at = None
         self.last_left_parallel_dynamic_at = None
         self.last_output = None
+        self.intersection_active = False
+        self.output_lock = threading.Lock()
         self.state_latch = HighwayEnvironmentLatch(self.latch_once)
 
         self.publisher = rospy.Publisher(
@@ -75,6 +84,12 @@ class HighwayEnvironmentGateNode:
             self._left_parallel_dynamic_callback,
             queue_size=1,
         )
+        self.intersection_subscriber = rospy.Subscriber(
+            self.intersection_detected_topic,
+            Bool,
+            self._intersection_callback,
+            queue_size=1,
+        )
         self.timer = rospy.Timer(
             rospy.Duration(1.0 / self.publish_rate_hz), self._timer_callback
         )
@@ -83,12 +98,13 @@ class HighwayEnvironmentGateNode:
         rospy.logwarn(
             "Highway gate: car=%s dashed=%s required_dashed=%s "
             "left_parallel_dynamic=%s required_left_parallel_dynamic=%s "
-            "latch_once=%s output=%s",
+            "intersection_override=%s latch_once=%s output=%s",
             self.car_detected_topic,
             self.dashed_lane_topic,
             self.require_dashed_lane,
             self.left_parallel_dynamic_topic,
             self.require_left_parallel_dynamic,
+            self.intersection_detected_topic,
             self.latch_once,
             self.output_topic,
         )
@@ -104,6 +120,15 @@ class HighwayEnvironmentGateNode:
     def _left_parallel_dynamic_callback(self, message):
         if message.data:
             self.last_left_parallel_dynamic_at = time.monotonic()
+
+    def _intersection_callback(self, message):
+        self.intersection_active = bool(message.data)
+        if self.intersection_active:
+            # Publish the exclusion immediately instead of waiting for the
+            # next periodic gate update.
+            with self.output_lock:
+                self.publisher.publish(Bool(data=False))
+                self.last_output = False
 
     @staticmethod
     def _recent(timestamp, hold_s, now):
@@ -133,20 +158,25 @@ class HighwayEnvironmentGateNode:
                 else True
             )
         )
-        active = self.state_latch.update(conditions_met)
-        self.publisher.publish(Bool(data=active))
+        highway_candidate = self.state_latch.update(conditions_met)
+        with self.output_lock:
+            active = exclusive_highway_active(
+                highway_candidate, self.intersection_active
+            )
+            self.publisher.publish(Bool(data=active))
 
         if active != self.last_output:
             rospy.logwarn(
                 "Highway environment gate changed: active=%s car=%s "
                 "dashed=%s dashed_required=%s left_parallel_dynamic=%s "
-                "left_parallel_dynamic_required=%s latched=%s",
+                "left_parallel_dynamic_required=%s intersection=%s latched=%s",
                 active,
                 car_active,
                 dashed_active,
                 self.require_dashed_lane,
                 left_parallel_dynamic_active,
                 self.require_left_parallel_dynamic,
+                self.intersection_active,
                 self.state_latch.latched,
             )
             self.last_output = active
