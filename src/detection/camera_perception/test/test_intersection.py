@@ -11,8 +11,8 @@ if PACKAGE_SRC not in sys.path:
     sys.path.insert(0, PACKAGE_SRC)
 
 from camera_perception.intersection import (
+    FrontCrossingVehicleLatch,
     IntersectionStateMachine,
-    LeftToRightCrossingTracker,
     left_to_right_crossing_obstacles,
 )
 
@@ -65,29 +65,19 @@ class LeftToRightCrossingTest(unittest.TestCase):
         self.assertEqual(len(selected), 1)
         self.assertAlmostEqual(selected[0]["lateral_m"], 3.0)
 
-    def test_tracker_requires_same_id_to_move_from_left_to_clear_right(self):
-        tracker = LeftToRightCrossingTracker(
-            ego_vehicle_width_m=1.892, clearance_m=0.2
-        )
-        passed, waiting, _ = tracker.update(
-            [{"id": 7, "lateral_m": 3.0, "lateral_half_extent_m": 2.25}]
-        )
-        self.assertFalse(passed)
-        self.assertEqual(waiting, (7,))
+    def test_front_crossing_observation_is_latched_immediately(self):
+        tracker = FrontCrossingVehicleLatch()
+        seen, ids = tracker.update([{"id": 7}])
+        self.assertTrue(seen)
+        self.assertEqual(ids, (7,))
 
-        # An unrelated object already on the right cannot release the brake.
-        passed, waiting, _ = tracker.update(
-            [{"id": 8, "lateral_m": -4.0, "lateral_half_extent_m": 2.25}]
-        )
-        self.assertFalse(passed)
-        self.assertEqual(waiting, (7,))
+        seen, ids = tracker.update([])
+        self.assertTrue(seen)
+        self.assertEqual(ids, (7,))
 
-        passed, waiting, passed_ids = tracker.update(
-            [{"id": 7, "lateral_m": -3.5, "lateral_half_extent_m": 2.25}]
-        )
-        self.assertTrue(passed)
-        self.assertEqual(waiting, ())
-        self.assertEqual(passed_ids, (7,))
+        seen, ids = tracker.update([], active=False)
+        self.assertFalse(seen)
+        self.assertEqual(ids, ())
 
 
 class IntersectionStateMachineTest(unittest.TestCase):
@@ -148,15 +138,14 @@ class IntersectionStateMachineTest(unittest.TestCase):
             "BLOCKED",
         )
 
-    def test_right_side_pass_releases_while_camera_still_sees_vehicle(self):
+    def test_front_crossing_observation_releases_immediately(self):
         state = IntersectionStateMachine(0.5, 2.0)
-        state.update(True, True, True, 0.0)
         clear = state.update(
             True,
             True,
             True,
-            0.1,
-            crossing_vehicle_passed_right=True,
+            0.0,
+            crossing_vehicle_seen_in_front=True,
         )
         self.assertEqual(clear.state, "CLEAR")
         self.assertTrue(clear.driving_allowed)
@@ -168,11 +157,11 @@ class IntersectionStateMachineTest(unittest.TestCase):
             True,
             True,
             0.2,
-            crossing_vehicle_passed_right=True,
+            crossing_vehicle_seen_in_front=True,
         )
         self.assertEqual(still_clear.state, "CLEAR")
 
-    def test_new_waiting_crossing_vehicle_reblocks_clear_state(self):
+    def test_missing_crossing_observation_reblocks_clear_state(self):
         state = IntersectionStateMachine(0.0, 2.0)
         state.update(True, True, True, 0.0)
         self.assertEqual(
@@ -181,7 +170,7 @@ class IntersectionStateMachineTest(unittest.TestCase):
                 True,
                 True,
                 0.1,
-                crossing_vehicle_passed_right=True,
+                crossing_vehicle_seen_in_front=True,
             ).state,
             "CLEAR",
         )
@@ -190,8 +179,7 @@ class IntersectionStateMachineTest(unittest.TestCase):
             True,
             True,
             0.2,
-            crossing_vehicle_passed_right=False,
-            crossing_vehicle_waiting=True,
+            crossing_vehicle_seen_in_front=False,
         )
         self.assertEqual(decision.state, "BLOCKED")
         self.assertTrue(decision.driving_unavailable)

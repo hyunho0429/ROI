@@ -106,8 +106,8 @@ LiDAR 왼쪽 끼어들기 공간 판단과 RViz 선을 활성화한다. 기본�
 `longlCmdType=1`, `accel=0`, `brake=1`로 제동한다. 교차로가 활성화된 동안에는
 고속도로 출력을 강제로 `false`로 만들어 두 상황이 동시에 켜지지 않게 한다.
 LiDAR의 `/detection/dynamic_obstacles`에서 에고 전방의 `MOVING` 객체 중 에고 기준
-오른쪽 횡속도를 가진 Tracking ID를 고른다. 같은 ID의 bounding box 전체가 에고
-우측 경계와 안전 여유를 벗어나면, 카메라에 차량이 아직 보이더라도
+오른쪽 횡속도를 가진 Tracking ID를 고른다. 이 좌→우 횡단 움직임이 전방에서
+확인되는 즉시, 카메라에 차량이 아직 보이더라도
 `/perception/intersection/driving_allowed=true`로 전환해 전역 경로 주행을 재개한다.
 LiDAR 추적이 끊긴 경우에는 차량이 카메라에서 0.5초간 사라진 뒤에만 해제한다.
 

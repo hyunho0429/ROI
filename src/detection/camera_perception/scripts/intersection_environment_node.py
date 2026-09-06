@@ -10,8 +10,8 @@ from nav_msgs.msg import Odometry
 from std_msgs.msg import Bool, String
 
 from camera_perception.intersection import (
+    FrontCrossingVehicleLatch,
     IntersectionStateMachine,
-    LeftToRightCrossingTracker,
     left_to_right_crossing_obstacles,
 )
 
@@ -84,10 +84,7 @@ class IntersectionEnvironmentNode:
             ),
             clear_hold_s=float(_param("clear_hold_s", 2.0)),
         )
-        self.crossing_tracker = LeftToRightCrossingTracker(
-            ego_vehicle_width_m=float(_param("ego_vehicle_width_m", 1.892)),
-            clearance_m=float(_param("right_pass_clearance_m", 0.2)),
-        )
+        self.crossing_tracker = FrontCrossingVehicleLatch()
 
         self.camera_vehicle_detected = False
         self.camera_updated_at = None
@@ -240,7 +237,7 @@ class IntersectionEnvironmentNode:
         tracking_active = bool(
             self.state_machine.state != "IDLE" or recognition_conditions_met
         )
-        crossing_passed, waiting_ids, passed_ids = self.crossing_tracker.update(
+        crossing_seen, crossing_ids = self.crossing_tracker.update(
             crossing_observations,
             active=tracking_active,
         )
@@ -253,8 +250,7 @@ class IntersectionEnvironmentNode:
             now=now,
             camera_fresh=camera_fresh,
             lane_fresh=lane_fresh,
-            crossing_vehicle_passed_right=crossing_passed,
-            crossing_vehicle_waiting=bool(waiting_ids),
+            crossing_vehicle_seen_in_front=crossing_seen,
         )
         if decision.state == "IDLE":
             self.crossing_tracker.reset()
@@ -284,9 +280,8 @@ class IntersectionEnvironmentNode:
                 int(observation["id"])
                 for observation in crossing_observations
             ],
-            "crossing_waiting_ids": list(waiting_ids),
-            "crossing_passed_right_ids": list(passed_ids),
-            "crossing_vehicle_passed_right": bool(crossing_passed),
+            "crossing_vehicle_ids": list(crossing_ids),
+            "crossing_vehicle_seen_in_front": bool(crossing_seen),
         }
         self.status_publisher.publish(
             String(data=json.dumps(status, separators=(",", ":")))
@@ -302,14 +297,14 @@ class IntersectionEnvironmentNode:
                 "\n============================================================\n"
                 "%s\n"
                 "camera_car=%s | left_yellow_solid=%s | right_solid=%s\n"
-                "crossing_waiting=%s | crossing_passed_right=%s\n"
+                "front_left_to_right_vehicle_ids=%s | crossing_seen=%s\n"
                 "============================================================",
                 driving_notice,
                 status["camera_car_detected"],
                 status["left_yellow_solid_lane_detected"],
                 status["right_solid_lane_detected"],
-                status["crossing_waiting_ids"],
-                status["crossing_passed_right_ids"],
+                status["crossing_vehicle_ids"],
+                status["crossing_vehicle_seen_in_front"],
             )
             self.last_state = decision.state
 

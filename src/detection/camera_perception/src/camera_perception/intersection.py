@@ -33,11 +33,9 @@ def left_to_right_crossing_obstacles(
             center_y = float(obstacle["center_y_map"])
             velocity_x = float(obstacle["velocity_x_map"])
             velocity_y = float(obstacle["velocity_y_map"])
-            length = max(0.0, float(obstacle.get("length", 0.0)))
-            width = max(0.0, float(obstacle.get("width", 0.0)))
         except (KeyError, TypeError, ValueError):
             continue
-        values = (center_x, center_y, velocity_x, velocity_y, length, width)
+        values = (center_x, center_y, velocity_x, velocity_y)
         if not all(math.isfinite(value) for value in values):
             continue
 
@@ -47,20 +45,6 @@ def left_to_right_crossing_obstacles(
         lateral = -sine * delta_x + cosine * delta_y
         lateral_speed = -sine * velocity_x + cosine * velocity_y
         speed = math.hypot(velocity_x, velocity_y)
-        try:
-            obstacle_yaw = float(obstacle.get("yaw", math.nan))
-        except (TypeError, ValueError):
-            obstacle_yaw = math.nan
-        if bool(obstacle.get("yaw_valid", False)) and math.isfinite(obstacle_yaw):
-            relative_yaw = obstacle_yaw - float(ego_yaw)
-            lateral_half_extent = 0.5 * (
-                abs(math.sin(relative_yaw)) * length
-                + abs(math.cos(relative_yaw)) * width
-            )
-        else:
-            # Unknown box orientation: max dimension is the conservative
-            # lateral projection for a crossing-clearance decision.
-            lateral_half_extent = 0.5 * max(length, width)
         if not 0.0 <= longitudinal <= float(maximum_forward_distance_m):
             continue
         if abs(lateral) > float(maximum_abs_lateral_distance_m):
@@ -75,56 +59,28 @@ def left_to_right_crossing_obstacles(
                 "longitudinal_m": longitudinal,
                 "lateral_m": lateral,
                 "lateral_speed_mps": lateral_speed,
-                "lateral_half_extent_m": lateral_half_extent,
             }
         )
     return selected
 
 
-class LeftToRightCrossingTracker:
-    """Remember left-side track IDs until their boxes clear ego's right side."""
+class FrontCrossingVehicleLatch:
+    """Latch IDs as soon as right-moving traffic is observed in front."""
 
-    def __init__(self, ego_vehicle_width_m=1.892, clearance_m=0.2):
-        if ego_vehicle_width_m <= 0.0 or clearance_m < 0.0:
-            raise ValueError("vehicle width must be positive and clearance non-negative")
-        self.ego_vehicle_width_m = float(ego_vehicle_width_m)
-        self.clearance_m = float(clearance_m)
-        self.target_ids = set()
-        self.passed_ids = set()
+    def __init__(self):
+        self.observed_ids = set()
 
     def reset(self):
-        self.target_ids.clear()
-        self.passed_ids.clear()
+        self.observed_ids.clear()
 
     def update(self, observations, active=True):
         if not active:
             self.reset()
-            return False, (), ()
+            return False, ()
 
-        right_boundary = -(0.5 * self.ego_vehicle_width_m + self.clearance_m)
         for observation in observations:
-            track_id = int(observation["id"])
-            lateral = float(observation["lateral_m"])
-            lateral_half_extent = max(
-                0.0,
-                float(observation.get("lateral_half_extent_m", 0.0)),
-            )
-            # Enrol only a right-moving object first observed on the ego-left
-            # or centre. This prevents unrelated right-side traffic from
-            # falsely releasing the brake.
-            if lateral >= 0.0:
-                self.target_ids.add(track_id)
-            left_edge = lateral + lateral_half_extent
-            if track_id in self.target_ids and left_edge <= right_boundary:
-                self.passed_ids.add(track_id)
-
-        waiting_ids = self.target_ids - self.passed_ids
-        all_passed = bool(self.target_ids) and not waiting_ids
-        return (
-            all_passed,
-            tuple(sorted(waiting_ids)),
-            tuple(sorted(self.passed_ids)),
-        )
+            self.observed_ids.add(int(observation["id"]))
+        return bool(self.observed_ids), tuple(sorted(self.observed_ids))
 
 
 @dataclass(frozen=True)
@@ -138,10 +94,9 @@ class IntersectionDecision:
 class IntersectionStateMachine:
     """Recognize ``Car AND left yellow solid AND right solid`` intersections.
 
-    After recognition, a tracked left-to-right vehicle clears the stop once
-    its complete box passes the ego-right boundary. Camera disappearance is
-    retained as a conservative fallback; stale camera data never releases a
-    blocked intersection.
+    After recognition, observing a tracked left-to-right moving vehicle in
+    front immediately clears the stop. Camera disappearance is retained as a
+    fallback; stale camera data never releases a blocked intersection.
     """
 
     def __init__(self, camera_clear_confirmation_s: float = 0.5, clear_hold_s: float = 2.0):
@@ -163,8 +118,7 @@ class IntersectionStateMachine:
         now: float,
         camera_fresh: bool = True,
         lane_fresh: bool = True,
-        crossing_vehicle_passed_right: bool = False,
-        crossing_vehicle_waiting: bool = False,
+        crossing_vehicle_seen_in_front: bool = False,
     ) -> IntersectionDecision:
         now = float(now)
         recognition_conditions_met = bool(
@@ -177,11 +131,14 @@ class IntersectionStateMachine:
 
         if self.state == "IDLE":
             if recognition_conditions_met:
-                self.state = "BLOCKED"
+                self.state = (
+                    "CLEAR" if crossing_vehicle_seen_in_front else "BLOCKED"
+                )
                 self.camera_clear_since = None
+                self.clear_started_at = None
 
         elif self.state == "BLOCKED":
-            if crossing_vehicle_passed_right:
+            if crossing_vehicle_seen_in_front:
                 self.state = "CLEAR"
                 self.camera_clear_since = None
                 self.clear_started_at = None
@@ -196,9 +153,7 @@ class IntersectionStateMachine:
                     self.clear_started_at = now
 
         elif self.state == "CLEAR":
-            if recognition_conditions_met and (
-                crossing_vehicle_waiting or not crossing_vehicle_passed_right
-            ):
+            if recognition_conditions_met and not crossing_vehicle_seen_in_front:
                 self.state = "BLOCKED"
                 self.camera_clear_since = None
                 self.clear_started_at = None

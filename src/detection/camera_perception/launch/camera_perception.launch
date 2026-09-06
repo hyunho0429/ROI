@@ -56,8 +56,6 @@
   <arg name="intersection_minimum_rightward_speed_mps" default="0.5" />
   <arg name="intersection_maximum_forward_distance_m" default="40.0" />
   <arg name="intersection_maximum_abs_lateral_distance_m" default="20.0" />
-  <arg name="intersection_ego_vehicle_width_m" default="1.892" />
-  <arg name="intersection_right_pass_clearance_m" default="0.2" />
   <arg name="intersection_camera_clear_confirmation_s" default="0.5" />
 
   <node if="$(arg enable_lane)"
@@ -137,8 +135,6 @@
     <param name="minimum_rightward_speed_mps" value="$(arg intersection_minimum_rightward_speed_mps)" />
     <param name="maximum_forward_distance_m" value="$(arg intersection_maximum_forward_distance_m)" />
     <param name="maximum_abs_lateral_distance_m" value="$(arg intersection_maximum_abs_lateral_distance_m)" />
-    <param name="ego_vehicle_width_m" value="$(arg intersection_ego_vehicle_width_m)" />
-    <param name="right_pass_clearance_m" value="$(arg intersection_right_pass_clearance_m)" />
     <param name="camera_clear_confirmation_s" value="$(arg intersection_camera_clear_confirmation_s)" />
     <param name="clear_hold_s" value="2.0" />
     <param name="input_stale_timeout_s" value="0.5" />

@@ -631,7 +631,7 @@ roslaunch path_planning kcity_2025_dijkstra.launch \
 - 신호등과 카메라 장애물 객체 배열 및 기존 car/person 호환 토픽 동시 발행
 - YOLO person 단독 인식 기반 보행자 즉시 정지 및 재출발
 - YOLO 통합 `Car`, 왼쪽 노란 실선, 오른쪽 실선을 결합한 교차로 판정 및 제동
-- LiDAR Tracking ID로 좌→우 횡단 차량의 우측 통과를 확인한 뒤 주행 재개
+- LiDAR가 전방 좌→우 횡단 차량을 확인하는 즉시 주행 재개
 - YOLO 통합 `Car`와 왼쪽 점선을 결합한 고속도로·끼어들기 환경 판정
 - 교차로 우선 상호 배제로 고속도로·끼어들기 동시 활성화 방지
 - 카메라 정지선 검출 결과 발행(표시·확인용)
@@ -680,7 +680,7 @@ morai_udp_ekf_purepursuit_lidar_camera.launch
     │    Car AND 왼쪽 점선 → merge-gap 활성화 후 유지
     ├── intersection_environment
     │    Car AND 왼쪽 노란 실선 AND 오른쪽 실선 → 교차로 제동
-    │    동일 LiDAR ID가 에고 오른쪽을 통과 → 전역 경로 주행 재개
+    │    전방 LiDAR ID의 좌→우 이동 확인 → 즉시 전역 경로 주행 재개
     └── pedestrian_crossing_fusion
          person_detected → 정지/재출발
 ```
@@ -837,7 +837,6 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
 | `intersection_driving_unavailable_topic` | `/perception/intersection/driving_unavailable` | 교차로 차량 잔존 시 제동 요청 |
 | `intersection_minimum_crossing_speed_mps` | `1.0` | 좌→우 횡단 객체 최소 속력 [m/s] |
 | `intersection_minimum_rightward_speed_mps` | `0.5` | 에고 기준 오른쪽 방향 최소 횡속도 [m/s] |
-| `intersection_right_pass_clearance_m` | `0.2` | NPC BBox가 에고 우측 경계를 벗어난 뒤 요구하는 추가 여유 [m] |
 | `merge_available_topic` | `/perception/merge_gap/available` | 왼쪽 차선 끼어들기 가능 토픽 |
 | `merge_unavailable_topic` | `/perception/merge_gap/unavailable` | 왼쪽 차선 끼어들기 불가능 토픽 |
 | `merge_adjacent_obstacle_topic` | `/perception/merge_gap/left_lane_obstacles` | 끼어들기 판단 중 왼쪽 옆 차선 객체 상태 배열 |
