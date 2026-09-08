@@ -1,0 +1,82 @@
+<launch>
+  <!-- MORAI UDP + EKF + existing LiDAR tracker + new Frenet FSM controller. -->
+  <arg name="workspace_path" default="$(env HOME)/morai_ws" />
+  <arg name="path_file" default="$(find morai_bringup)/../../../data/routes/2026_molit_comp_global_path.txt" />
+  <arg name="bind_ip" default="0.0.0.0" />
+  <arg name="morai_host_ip" default="192.168.0.148" />
+  <arg name="control_remote_port" default="9093" />
+  <arg name="target_speed_mps" default="2.0" />
+  <arg name="avoidance_speed_mps" default="2.0" />
+  <arg name="return_speed_mps" default="2.0" />
+  <arg name="lidar_x_m" default="0.0" />
+  <arg name="lidar_y_m" default="0.0" />
+  <arg name="lidar_yaw_deg" default="0.0" />
+  <arg name="enable_control" default="false" />
+  <arg name="rviz" default="true" />
+
+  <!-- Keep all existing transport/localization/tracking nodes.  Critically,
+       disable control in the old Pure Pursuit node so it cannot also publish
+       active CtrlCmd messages. -->
+  <include file="$(find morai_bringup)/launch/morai_udp_ekf_purepursuit_lidar_tracking.launch">
+    <arg name="workspace_path" value="$(arg workspace_path)" />
+    <arg name="path_file" value="$(arg path_file)" />
+    <arg name="bind_ip" value="$(arg bind_ip)" />
+    <arg name="morai_host_ip" value="$(arg morai_host_ip)" />
+    <arg name="control_remote_port" value="$(arg control_remote_port)" />
+    <arg name="target_speed_mps" value="$(arg target_speed_mps)" />
+    <arg name="lidar_x_m" value="$(arg lidar_x_m)" />
+    <arg name="lidar_y_m" value="$(arg lidar_y_m)" />
+    <arg name="lidar_yaw_deg" value="$(arg lidar_yaw_deg)" />
+    <arg name="enable_control" value="false" />
+    <arg name="rviz" value="$(arg rviz)" />
+  </include>
+
+  <node pkg="purepursuit_mgeo"
+        type="frenet_fsm_node.py"
+        name="frenet_fsm_controller"
+        output="screen">
+    <param name="path_file" value="$(arg path_file)" />
+    <param name="enable_control" value="$(arg enable_control)" />
+    <param name="normal_speed_mps" value="$(arg target_speed_mps)" />
+    <param name="avoidance_speed_mps" value="$(arg avoidance_speed_mps)" />
+    <param name="return_speed_mps" value="$(arg return_speed_mps)" />
+
+    <param name="odometry_topic" value="/localization/odometry" />
+    <param name="obstacle_topic" value="/detection/obstacle_states" />
+    <param name="pedestrian_stop_topic" value="/perception/pedestrian_crossing/stop_required" />
+    <param name="command_topic" value="/ctrl_cmd" />
+    <param name="map_frame" value="map" />
+
+    <param name="wheelbase_m" value="3.0" />
+    <param name="vehicle_length_m" value="4.635" />
+    <param name="vehicle_width_m" value="1.892" />
+    <!-- Verify this against the selected MORAI vehicle model if available. -->
+    <param name="rear_axle_to_center_m" value="1.35" />
+    <param name="lane_width_m" value="3.5" />
+    <param name="safety_margin_m" value="0.3" />
+
+    <param name="control_rate_hz" value="20.0" />
+    <param name="planning_rate_hz" value="5.0" />
+    <param name="lookahead_min_m" value="4.0" />
+    <param name="lookahead_gain" value="0.35" />
+    <!-- RETURN does not generate a second Frenet path.  It follows a point
+         ahead of the nearest MGeo index with this gentler Pure Pursuit. -->
+    <param name="return_lookahead_min_m" value="8.0" />
+    <param name="return_lookahead_gain" value="0.50" />
+    <param name="max_steering_rad" value="0.6981317" />
+    <param name="steering_sign" value="1.0" />
+
+    <param name="obstacle_trigger_distance_m" value="30.0" />
+    <param name="obstacle_rear_distance_m" value="3.0" />
+    <param name="obstacle_stale_timeout_s" value="0.6" />
+    <param name="require_obstacle_topic" value="true" />
+    <param name="clear_hold_s" value="1.5" />
+    <param name="return_tolerance_m" value="0.30" />
+
+    <!-- Frenet d > 0 is left of the MGeo path direction.  Remove any offset
+         that is not a legal/drivable lane in the actual MORAI map. -->
+    <param name="preferred_avoidance_side" value="left" />
+    <rosparam param="avoidance_offsets_m">[1.0, -1.0, 2.0, -2.0, 3.0, -3.0, 4.0, -4.0, 5.0, -5.0, 6.0, -6.0, 7.0, -7.0]</rosparam>
+    <rosparam param="planning_times_s">[2.0, 3.0, 4.0]</rosparam>
+  </node>
+</launch>
