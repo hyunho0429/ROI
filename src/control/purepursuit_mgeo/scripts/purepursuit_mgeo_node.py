@@ -1,15 +1,25 @@
 #!/usr/bin/env python3
-"""MGeo local ENU pose를 이용해 MORAI CtrlCmd Pure Pursuit를 실행한다."""
+"""Sensor-team Pure Pursuit + managed path + merge-gate integration.
+
+Preserves the sensor team's steering geometry and longlCmdType=1 pedal control.
+Adds only:
+* Path Manager active-path input with stale fail-safe;
+* Path Manager avoidance stop OR;
+* roundabout/generic merge stop OR;
+* optional scenario-specific suppression of the generic intersection stop only
+  after the merge gate has explicitly committed GO.
+"""
 
 from __future__ import annotations
 
 import math
-from typing import Optional
+import threading
+from typing import List, Optional
 
 import rospy
 from geometry_msgs.msg import PointStamped
 from morai_msgs.msg import CtrlCmd
-from nav_msgs.msg import Odometry
+from nav_msgs.msg import Odometry, Path as RosPath
 from path_planning.longitudinal_controller import PedalSpeedController
 from std_msgs.msg import Bool, Float64
 
@@ -32,15 +42,14 @@ class PurePursuitNode:
         self.target_speed = float(rospy.get_param("~target_speed_mps", 6.0))
         if self.target_speed < 0.0:
             raise ValueError("target_speed_mps must be zero or positive")
-        self.max_steering = float(
-            rospy.get_param("~max_steering_rad", math.radians(40.0))
-        )
+        self.max_steering = float(rospy.get_param("~max_steering_rad", math.radians(40.0)))
         self.rate_hz = float(rospy.get_param("~control_rate_hz", 20.0))
         self.enable_control = bool(rospy.get_param("~enable_control", False))
         self.longl_cmd_type = int(rospy.get_param("~longl_cmd_type", 1))
         self.steering_sign = float(rospy.get_param("~steering_sign", 1.0))
         if self.longl_cmd_type != 1:
             raise ValueError("competition rules require longl_cmd_type=1")
+
         self.speed_controller = PedalSpeedController(
             kp=float(rospy.get_param("~speed_kp", 0.075)),
             ki=float(rospy.get_param("~speed_ki", 0.0001)),
@@ -62,97 +71,191 @@ class PurePursuitNode:
             goal_tolerance,
             self.steering_sign,
         )
+        self.controller_lock = threading.RLock()
 
         self.pose_topic = rospy.get_param("~pose_topic", "/localization/odometry")
         self.command_topic = rospy.get_param("~command_topic", "/ctrl_cmd")
         self.lookahead_topic = rospy.get_param("~lookahead_topic", "/control/lookahead_point")
         self.pedestrian_stop_topic = rospy.get_param(
-            "~pedestrian_stop_topic",
-            "/perception/pedestrian_crossing/stop_required",
+            "~pedestrian_stop_topic", "/perception/pedestrian_crossing/stop_required"
         )
         self.traffic_light_stop_topic = rospy.get_param(
-            "~traffic_light_stop_topic",
-            "/perception/traffic_light/stop_required",
+            "~traffic_light_stop_topic", "/perception/traffic_light/stop_required"
         )
         self.intersection_stop_topic = rospy.get_param(
-            "~intersection_stop_topic",
-            "/perception/intersection/driving_unavailable",
+            "~intersection_stop_topic", "/perception/intersection/driving_unavailable"
         )
         self.map_frame = rospy.get_param("~map_frame", "map")
+
+        # Avoidance Path Manager integration.
+        self.use_active_path = bool(rospy.get_param("~use_active_path", False))
+        self.active_path_topic = rospy.get_param(
+            "~active_path_topic", "/avoidance_path_manager/active_path"
+        )
+        self.require_path_manager_status = bool(
+            rospy.get_param("~require_path_manager_status", False)
+        )
+        self.stop_required_topic = rospy.get_param(
+            "~stop_required_topic", "/avoidance_path_manager/stop_required"
+        )
+        self.managed_timeout_s = float(rospy.get_param("~managed_timeout_s", 2.0))
+
+        # Roundabout / generic yield merge gate.
+        self.enable_merge_gate = bool(rospy.get_param("~enable_merge_gate", False))
+        self.merge_stop_topic = rospy.get_param(
+            "~merge_stop_topic", "/roundabout_merge_gate/stop_required"
+        )
+        self.merge_allowed_topic = rospy.get_param(
+            "~merge_allowed_topic", "/roundabout_merge_gate/allowed"
+        )
+        self.merge_request_topic = rospy.get_param(
+            "~merge_request_topic", "/planning/merge_request"
+        )
+        self.merge_gate_timeout_s = float(rospy.get_param("~merge_gate_timeout_s", 0.8))
+        self.roundabout_override_intersection_stop = bool(
+            rospy.get_param("~roundabout_override_intersection_stop", False)
+        )
+
         self.latest_odom: Optional[Odometry] = None
         self.pedestrian_stop_required = False
         self.traffic_light_stop_required = False
         self.intersection_stop_required = False
 
+        self.active_path_received = False
+        self.active_path_at: Optional[rospy.Time] = None
+        self.path_manager_stop = True if self.require_path_manager_status else False
+        self.path_manager_status_at: Optional[rospy.Time] = None
+
+        self.merge_requested = False
+        self.merge_stop_required = False
+        self.merge_allowed = False
+        self.merge_gate_at: Optional[rospy.Time] = None
+        self.merge_request_at: Optional[rospy.Time] = None
+
         rospy.Subscriber(self.pose_topic, Odometry, self.odom_callback, queue_size=10)
-        rospy.Subscriber(
-            self.pedestrian_stop_topic,
-            Bool,
-            self.pedestrian_stop_callback,
-            queue_size=1,
-        )
-        rospy.Subscriber(
-            self.traffic_light_stop_topic,
-            Bool,
-            self.traffic_light_stop_callback,
-            queue_size=1,
-        )
-        rospy.Subscriber(
-            self.intersection_stop_topic,
-            Bool,
-            self.intersection_stop_callback,
-            queue_size=1,
-        )
+        rospy.Subscriber(self.pedestrian_stop_topic, Bool, self.pedestrian_stop_callback, queue_size=1)
+        rospy.Subscriber(self.traffic_light_stop_topic, Bool, self.traffic_light_stop_callback, queue_size=1)
+        rospy.Subscriber(self.intersection_stop_topic, Bool, self.intersection_stop_callback, queue_size=1)
+        if self.use_active_path:
+            rospy.Subscriber(self.active_path_topic, RosPath, self.active_path_callback, queue_size=1)
+        if self.require_path_manager_status:
+            rospy.Subscriber(self.stop_required_topic, Bool, self.stop_required_callback, queue_size=1)
+        if self.enable_merge_gate:
+            rospy.Subscriber(self.merge_stop_topic, Bool, self.merge_stop_callback, queue_size=1)
+            rospy.Subscriber(self.merge_allowed_topic, Bool, self.merge_allowed_callback, queue_size=1)
+            rospy.Subscriber(self.merge_request_topic, Bool, self.merge_request_callback, queue_size=1)
+
         self.command_pub = rospy.Publisher(self.command_topic, CtrlCmd, queue_size=1)
         self.lookahead_pub = rospy.Publisher(self.lookahead_topic, PointStamped, queue_size=1)
         self.steering_preview_pub = rospy.Publisher("/control/steering_preview", Float64, queue_size=1)
-        self.timer = rospy.Timer(rospy.Duration(1.0 / max(self.rate_hz, 1.0)), self.control_callback)
+        self.timer = rospy.Timer(
+            rospy.Duration(1.0 / max(self.rate_hz, 1.0)), self.control_callback
+        )
 
         rospy.logwarn(
-            "Pure Pursuit 제어=%s path=%s points=%d speed=%.2fm/s (%.1fkm/h) "
-            "wheelbase=%.3f lookahead_min=%.3f",
+            "Pure Pursuit FINAL control=%s speed=%.2fm/s path_points=%d managed_path=%s managed_stop=%s "
+            "merge_gate=%s roundabout_intersection_override=%s",
             self.enable_control,
-            path_file,
-            len(self.points),
             self.target_speed,
-            self.target_speed * 3.6,
-            wheelbase,
-            lookahead_min,
+            len(self.points),
+            self.use_active_path,
+            self.require_path_manager_status,
+            self.enable_merge_gate,
+            self.roundabout_override_intersection_stop,
         )
 
     def odom_callback(self, msg: Odometry) -> None:
         self.latest_odom = msg
 
     def pedestrian_stop_callback(self, msg: Bool) -> None:
-        previous = self.pedestrian_stop_required
         self.pedestrian_stop_required = bool(msg.data)
-        if self.pedestrian_stop_required != previous:
-            rospy.logwarn(
-                "Pedestrian crossing control: stop_required=%s",
-                self.pedestrian_stop_required,
-            )
 
     def traffic_light_stop_callback(self, msg: Bool) -> None:
-        previous = self.traffic_light_stop_required
         self.traffic_light_stop_required = bool(msg.data)
-        if self.traffic_light_stop_required != previous:
-            rospy.logwarn(
-                "Traffic-light control: stop_required=%s",
-                self.traffic_light_stop_required,
-            )
 
     def intersection_stop_callback(self, msg: Bool) -> None:
-        previous = self.intersection_stop_required
         self.intersection_stop_required = bool(msg.data)
-        if self.intersection_stop_required != previous:
-            rospy.logwarn(
-                "Intersection control: stop_required=%s",
-                self.intersection_stop_required,
+
+    def active_path_callback(self, msg: RosPath) -> None:
+        if msg.header.frame_id and msg.header.frame_id != self.map_frame:
+            rospy.logwarn_throttle(
+                2.0,
+                "active_path frame=%s ignored (expected %s)",
+                msg.header.frame_id,
+                self.map_frame,
             )
+            return
+        points: List[PathPoint] = [
+            PathPoint(
+                float(ps.pose.position.x),
+                float(ps.pose.position.y),
+                float(ps.pose.position.z),
+            )
+            for ps in msg.poses
+        ]
+        if len(points) < 2:
+            rospy.logwarn_throttle(2.0, "active_path has fewer than 2 points")
+            return
+        with self.controller_lock:
+            self.points = points
+            self.controller.points = points
+        self.active_path_received = True
+        self.active_path_at = rospy.Time.now()
+
+    def stop_required_callback(self, msg: Bool) -> None:
+        self.path_manager_stop = bool(msg.data)
+        self.path_manager_status_at = rospy.Time.now()
+
+    def merge_stop_callback(self, msg: Bool) -> None:
+        self.merge_stop_required = bool(msg.data)
+        self.merge_gate_at = rospy.Time.now()
+
+    def merge_allowed_callback(self, msg: Bool) -> None:
+        self.merge_allowed = bool(msg.data)
+        self.merge_gate_at = rospy.Time.now()
+
+    def merge_request_callback(self, msg: Bool) -> None:
+        self.merge_requested = bool(msg.data)
+        self.merge_request_at = rospy.Time.now()
+
+    def _managed_fault_reason(self, now: rospy.Time) -> Optional[str]:
+        if self.use_active_path:
+            if not self.active_path_received or self.active_path_at is None:
+                return "active_path_missing"
+            if (now - self.active_path_at).to_sec() > self.managed_timeout_s:
+                return "active_path_stale"
+        if self.require_path_manager_status:
+            if self.path_manager_status_at is None:
+                return "path_manager_status_missing"
+            if (now - self.path_manager_status_at).to_sec() > self.managed_timeout_s:
+                return "path_manager_status_stale"
+        return None
+
+    def _merge_gate_fresh(self, now: rospy.Time) -> bool:
+        if not self.enable_merge_gate or not self.merge_requested:
+            return True
+        if self.merge_gate_at is None:
+            return False
+        return (now - self.merge_gate_at).to_sec() <= self.merge_gate_timeout_s
 
     def control_callback(self, _event: rospy.timer.TimerEvent) -> None:
         if self.latest_odom is None:
             rospy.logwarn_throttle(5.0, "Pure Pursuit가 /localization/odometry를 기다리는 중이다.")
+            return
+
+        now = rospy.Time.now()
+        managed_fault = self._managed_fault_reason(now)
+        merge_fresh = self._merge_gate_fresh(now)
+        if managed_fault is not None or not merge_fresh:
+            if self.enable_control:
+                self.speed_controller.reset()
+                self.command_pub.publish(self.make_command(0.0, True, 0.0, 1.0))
+            self.steering_preview_pub.publish(Float64(0.0))
+            rospy.logwarn_throttle(
+                1.0,
+                "Pure Pursuit FAIL-SAFE STOP: %s",
+                managed_fault if managed_fault is not None else "merge_gate_stale",
+            )
             return
 
         pose = self.latest_odom.pose.pose
@@ -166,24 +269,45 @@ class PurePursuitNode:
             self.latest_odom.twist.twist.linear.x,
             self.latest_odom.twist.twist.linear.y,
         )
-        steering, stop, target, target_index, lookahead = self.controller.compute(
-            pose.position.x,
-            pose.position.y,
-            yaw,
-            speed,
-        )
+        with self.controller_lock:
+            steering, path_stop, target, target_index, lookahead = self.controller.compute(
+                pose.position.x,
+                pose.position.y,
+                yaw,
+                speed,
+            )
+            active_count = len(self.controller.points)
         steering = max(-self.max_steering, min(self.max_steering, steering))
-        now_sec = rospy.Time.now().to_sec()
-        path_stop = stop
+
+        avoidance_stop = self.path_manager_stop if self.require_path_manager_status else False
+        merge_stop = self.merge_stop_required if (self.enable_merge_gate and self.merge_requested) else False
+
+        # The sensor team's generic intersection detector may also fire at a
+        # roundabout. Never suppress it by default. When the mission layer has
+        # explicitly asserted merge_request AND the merge gate has latched GO,
+        # this optional override lets the dedicated roundabout gap logic own the
+        # entry decision. Pedestrian, traffic-light, avoidance and path stops are
+        # never overridden.
+        intersection_effective_stop = self.intersection_stop_required
+        if (
+            self.roundabout_override_intersection_stop
+            and self.enable_merge_gate
+            and self.merge_requested
+            and self.merge_allowed
+        ):
+            intersection_effective_stop = False
+
         stop = (
             path_stop
             or self.pedestrian_stop_required
             or self.traffic_light_stop_required
-            or self.intersection_stop_required
+            or intersection_effective_stop
+            or avoidance_stop
+            or merge_stop
         )
 
         target_msg = PointStamped()
-        target_msg.header.stamp = rospy.Time.now()
+        target_msg.header.stamp = now
         target_msg.header.frame_id = self.map_frame
         target_msg.point.x = target.x
         target_msg.point.y = target.y
@@ -191,24 +315,19 @@ class PurePursuitNode:
         self.lookahead_pub.publish(target_msg)
         self.steering_preview_pub.publish(Float64(steering))
 
+        now_sec = now.to_sec()
         if self.enable_control:
             if stop:
                 self.speed_controller.reset()
                 accel, brake = 0.0, 1.0
             else:
-                accel, brake = self.speed_controller.compute(
-                    self.target_speed,
-                    speed,
-                    now_sec,
-                )
-            command = self.make_command(steering, stop, accel, brake)
-            self.command_pub.publish(command)
+                accel, brake = self.speed_controller.compute(self.target_speed, speed, now_sec)
+            self.command_pub.publish(self.make_command(steering, stop, accel, brake))
 
         rospy.loginfo_throttle(
-            2.0,
-            "Pure Pursuit index=%d lookahead=%.2f steering=%.4f "
-            "stop=%s path_stop=%s pedestrian_stop=%s traffic_light_stop=%s "
-            "intersection_stop=%s",
+            1.0,
+            "PP idx=%d lookahead=%.2f steer=%.4f stop=%s path=%s ped=%s tl=%s int=%s->%s "
+            "avoid=%s merge(request=%s stop=%s allowed=%s) source=%s points=%d",
             target_index,
             lookahead,
             steering,
@@ -217,6 +336,13 @@ class PurePursuitNode:
             self.pedestrian_stop_required,
             self.traffic_light_stop_required,
             self.intersection_stop_required,
+            intersection_effective_stop,
+            avoidance_stop,
+            self.merge_requested,
+            merge_stop,
+            self.merge_allowed,
+            "active_path" if self.use_active_path else "path_file",
+            active_count,
         )
 
     def make_command(
@@ -236,9 +362,8 @@ class PurePursuitNode:
         if hasattr(command, "accel"):
             command.accel = 0.0 if stop else accel
         if hasattr(command, "acceleration"):
-            command.acceleration = 0.0 if stop else 0.0
+            command.acceleration = 0.0
         if hasattr(command, "velocity"):
-            # longlCmdType=1에서는 velocity 필드가 비활성이다.
             command.velocity = 0.0
         return command
 
