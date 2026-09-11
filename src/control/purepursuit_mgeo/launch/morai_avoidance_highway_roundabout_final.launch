@@ -241,10 +241,11 @@
     <param name="require_left_dashed" value="true" />
 
     <param name="change_start_m" value="3.0" />
-    <param name="change_min_length_m" value="22.0" />
-    <param name="change_max_length_m" value="26.0" />
-    <param name="change_time_s" value="5.5" />
+    <param name="change_min_length_m" value="28.0" />
+    <param name="change_max_length_m" value="32.0" />
+    <param name="change_time_s" value="7.0" />
     <param name="change_post_hold_m" value="10.0" />
+    <param name="change_settle_m" value="6.0" />
     <param name="max_lateral_accel_mps2" value="2.5" />
 
     <param name="front_min_gap_m" value="6.0" />
@@ -257,6 +258,9 @@
     <param name="follow_time_headway_s" value="1.6" />
     <param name="follow_gain" value="0.35" />
     <param name="follow_search_m" value="60.0" />
+    <param name="current_lane_center_gate_m" value="1.15" />
+    <param name="target_lane_center_gate_m" value="1.50" />
+    <param name="lead_overlap_tolerance_m" value="0.25" />
     <param name="emergency_gap_m" value="1.5" />
     <param name="emergency_ttc_s" value="1.0" />
 
