@@ -240,10 +240,11 @@
     <param name="lane_width_max_m" value="4.2" />
     <param name="require_left_dashed" value="true" />
 
-    <param name="change_start_m" value="2.0" />
-    <param name="change_min_length_m" value="14.0" />
-    <param name="change_max_length_m" value="18.0" />
-    <param name="change_time_s" value="3.0" />
+    <param name="change_start_m" value="3.0" />
+    <param name="change_min_length_m" value="22.0" />
+    <param name="change_max_length_m" value="26.0" />
+    <param name="change_time_s" value="5.5" />
+    <param name="change_post_hold_m" value="10.0" />
     <param name="max_lateral_accel_mps2" value="2.5" />
 
     <param name="front_min_gap_m" value="6.0" />
@@ -265,9 +266,12 @@
     <param name="collision_long_margin_m" value="0.50" />
     <param name="collision_lat_margin_m" value="0.35" />
 
-    <param name="release_global_d_m" value="0.90" />
-    <param name="release_confirm_s" value="1.0" />
+    <param name="release_global_d_m" value="0.55" />
+    <param name="release_confirm_s" value="0.6" />
     <param name="min_inner_hold_after_change_m" value="8.0" />
+    <param name="rejoin_start_global_d_m" value="1.80" />
+    <param name="rejoin_length_m" value="18.0" />
+    <param name="rejoin_complete_global_d_m" value="0.45" />
   </node>
 
   <!-- Roundabout gap logic remains separate from highway lane-change logic. -->
