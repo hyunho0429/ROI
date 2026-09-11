@@ -114,6 +114,7 @@ class HighwayLaneStrategyNode:
     WAIT_GAP = "WAIT_GAP"
     LANE_CHANGE = "LANE_CHANGE"
     INNER_HOLD = "INNER_HOLD"
+    REJOIN = "REJOIN"
     DONE = "DONE"
 
     def __init__(self) -> None:
@@ -157,10 +158,11 @@ class HighwayLaneStrategyNode:
         self.vehicle_width_m = float(rospy.get_param("~vehicle_width_m", 1.892))
         self.vehicle_center_from_base_m = float(rospy.get_param("~vehicle_center_from_base_m", 1.50))
 
-        self.change_start_m = float(rospy.get_param("~change_start_m", 2.0))
-        self.change_min_length_m = float(rospy.get_param("~change_min_length_m", 14.0))
-        self.change_max_length_m = float(rospy.get_param("~change_max_length_m", 18.0))
-        self.change_time_s = float(rospy.get_param("~change_time_s", 3.0))
+        self.change_start_m = float(rospy.get_param("~change_start_m", 3.0))
+        self.change_min_length_m = float(rospy.get_param("~change_min_length_m", 22.0))
+        self.change_max_length_m = float(rospy.get_param("~change_max_length_m", 26.0))
+        self.change_time_s = float(rospy.get_param("~change_time_s", 5.5))
+        self.change_post_hold_m = float(rospy.get_param("~change_post_hold_m", 10.0))
         self.change_complete_min_ratio = float(rospy.get_param("~change_complete_min_ratio", 0.72))
         self.change_center_error_m = float(rospy.get_param("~change_center_error_m", 0.45))
         self.change_heading_error_rad = float(rospy.get_param("~change_heading_error_rad", math.radians(10.0)))
@@ -171,6 +173,11 @@ class HighwayLaneStrategyNode:
         self.time_headway_s = float(rospy.get_param("~time_headway_s", 1.5))
         self.min_ttc_s = float(rospy.get_param("~min_ttc_s", 3.0))
         self.gap_search_range_m = float(rospy.get_param("~gap_search_range_m", 50.0))
+        # Lane-membership gates use obstacle CENTER distance from each lane center.
+        # The old footprint-style gate was ~3 m wide and could classify an
+        # adjacent-lane car as the current-lane lead, which caused false stops.
+        self.current_lane_center_gate_m = float(rospy.get_param("~current_lane_center_gate_m", 1.30))
+        self.target_lane_center_gate_m = float(rospy.get_param("~target_lane_center_gate_m", 1.50))
         self.target_lane_lateral_extra_m = float(rospy.get_param("~target_lane_lateral_extra_m", 0.35))
 
         self.follow_standstill_gap_m = float(rospy.get_param("~follow_standstill_gap_m", 4.0))
@@ -186,9 +193,12 @@ class HighwayLaneStrategyNode:
         self.collision_lat_margin_m = float(rospy.get_param("~collision_lat_margin_m", 0.35))
         self.max_lateral_accel_mps2 = float(rospy.get_param("~max_lateral_accel_mps2", 2.5))
 
-        self.release_global_d_m = float(rospy.get_param("~release_global_d_m", 0.9))
-        self.release_confirm_s = float(rospy.get_param("~release_confirm_s", 1.0))
+        self.release_global_d_m = float(rospy.get_param("~release_global_d_m", 0.55))
+        self.release_confirm_s = float(rospy.get_param("~release_confirm_s", 0.6))
         self.min_inner_hold_after_change_m = float(rospy.get_param("~min_inner_hold_after_change_m", 8.0))
+        self.rejoin_start_global_d_m = float(rospy.get_param("~rejoin_start_global_d_m", 1.8))
+        self.rejoin_length_m = float(rospy.get_param("~rejoin_length_m", 18.0))
+        self.rejoin_complete_global_d_m = float(rospy.get_param("~rejoin_complete_global_d_m", 0.45))
 
         self.latest_base_path: Optional[RosPath] = None
         self.base_path_at: Optional[rospy.Time] = None
@@ -218,6 +228,9 @@ class HighwayLaneStrategyNode:
         self.committed_path: Optional[RosPath] = None
         self.committed_speed_mps = self.cruise_speed_mps
         self.committed_change_length_m = self.change_min_length_m
+        self.committed_rejoin_path: Optional[RosPath] = None
+        self.rejoin_travel_m = 0.0
+        self.last_rejoin_xy: Optional[Tuple[float, float]] = None
         self.change_travel_m = 0.0
         self.last_change_xy: Optional[Tuple[float, float]] = None
         self.inner_hold_travel_m = 0.0
@@ -365,9 +378,77 @@ class HighwayLaneStrategyNode:
             msg.poses.append(ps)
         return msg
 
+    def _extend_local_polyline(self, points: Sequence[Tuple[float, float]], target_length_m: float) -> List[Tuple[float, float]]:
+        pts = list(points)
+        if len(pts) < 2:
+            return pts
+        arc = polyline_arclength(pts)
+        if arc[-1] >= target_length_m:
+            return pts
+        tx, ty = tangent_at(pts, len(pts)-1)
+        x, y = pts[-1]
+        remain = target_length_m - arc[-1]
+        step = 1.0
+        while remain > 1e-6:
+            ds = min(step, remain)
+            x += tx * ds
+            y += ty * ds
+            pts.append((x, y))
+            remain -= ds
+        return pts
+
+    def _path_map_to_local(self, path: Optional[RosPath]) -> List[Tuple[float, float]]:
+        if path is None or self.latest_odom is None:
+            return []
+        ex, ey, yaw, _ = self._odom_pose()
+        c, s = math.cos(yaw), math.sin(yaw)
+        out: List[Tuple[float, float]] = [(0.0, 0.0)]
+        for ps in path.poses:
+            dx = float(ps.pose.position.x) - ex
+            dy = float(ps.pose.position.y) - ey
+            x = c*dx + s*dy
+            y = -s*dx + c*dy
+            if x > 0.5 and math.isfinite(x) and math.isfinite(y):
+                out.append((x, y))
+        out.sort(key=lambda q: q[0])
+        dedup: List[Tuple[float, float]] = []
+        for q in out:
+            if not dedup or math.hypot(q[0]-dedup[-1][0], q[1]-dedup[-1][1]) > 0.15:
+                dedup.append(q)
+        return dedup
+
+    def _generate_rejoin_path(self, now: rospy.Time) -> Optional[RosPath]:
+        """Blend the camera lane centerline into the base/global path smoothly.
+
+        Rejoin starts only when the two physical lanes are already close, so a
+        local-y quintic blend is enough and avoids a hard path-source switch.
+        """
+        inner = self._centerline_local()
+        base = self._path_map_to_local(self.latest_base_path)
+        if len(inner) < 3 or len(base) < 3:
+            return None
+        target_len = max(self.rejoin_length_m + 10.0, 30.0)
+        inner = self._extend_local_polyline(inner, target_len)
+        base = self._extend_local_polyline(base, target_len)
+        arc = polyline_arclength(inner)
+        blended: List[Tuple[float, float]] = []
+        for i, (x, yi) in enumerate(inner):
+            yb = interp_y(base, x)
+            if yb is None:
+                yb = yi
+            u = (arc[i] - 1.5) / max(self.rejoin_length_m, 1e-6)
+            w = smoothstep5(u)
+            blended.append((x, (1.0-w)*yi + w*yb))
+        return self._local_to_map(blended, now)
+
     def _generate_lane_change_local(self, lane_width: float, speed_mps: float) -> Tuple[List[Tuple[float, float]], float]:
         base = self._centerline_local()
         length = clamp(max(speed_mps, 1.0) * self.change_time_s, self.change_min_length_m, self.change_max_length_m)
+        # Camera centerline ends at ~25 m. Extend only its final tangent so the
+        # quintic lane change can be longer and still give Pure Pursuit a stable
+        # post-change segment to follow.
+        target_len = self.change_start_m + length + self.change_post_hold_m
+        base = self._extend_local_polyline(base, target_len)
         arc = polyline_arclength(base)
         shifted: List[Tuple[float, float]] = []
         for i, (x, y) in enumerate(base):
@@ -410,7 +491,10 @@ class HighwayLaneStrategyNode:
             if cy is None:
                 cy = 0.0
             target_y = cy + lane_width
-            allowance = 0.5 * lane_width + 0.5 * o.width + self.target_lane_lateral_extra_m
+            # Center-to-center lane membership.  The previous footprint-style
+            # allowance (~3 m for a normal lane/car) could mix current- and
+            # target-lane vehicles.
+            allowance = self.target_lane_center_gate_m
             if abs(o.y - target_y) > allowance:
                 continue
             considered.append(o)
@@ -470,7 +554,7 @@ class HighwayLaneStrategyNode:
             max_k = max(max_k, k)
         return speed_mps*speed_mps*max_k <= self.max_lateral_accel_mps2 + 1e-6, max_k
 
-    def _dynamic_path_safe(self, path: RosPath, candidate_speed: float) -> Tuple[bool, str]:
+    def _dynamic_path_safe(self, path: RosPath, candidate_speed: float, max_arc_m: Optional[float] = None) -> Tuple[bool, str]:
         if self.latest_obstacles is None or len(path.poses) < 3:
             return False, "no_obstacles_or_short_path"
         # Arc length / time along the ego base_link path.
@@ -484,6 +568,8 @@ class HighwayLaneStrategyNode:
         for i, ps in enumerate(path.poses):
             if i == 0:
                 continue
+            if max_arc_m is not None and arc[i] > max_arc_m:
+                break
             p = ps.pose.position
             p0 = path.poses[max(0, i-1)].pose.position
             p1 = path.poses[min(len(path.poses)-1, i+1)].pose.position
@@ -546,7 +632,9 @@ class HighwayLaneStrategyNode:
             curv_ok, max_k = self._path_curvature_ok(local, v)
             gap_ok, gap_reason, gap_diag = self._gap_safe_for_speed(v, width, length)
             path = self._local_to_map(local, now)
-            dyn_ok, dyn_reason = self._dynamic_path_safe(path, v)
+            dyn_ok, dyn_reason = self._dynamic_path_safe(
+                path, v, self.change_start_m + length + 4.0
+            )
             diagnostics[str(v)] = {"curvature": round(max_k,5), "gap": gap_diag, "gap_reason": gap_reason, "dyn": dyn_reason}
             if curv_ok and gap_ok and dyn_ok:
                 return path, v, length, "ok", diagnostics
@@ -565,7 +653,10 @@ class HighwayLaneStrategyNode:
             cy = interp_y(center, clamp(o.x, 0.0, 25.0))
             if cy is None:
                 cy = 0.0
-            if abs(o.y - cy) > 0.5*lane_width + 0.5*o.width + 0.25:
+            # Strict current-lane center gate.  Adjacent-lane vehicles must
+            # never trigger emergency following/stop while ego is still in the
+            # current lane.
+            if abs(o.y - cy) > self.current_lane_center_gate_m:
                 continue
             gap = o.x - (self.vehicle_center_from_base_m + 0.5*self.vehicle_length_m) - 0.5*o.length
             if best_gap is None or gap < best_gap:
@@ -716,6 +807,10 @@ class HighwayLaneStrategyNode:
             if self.last_hold_xy is not None:
                 self.inner_hold_travel_m += math.hypot(ex-self.last_hold_xy[0], ey-self.last_hold_xy[1])
             self.last_hold_xy = (ex,ey)
+        elif self.state == self.REJOIN:
+            if self.last_rejoin_xy is not None:
+                self.rejoin_travel_m += math.hypot(ex-self.last_rejoin_xy[0], ey-self.last_rejoin_xy[1])
+            self.last_rejoin_xy = (ex,ey)
 
         if self.completed_once and self.state != self.DONE:
             self.state = self.DONE
@@ -783,7 +878,13 @@ class HighwayLaneStrategyNode:
             head = None if self.lane_info is None else self.lane_info.get("heading_error_rad")
             progressed = self.change_travel_m >= self.change_complete_min_ratio*self.committed_change_length_m
             centered = lane_ok and lat is not None and head is not None and abs(float(lat)) <= self.change_center_error_m and abs(float(head)) <= self.change_heading_error_rad
-            if progressed and centered:
+            fallback_complete = (
+                self.change_travel_m >= 1.05*self.committed_change_length_m
+                and lane_ok
+                and head is not None
+                and abs(float(head)) <= math.radians(15.0)
+            )
+            if (progressed and centered) or fallback_complete:
                 if self.complete_since is None:
                     self.complete_since = now
                 elif (now-self.complete_since).to_sec() >= self.change_complete_confirm_s:
@@ -796,7 +897,7 @@ class HighwayLaneStrategyNode:
             else:
                 self.complete_since = None
 
-            self._publish(self.committed_path, stop, speed, True, {"reason":lane_reason, "travel_m":round(self.change_travel_m,2), "progressed":progressed, "centered":centered, "follow":follow}, now, dt)
+            self._publish(self.committed_path, stop, speed, True, {"reason":lane_reason, "travel_m":round(self.change_travel_m,2), "progressed":progressed, "centered":centered, "fallback_complete":fallback_complete, "follow":follow}, now, dt)
             return
 
         if self.state == self.INNER_HOLD:
@@ -828,25 +929,69 @@ class HighwayLaneStrategyNode:
                     self.ready_since = None
 
             global_d = self._global_signed_d()
-            can_release = (
+            can_start_rejoin = (
+                self.lane_changes_done >= self.target_left_lane_changes
+                and self.inner_hold_travel_m >= self.min_inner_hold_after_change_m
+                and global_d is not None
+                and abs(global_d) <= self.rejoin_start_global_d_m
+                and lane_ok
+                and base_fresh
+            )
+            if can_start_rejoin:
+                rejoin = self._generate_rejoin_path(now)
+                if rejoin is not None:
+                    self.committed_rejoin_path = rejoin
+                    self.rejoin_travel_m = 0.0
+                    self.last_rejoin_xy = (ex, ey)
+                    self.release_since = None
+                    self.state = self.REJOIN
+                    rospy.logwarn("HIGHWAY REJOIN COMMITTED global_d=%.2f length=%.1f", global_d, self.rejoin_length_m)
+                    self._publish(rejoin, False, adaptive, True, {"reason":"rejoin_committed", "global_d":round(global_d,2), "follow":follow}, now, dt)
+                    return
+
+            # Failsafe direct release only when the two paths are already almost
+            # coincident. This also prevents a lane-info dropout at the physical
+            # merge from stopping the car forever.
+            can_direct_release = (
                 self.lane_changes_done >= self.target_left_lane_changes
                 and self.inner_hold_travel_m >= self.min_inner_hold_after_change_m
                 and global_d is not None
                 and abs(global_d) <= self.release_global_d_m
+                and base_fresh
             )
-            if can_release:
+            if can_direct_release:
                 if self.release_since is None:
                     self.release_since = now
                 elif (now-self.release_since).to_sec() >= self.release_confirm_s:
                     self.completed_once = True
                     self.state = self.DONE
-                    self._publish(self.latest_base_path if base_fresh else path, (not base_fresh) or (not base_stop_fresh) or self.base_stop, adaptive, False, {"reason":"lanes_converged_release", "global_d":global_d, "follow":follow}, now, dt)
-                    rospy.logwarn("HIGHWAY strategy DONE: global path convergence d=%.2f", global_d)
+                    self._publish(self.latest_base_path, (not base_stop_fresh) or self.base_stop, adaptive, False, {"reason":"direct_release_near_global", "global_d":global_d, "follow":follow}, now, dt)
+                    rospy.logwarn("HIGHWAY strategy DONE: direct global release d=%.2f", global_d)
                     return
             else:
                 self.release_since = None
 
             self._publish(path, stop, adaptive, True, {"reason":lane_reason, "global_d":None if global_d is None else round(global_d,2), "inner_hold_travel_m":round(self.inner_hold_travel_m,2), "follow":follow}, now, dt)
+            return
+
+        if self.state == self.REJOIN:
+            adaptive, emergency, follow = self._adaptive_speed(self.cruise_speed_mps) if obs_fresh and self.lane_info is not None else (self.cruise_speed_mps, False, {})
+            global_d = self._global_signed_d()
+            stop = emergency or not obs_fresh or self.committed_rejoin_path is None
+            close_enough = global_d is not None and abs(global_d) <= self.rejoin_complete_global_d_m
+            progressed = self.rejoin_travel_m >= 0.65*self.rejoin_length_m
+            if (progressed or close_enough) and base_fresh:
+                if self.release_since is None:
+                    self.release_since = now
+                elif (now-self.release_since).to_sec() >= self.release_confirm_s:
+                    self.completed_once = True
+                    self.state = self.DONE
+                    self._publish(self.latest_base_path, (not base_stop_fresh) or self.base_stop, adaptive, False, {"reason":"rejoin_complete", "global_d":global_d, "travel_m":round(self.rejoin_travel_m,2), "follow":follow}, now, dt)
+                    rospy.logwarn("HIGHWAY REJOIN COMPLETE global_d=%s travel=%.1f", "n/a" if global_d is None else "%.2f" % global_d, self.rejoin_travel_m)
+                    return
+            else:
+                self.release_since = None
+            self._publish(self.committed_rejoin_path, stop, adaptive, True, {"reason":"rejoining", "global_d":None if global_d is None else round(global_d,2), "travel_m":round(self.rejoin_travel_m,2), "progressed":progressed, "follow":follow}, now, dt)
             return
 
 
