@@ -197,6 +197,13 @@ class AvoidanceFrenetDebugNode:
         self.trigger_lateral_margin_m = float(
             rospy.get_param("~trigger_lateral_margin_m", 0.35)
         )
+        # Threat gating should not let noisy obstacle yaw rotate a long vehicle
+        # into an unrealistically wide lateral envelope.  Full OBB geometry is
+        # still used later for candidate collision checking; this cap applies
+        # only to deciding whether an object belongs to the ego-path corridor.
+        self.trigger_lateral_half_cap_m = float(
+            rospy.get_param("~trigger_lateral_half_cap_m", 1.25)
+        )
 
         self.start_distances_m = _parse_float_list(
             rospy.get_param("~lane_change_start_distances_m", [3.0, 7.0, 11.0]),
@@ -875,7 +882,10 @@ class AvoidanceFrenetDebugNode:
             longitudinal_half = 0.5 * (abs_cos * length + abs_sin * width)
             lateral_half = 0.5 * (abs_sin * length + abs_cos * width)
             near_edge = rel_s - longitudinal_half - ego_front_from_base_m
-            lateral_limit = ego_half_width_m + lateral_half + self.trigger_lateral_margin_m
+            trigger_lateral_half = lateral_half
+            if self.trigger_lateral_half_cap_m > 0.0:
+                trigger_lateral_half = min(trigger_lateral_half, self.trigger_lateral_half_cap_m)
+            lateral_limit = ego_half_width_m + trigger_lateral_half + self.trigger_lateral_margin_m
             lateral_overlap = abs(projection.d) <= lateral_limit
             ahead_or_overlapping = rel_s + longitudinal_half >= -0.5 * self.vehicle_length_m
             within_range = near_edge <= self.trigger_distance_m
