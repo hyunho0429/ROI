@@ -75,6 +75,8 @@
     <arg name="morai_host_ip" value="$(arg morai_host_ip)" />
     <arg name="target_speed_mps" value="$(arg target_speed_mps)" />
     <arg name="enable_control" value="$(arg enable_control)" />
+    <!-- One UDP consumer only: live_lane_info_publisher_v2.py owns MORAI lane port 1101. -->
+    <arg name="enable_lane" value="false" />
   </include>
 
   <!-- Launch the camera team's EXISTING lane-info publisher without modifying it.
@@ -85,6 +87,22 @@
         name="lane_info_runner"
         output="screen"
         args="--ip $(arg lane_info_ip) --port $(arg lane_info_port) --checkpoint $(arg lane_info_checkpoint) --cam-set $(arg lane_info_cam_set) --device $(arg lane_info_device) --every $(arg lane_info_every) --topic $(arg lane_info_topic)" />
+
+  <!-- Republish the camera team's semantic lane topics from lane_info JSON.
+       This replaces the second live_overlay inference process without changing camera-team source files. -->
+  <node pkg="purepursuit_mgeo"
+        type="lane_info_semantic_adapter.py"
+        name="lane_info_semantic_adapter"
+        output="screen">
+    <param name="lane_info_topic" value="$(arg lane_info_topic)" />
+    <param name="dashed_lane_topic" value="/perception/camera/dashed_lane_detected" />
+    <param name="left_solid_lane_topic" value="/perception/camera/left_solid_lane_detected" />
+    <param name="left_yellow_solid_lane_topic" value="/perception/camera/left_yellow_solid_lane_detected" />
+    <param name="right_solid_lane_topic" value="/perception/camera/right_solid_lane_detected" />
+    <param name="stopline_detected_topic" value="/perception/camera/stopline_detected" />
+    <param name="stopline_distance_topic" value="/perception/camera/stopline_distance_m" />
+    <param name="stale_timeout_s" value="0.75" />
+  </node>
 
   <!-- Base F6.3 obstacle planner: no MGeo lane-change candidates. -->
   <include file="$(find purepursuit_mgeo)/launch/frenet_avoidance_debug.launch">
@@ -104,7 +122,7 @@
     <arg name="lidar_z_m" value="$(arg lidar_z_m)" />
     <arg name="lidar_yaw_deg" value="$(arg lidar_yaw_deg)" />
 
-    <arg name="bypass_lateral_margin_m" value="1.15" />
+    <arg name="bypass_lateral_margin_m" value="0.85" />
     <arg name="bypass_longitudinal_margin_m" value="3.0" />
     <arg name="bypass_departure_length_m" value="14.0" />
     <arg name="bypass_return_length_m" value="14.0" />
