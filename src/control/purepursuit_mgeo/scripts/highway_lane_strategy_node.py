@@ -176,7 +176,7 @@ class HighwayLaneStrategyNode:
         # Lane-membership gates use obstacle CENTER distance from each lane center.
         # The old footprint-style gate was ~3 m wide and could classify an
         # adjacent-lane car as the current-lane lead, which caused false stops.
-        self.current_lane_center_gate_m = float(rospy.get_param("~current_lane_center_gate_m", 1.30))
+        self.current_lane_center_gate_m = float(rospy.get_param("~current_lane_center_gate_m", 1.15))
         self.target_lane_center_gate_m = float(rospy.get_param("~target_lane_center_gate_m", 1.50))
         self.target_lane_lateral_extra_m = float(rospy.get_param("~target_lane_lateral_extra_m", 0.35))
 
@@ -186,6 +186,8 @@ class HighwayLaneStrategyNode:
         self.follow_search_m = float(rospy.get_param("~follow_search_m", 60.0))
         self.emergency_gap_m = float(rospy.get_param("~emergency_gap_m", 1.5))
         self.emergency_ttc_s = float(rospy.get_param("~emergency_ttc_s", 1.0))
+        self.lead_overlap_tolerance_m = float(rospy.get_param("~lead_overlap_tolerance_m", 0.25))
+        self.change_settle_m = float(rospy.get_param("~change_settle_m", 6.0))
         self.speed_rise_mps2 = float(rospy.get_param("~speed_rise_mps2", 0.8))
         self.speed_fall_mps2 = float(rospy.get_param("~speed_fall_mps2", 1.8))
 
@@ -658,10 +660,17 @@ class HighwayLaneStrategyNode:
             # current lane.
             if abs(o.y - cy) > self.current_lane_center_gate_m:
                 continue
-            gap = o.x - (self.vehicle_center_from_base_m + 0.5*self.vehicle_length_m) - 0.5*o.length
+            # Lead following is bumper-to-bumper, not center-x based.  A vehicle
+            # whose rear bumper is still alongside/behind the ego front must not be
+            # treated as a front lead merely because its CENTER transformed to x>0.
+            ego_front_x = self.vehicle_center_from_base_m + 0.5*self.vehicle_length_m
+            obstacle_rear_x = o.x - 0.5*o.length
+            gap = obstacle_rear_x - ego_front_x
+            if gap < -self.lead_overlap_tolerance_m:
+                continue
             if best_gap is None or gap < best_gap:
                 closing = ego_speed - o.vx
-                ttc = gap/closing if closing > 0.05 and gap > 0.0 else float("inf")
+                ttc = max(gap, 0.0)/closing if closing > 0.05 else float("inf")
                 best, best_gap, best_ttc = o, gap, ttc
         return best, best_gap, best_ttc
 
@@ -778,6 +787,8 @@ class HighwayLaneStrategyNode:
         self.active_pub.publish(Bool(data=bool(active)))
         status.update({"state": self.state, "active": bool(active), "stop": bool(stop), "target_speed_mps": round(speed_out,2), "lane_changes_done": self.lane_changes_done})
         self.state_pub.publish(String(data=json.dumps(status, separators=(",", ":"))))
+        if stop:
+            rospy.logwarn_throttle(0.5, "HIGHWAY STOP state=%s reason=%s follow=%s", self.state, str(status.get("reason")), json.dumps(status.get("follow", {}), separators=(",", ":")))
 
     def _tick(self, _event) -> None:
         now = rospy.Time.now()
@@ -876,15 +887,21 @@ class HighwayLaneStrategyNode:
 
             lat = None if self.lane_info is None else self.lane_info.get("lateral_error_m")
             head = None if self.lane_info is None else self.lane_info.get("heading_error_rad")
-            progressed = self.change_travel_m >= self.change_complete_min_ratio*self.committed_change_length_m
+            transition_done = self.change_travel_m >= (self.change_start_m + self.committed_change_length_m)
+            settle_needed = self.change_start_m + self.committed_change_length_m + min(self.change_settle_m, self.change_post_hold_m)
+            settled = self.change_travel_m >= settle_needed
+            progressed = settled
             centered = lane_ok and lat is not None and head is not None and abs(float(lat)) <= self.change_center_error_m and abs(float(head)) <= self.change_heading_error_rad
+            # Do not switch from the committed quintic to the camera centerline
+            # immediately after lateral translation.  Keep several metres of the
+            # post-change straight segment so Pure Pursuit can settle first.
             fallback_complete = (
-                self.change_travel_m >= 1.05*self.committed_change_length_m
+                self.change_travel_m >= (self.change_start_m + self.committed_change_length_m + 0.9*self.change_post_hold_m)
                 and lane_ok
                 and head is not None
                 and abs(float(head)) <= math.radians(15.0)
             )
-            if (progressed and centered) or fallback_complete:
+            if (settled and centered) or fallback_complete:
                 if self.complete_since is None:
                     self.complete_since = now
                 elif (now-self.complete_since).to_sec() >= self.change_complete_confirm_s:
@@ -897,17 +914,28 @@ class HighwayLaneStrategyNode:
             else:
                 self.complete_since = None
 
-            self._publish(self.committed_path, stop, speed, True, {"reason":lane_reason, "travel_m":round(self.change_travel_m,2), "progressed":progressed, "centered":centered, "fallback_complete":fallback_complete, "follow":follow}, now, dt)
+            stop_reason = "lead_emergency" if emergency else ("obstacles_stale" if not obs_fresh else lane_reason)
+            self._publish(self.committed_path, stop, speed, True, {"reason":stop_reason, "travel_m":round(self.change_travel_m,2), "transition_done":transition_done, "settled":settled, "settle_needed_m":round(settle_needed,2), "progressed":progressed, "centered":centered, "fallback_complete":fallback_complete, "follow":follow}, now, dt)
             return
 
         if self.state == self.INNER_HOLD:
             lane_ok, lane_reason = self._lane_valid(now)
             if lane_ok:
-                local = self._centerline_local()
+                local = self._extend_local_polyline(self._centerline_local(), 40.0)
                 self.last_inner_path = self._local_to_map(local, now)
             path = self.last_inner_path
             adaptive, emergency, follow = self._adaptive_speed(self.cruise_speed_mps) if obs_fresh and lane_ok else (0.0, True, {})
             stop = emergency or not obs_fresh or not lane_ok or path is None
+            if emergency:
+                inner_reason = "lead_emergency"
+            elif not obs_fresh:
+                inner_reason = "obstacles_stale"
+            elif not lane_ok:
+                inner_reason = lane_reason
+            elif path is None:
+                inner_reason = "inner_path_missing"
+            else:
+                inner_reason = lane_reason
 
             # Optional repeated left changes for a >2-lane highway. Default is 1.
             if self.lane_changes_done < self.target_left_lane_changes:
@@ -971,7 +999,7 @@ class HighwayLaneStrategyNode:
             else:
                 self.release_since = None
 
-            self._publish(path, stop, adaptive, True, {"reason":lane_reason, "global_d":None if global_d is None else round(global_d,2), "inner_hold_travel_m":round(self.inner_hold_travel_m,2), "follow":follow}, now, dt)
+            self._publish(path, stop, adaptive, True, {"reason":inner_reason, "global_d":None if global_d is None else round(global_d,2), "inner_hold_travel_m":round(self.inner_hold_travel_m,2), "follow":follow}, now, dt)
             return
 
         if self.state == self.REJOIN:
