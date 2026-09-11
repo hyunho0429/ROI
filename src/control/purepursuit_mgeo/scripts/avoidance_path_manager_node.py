@@ -208,6 +208,22 @@ class AvoidancePathManager:
             rospy.get_param("~guard_refresh_min_interval_s", 0.20)
         )
 
+        # Transient-obstacle release: if a bypass was committed while the ego is
+        # still essentially on the global route (for example, a pedestrian is
+        # crossing while the vehicle is stopped), do not keep following the old
+        # detour after the planner says the threat is gone.  We deliberately do
+        # NOT snap back from a large lateral offset; once the vehicle has actually
+        # departed, the committed maneuver remains locked until it safely returns.
+        self.cancel_cleared_bypass_near_global = bool(
+            rospy.get_param("~cancel_cleared_bypass_near_global", True)
+        )
+        self.threat_clear_confirm_s = float(
+            rospy.get_param("~threat_clear_confirm_s", 0.40)
+        )
+        self.threat_clear_max_abs_d_m = float(
+            rospy.get_param("~threat_clear_max_abs_d_m", 0.55)
+        )
+
         global_points = load_mgeo_path(path_file)
         self.reference = ReferencePath(global_points)
         self.closed_loop_endpoint_tolerance_m = float(
@@ -250,6 +266,7 @@ class AvoidancePathManager:
         self.guard_collision_started_at: Optional[rospy.Time] = None
         self.last_guard_refresh_at: Optional[rospy.Time] = None
         self.guard_refresh_count = 0
+        self.threat_clear_started_at: Optional[rospy.Time] = None
 
         self.active_path_pub = rospy.Publisher("~active_path", RosPath, queue_size=1)
         self.committed_path_pub = rospy.Publisher(
@@ -572,6 +589,7 @@ class AvoidancePathManager:
         self.has_departed_global = False
         self.max_abs_global_d = 0.0
         self.last_guard_collision_id = None
+        self.threat_clear_started_at = None
         self.state = (
             self.AVOIDING_LANE_CHANGE
             if self.commit_kind == "lane_change"
@@ -634,6 +652,7 @@ class AvoidancePathManager:
         self.guard_refresh_count += 1
         self.last_guard_collision_id = None
         self.guard_collision_started_at = None
+        self.threat_clear_started_at = None
         self.committed_path_pub.publish(self._ros_path(self.committed_points))
         rospy.logwarn(
             "MANEUVER REFRESH same-side=%s count=%d points=%d length=%.1fm",
@@ -666,6 +685,7 @@ class AvoidancePathManager:
         self.guard_collision_started_at = None
         self.last_guard_refresh_at = None
         self.guard_refresh_count = 0
+        self.threat_clear_started_at = None
         self.committed_path_pub.publish(self._ros_path([]))
 
     def _obstacle_boxes(self) -> List[ObstacleBox]:
@@ -724,6 +744,7 @@ class AvoidancePathManager:
         guard_collision_id = None
         guard_collision_distance_m = None
         guard_block_age_s = None
+        threat_clear_age_s = None
 
         if self.committed_points:
             remaining, _nearest, fraction, rem_dist = self._remaining_committed(x, y)
@@ -736,7 +757,49 @@ class AvoidancePathManager:
             if abs_d >= self.departure_detect_d_m:
                 self.has_departed_global = True
 
-            if not sensors_fresh:
+            # A pedestrian / other transient object may disappear while the ego
+            # is still stopped on the original route.  The old logic kept the
+            # frozen committed bypass until the full maneuver completed, which
+            # made the car drive an obsolete detour after the crossing cleared.
+            # Confirm the threat-clear signal briefly, then cancel ONLY while we
+            # are still close enough to the global route to switch back without a
+            # lateral snap.
+            cancelled_cleared_commit = False
+            if self.avoidance_required:
+                self.threat_clear_started_at = None
+            else:
+                if self.threat_clear_started_at is None:
+                    self.threat_clear_started_at = now
+                threat_clear_age_s = max(
+                    0.0, (now - self.threat_clear_started_at).to_sec()
+                )
+
+            can_cancel_cleared = (
+                self.cancel_cleared_bypass_near_global
+                and self.commit_kind == "bypass"
+                and not self.avoidance_required
+                and sensors_fresh
+                and threat_clear_age_s is not None
+                and threat_clear_age_s >= self.threat_clear_confirm_s
+                and abs_d <= self.threat_clear_max_abs_d_m
+            )
+
+            if can_cancel_cleared:
+                rospy.logwarn(
+                    "BYPASS CANCELLED: threat cleared before meaningful departure "
+                    "(d=%+.2f clear_age=%.2fs)",
+                    ego_projection.d,
+                    threat_clear_age_s,
+                )
+                self._clear_commit()
+                self.state = self.NORMAL
+                active_source = "global"
+                remaining = self._normal_path(ego_projection)
+                remaining_fraction = None
+                remaining_distance = None
+                stop_required = False
+                cancelled_cleared_commit = True
+            elif not sensors_fresh:
                 self.state = self.AVOIDING_SENSOR_STOP
                 stop_required = True
             else:
@@ -814,7 +877,11 @@ class AvoidancePathManager:
                 )
             )
 
-            if (returned_to_global or near_committed_end) and not stop_required:
+            if (
+                not cancelled_cleared_commit
+                and (returned_to_global or near_committed_end)
+                and not stop_required
+            ):
                 rospy.logwarn(
                     "MANEUVER COMPLETE kind=%s: returned to global (d=%+.2f heading_err=%.1fdeg progress=%.0f%%)",
                     self.commit_kind or "-",
@@ -911,6 +978,13 @@ class AvoidancePathManager:
                     else None
                 ),
                 "guard_refresh_count": self.guard_refresh_count,
+                "threat_clear_age_s": (
+                    round(threat_clear_age_s, 3)
+                    if threat_clear_age_s is not None
+                    else None
+                ),
+                "threat_clear_confirm_s": self.threat_clear_confirm_s,
+                "threat_clear_max_abs_d_m": self.threat_clear_max_abs_d_m,
                 "escape_prefix_m": self.escape_prefix_m,
             },
         }
