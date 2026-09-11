@@ -18,9 +18,16 @@
   <arg name="target_speed_mps" default="2.0" />
   <arg name="managed_timeout_s" default="1.0" />
 
-  <!-- Camera team's files are NOT modified or copied by this package.
-       This stack only subscribes to their existing lane_info output. -->
+  <!-- Camera-team source files remain UNCHANGED.  Our wrapper only launches
+       their existing live_lane_info_publisher_v2.py so lane_info is available. -->
+  <arg name="enable_lane_info_publisher" default="true" />
   <arg name="lane_info_topic" default="/perception/camera/lane_info" />
+  <arg name="lane_info_ip" default="0.0.0.0" />
+  <arg name="lane_info_port" default="1101" />
+  <arg name="lane_info_checkpoint" default="$(find camera_perception)/lane/lane_seg_best.pt" />
+  <arg name="lane_info_cam_set" default="$(find camera_perception)/lane/cam_set.json" />
+  <arg name="lane_info_device" default="auto" />
+  <arg name="lane_info_every" default="1" />
   <arg name="highway_environment_topic" default="/perception/camera/highway_environment" />
   <arg name="highway_request_topic" default="/planning/highway_lane_change_request" />
   <arg name="target_left_lane_changes" default="1" />
@@ -70,6 +77,15 @@
     <arg name="enable_control" value="$(arg enable_control)" />
   </include>
 
+  <!-- Launch the camera team's EXISTING lane-info publisher without modifying it.
+       The canonical camera launch above does not publish /perception/camera/lane_info. -->
+  <node if="$(arg enable_lane_info_publisher)"
+        pkg="purepursuit_mgeo"
+        type="lane_info_runner.py"
+        name="lane_info_runner"
+        output="screen"
+        args="--ip $(arg lane_info_ip) --port $(arg lane_info_port) --checkpoint $(arg lane_info_checkpoint) --cam-set $(arg lane_info_cam_set) --device $(arg lane_info_device) --every $(arg lane_info_every) --topic $(arg lane_info_topic)" />
+
   <!-- Base F6.3 obstacle planner: no MGeo lane-change candidates. -->
   <include file="$(find purepursuit_mgeo)/launch/frenet_avoidance_debug.launch">
     <arg name="path_file" value="$(arg path_file)" />
@@ -77,7 +93,8 @@
     <arg name="evaluation_speed_mps" value="$(arg target_speed_mps)" />
     <arg name="local_length_m" value="55.0" />
     <arg name="trigger_distance_m" value="35.0" />
-    <arg name="trigger_lateral_margin_m" value="0.35" />
+    <arg name="trigger_lateral_margin_m" value="0.05" />
+    <arg name="trigger_lateral_half_cap_m" value="1.25" />
     <arg name="candidate_corridor_margin_m" value="0.45" />
     <arg name="enable_mgeo_lane_candidates" value="false" />
     <arg name="allow_bypass_with_adjacent_lane" value="true" />
@@ -166,6 +183,12 @@
     <param name="allow_same_side_guard_refresh" value="true" />
     <param name="guard_stop_confirm_s" value="0.30" />
     <param name="guard_refresh_min_interval_s" value="0.20" />
+    <!-- Transient obstacle (e.g. pedestrian) cleared before the ego leaves the
+         global route: discard the obsolete committed detour after a short
+         confirmation instead of driving it anyway. -->
+    <param name="cancel_cleared_bypass_near_global" value="true" />
+    <param name="threat_clear_confirm_s" value="0.40" />
+    <param name="threat_clear_max_abs_d_m" value="0.55" />
   </node>
 
   <!-- Highway strategy:
@@ -187,6 +210,7 @@
     <param name="highway_request_topic" value="$(arg highway_request_topic)" />
     <param name="merge_available_topic" value="/perception/merge_gap/available" />
     <param name="merge_unavailable_topic" value="/perception/merge_gap/unavailable" />
+    <param name="mission_request_bypass_sensor_merge_gate" value="true" />
 
     <param name="cruise_speed_mps" value="$(arg target_speed_mps)" />
     <param name="target_left_lane_changes" value="$(arg target_left_lane_changes)" />
