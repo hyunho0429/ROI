@@ -143,6 +143,9 @@ class HighwayLaneStrategyNode:
         self.obstacle_timeout_s = float(rospy.get_param("~obstacle_timeout_s", 0.6))
         self.base_timeout_s = float(rospy.get_param("~base_timeout_s", 0.8))
         self.merge_timeout_s = float(rospy.get_param("~merge_timeout_s", 0.8))
+        self.mission_request_bypass_sensor_merge_gate = bool(
+            rospy.get_param("~mission_request_bypass_sensor_merge_gate", True)
+        )
 
         self.min_lane_confidence = float(rospy.get_param("~min_lane_confidence", 0.45))
         self.lane_width_min_m = float(rospy.get_param("~lane_width_min_m", 2.7))
@@ -511,10 +514,20 @@ class HighwayLaneStrategyNode:
         dashed, dreason = self._left_dashed_ok()
         if not dashed:
             return None, None, None, dreason, {}
-        if not self._fresh(self.merge_at, self.merge_timeout_s, now):
-            return None, None, None, "merge_gap_stale", {}
-        if self.merge_unavailable or not self.merge_available:
-            return None, None, None, "sensor_merge_gap_unavailable", {}
+        # The sensor-team merge-gap node is itself gated by
+        # /perception/camera/highway_environment.  Therefore an explicit mission
+        # request would otherwise deadlock whenever that upstream highway gate is
+        # false.  Under an explicit request we may skip only that upstream veto;
+        # the lane-change still must pass this node's own LiDAR front/rear gap,
+        # TTC, predicted-collision, curvature and dashed-line checks below.
+        use_sensor_merge_gate = not (
+            self.highway_request and self.mission_request_bypass_sensor_merge_gate
+        )
+        if use_sensor_merge_gate:
+            if not self._fresh(self.merge_at, self.merge_timeout_s, now):
+                return None, None, None, "merge_gap_stale", {}
+            if self.merge_unavailable or not self.merge_available:
+                return None, None, None, "sensor_merge_gap_unavailable", {}
         if not self._fresh(self.obstacles_at, self.obstacle_timeout_s, now):
             return None, None, None, "obstacles_stale", {}
 
