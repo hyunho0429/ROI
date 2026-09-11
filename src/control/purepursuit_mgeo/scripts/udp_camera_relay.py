@@ -20,7 +20,8 @@ def parse_args():
     ap.add_argument("--output-ports", default="1102,1103")
     ap.add_argument("--recv-buffer-bytes", type=int, default=4 * 1024 * 1024)
     ap.add_argument("--stats-period-s", type=float, default=5.0)
-    return ap.parse_args()
+    args, _unknown = ap.parse_known_args()
+    return args
 
 
 def main() -> None:
