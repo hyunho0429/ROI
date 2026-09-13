@@ -93,18 +93,36 @@ class DiagonalLaneChangeTest(unittest.TestCase):
         self.assertEqual(reason, 'ok')
         self.assertLess(abs(path.poses[1].pose.position.y), .03)
 
-    def test_camera_jump_is_held_without_right_steering(self):
+    def test_camera_jump_is_blended_without_delayed_stop(self):
         n = node_fixture()
         n._global_signed_d.return_value = 3.5
         n._centerline_local.return_value = [(0.0, 0.0)] + [(float(x), -0.8) for x in range(5, 26)]
         n._tick(None)
         path, stop, _, _, status, *_ = n._publish.call_args.args
         self.assertFalse(stop)
-        self.assertEqual(status['reason'], 'lane_grace_inner_path_jump')
-        self.assertTrue(all(p.pose.position.y == 0 for p in path.poses))
+        self.assertEqual(status['reason'], 'ok')
+        self.assertLess(abs(path.poses[1].pose.position.y), .01)
         n.lane_invalid_since = Stamp(98.0)
         n._tick(None)
-        self.assertTrue(n._publish.call_args.args[1])
+        self.assertFalse(n._publish.call_args.args[1])
+        self.assertIsNone(n.lane_invalid_since)
+
+    def test_allowed_handover_heading_does_not_reject_inner_path(self):
+        n = node_fixture()
+        n.last_inner_path = path_at(3.5)
+        n._odom_pose.return_value = (42.0, 3.5, math.radians(8.0), 2.0)
+        n._centerline_local.return_value = [(float(x), 0.0) for x in range(41)]
+        path, reason = n._filtered_inner_path(Stamp(), .05)
+        self.assertIsNotNone(path)
+        self.assertEqual(reason, 'limited')
+
+    def test_expired_committed_path_still_gets_continuous_inner_path(self):
+        n = node_fixture()
+        n.last_inner_path = path_at(3.5, end=5)
+        n._odom_pose.return_value = (6.0, 3.5, 0.0, 2.0)
+        n._centerline_local.return_value = [(float(x), 0.0) for x in range(41)]
+        path, _ = n._filtered_inner_path(Stamp(), .05)
+        self.assertGreater(len(path.poses), 20)
 
     def test_path_blending_accounts_for_vehicle_motion(self):
         n = node_fixture()

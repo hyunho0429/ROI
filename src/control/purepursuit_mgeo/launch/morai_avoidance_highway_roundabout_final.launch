@@ -257,6 +257,7 @@
     <param name="change_max_heading_deg" value="8.0" />
     <param name="inner_path_blend_time_s" value="1.0" />
     <param name="inner_path_max_jump_m" value="0.75" />
+    <param name="inner_path_join_length_m" value="18.0" />
     <param name="change_time_s" value="7.0" />
     <param name="change_post_hold_m" value="10.0" />
     <param name="change_settle_m" value="6.0" />

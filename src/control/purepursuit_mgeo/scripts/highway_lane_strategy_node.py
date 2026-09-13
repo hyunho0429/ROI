@@ -188,6 +188,7 @@ class HighwayLaneStrategyNode:
             raise ValueError("invalid diagonal lane-change ramp or heading limit")
         self.inner_path_blend_time_s = max(0.05, float(rospy.get_param("~inner_path_blend_time_s", 1.0)))
         self.inner_path_max_jump_m = float(rospy.get_param("~inner_path_max_jump_m", 0.75))
+        self.inner_path_join_length_m = float(rospy.get_param("~inner_path_join_length_m", 18.0))
         self.change_time_s = float(rospy.get_param("~change_time_s", 5.5))
         self.change_post_hold_m = float(rospy.get_param("~change_post_hold_m", 10.0))
         self.change_complete_min_ratio = float(rospy.get_param("~change_complete_min_ratio", 0.72))
@@ -618,20 +619,30 @@ class HighwayLaneStrategyNode:
     def _filtered_inner_path(self, now: rospy.Time, dt: float) -> Tuple[Optional[RosPath], str]:
         """Blend camera updates with the previous path in a common map frame.
 
-        Reject lane-identity jumps before they reach steering. Small accepted
-        corrections are spread over time, including the first post-change frame.
+        Corrections are spread over both distance and time. A large but valid
+        camera correction is rate-limited instead of rejecting the path and
+        eventually stopping at the finite committed-path endpoint.
         """
         camera = self._extend_local_polyline(self._centerline_local(), 40.0)
         previous = self._path_map_to_local(self.last_inner_path)
-        if len(camera) < 3 or len(previous) < 3:
-            return None, "inner_path_reference_short"
-        for x in (5.0, 8.0, 12.0):
-            if abs(interp_y(camera, x)-interp_y(previous, x)) > self.inner_path_max_jump_m:
-                return None, "inner_path_jump"
+        if len(camera) < 3:
+            return None, "inner_camera_path_short"
+        if len(previous) < 2:
+            # The committed path can have no remaining samples if hand-over is
+            # delayed near its endpoint. Continue from the current heading.
+            previous = [(0.0, 0.0), (1.0, 0.0)]
         previous = self._extend_local_polyline(previous, 40.0)
         alpha = 1.0-math.exp(-max(0.0, dt)/self.inner_path_blend_time_s)
-        blended = [(x, (1.0-alpha)*interp_y(previous, x)+alpha*y) for x, y in camera]
-        return self._local_to_map(blended, now), "ok"
+        limited = False
+        blended = []
+        for x, camera_y in camera:
+            previous_y = interp_y(previous, x)
+            delta = camera_y-previous_y
+            bounded_delta = clamp(delta, -self.inner_path_max_jump_m, self.inner_path_max_jump_m)
+            limited = limited or abs(delta) > self.inner_path_max_jump_m
+            spatial = smoothstep5((x-1.5)/max(self.inner_path_join_length_m, 1.0))
+            blended.append((x, previous_y+alpha*spatial*bounded_delta))
+        return self._local_to_map(blended, now), "limited" if limited else "ok"
 
     def _map_obstacles_local(self) -> List[LocalObstacle]:
         if self.latest_obstacles is None or self.latest_odom is None:
