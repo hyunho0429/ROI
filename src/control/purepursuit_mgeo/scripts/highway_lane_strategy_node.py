@@ -27,8 +27,10 @@ from __future__ import annotations
 
 import json
 import math
+from collections import deque
 from dataclasses import dataclass
-from typing import List, Optional, Sequence, Tuple
+from statistics import median
+from typing import Deque, Dict, List, Optional, Sequence, Tuple
 
 import rospy
 from geometry_msgs.msg import PoseStamped
@@ -172,6 +174,19 @@ class HighwayLaneStrategyNode:
             rospy.get_param("~inner_lane_grace_speed_mps", 1.50)
         )
 
+        # V7 lane-center stabilization.  The camera lane publisher already does
+        # its own EMA, but a lane-identity switch can still move the reported
+        # centerline by a large amount in a single frame.  Sample the geometry at
+        # fixed look-ahead x positions, use a short temporal median, then apply a
+        # second low-pass / slew limit before it is allowed to move the path.
+        self.center_filter_window = int(rospy.get_param("~center_filter_window", 5))
+        self.center_filter_alpha = float(rospy.get_param("~center_filter_alpha", 0.35))
+        self.center_filter_max_step_m = float(rospy.get_param("~center_filter_max_step_m", 0.16))
+        self.inner_path_blend_alpha = float(rospy.get_param("~inner_path_blend_alpha", 0.30))
+        self.inner_path_max_step_m = float(rospy.get_param("~inner_path_max_step_m", 0.10))
+        self.inner_recovery_timeout_s = float(rospy.get_param("~inner_recovery_timeout_s", 3.0))
+        self.center_sample_xs = (5.0, 7.5, 10.0, 12.5, 15.0, 17.5, 20.0, 22.5, 25.0)
+
         self.vehicle_length_m = float(rospy.get_param("~vehicle_length_m", 4.635))
         self.vehicle_width_m = float(rospy.get_param("~vehicle_width_m", 1.892))
         self.vehicle_center_from_base_m = float(rospy.get_param("~vehicle_center_from_base_m", 1.50))
@@ -275,6 +290,12 @@ class HighwayLaneStrategyNode:
         self.last_inner_path: Optional[RosPath] = None
         self.lane_invalid_since: Optional[rospy.Time] = None
 
+        self.center_sample_history: Deque[Dict[float, float]] = deque(
+            maxlen=max(3, self.center_filter_window)
+        )
+        self.filtered_center_y: Dict[float, float] = {}
+        self.last_good_center_local: Optional[List[Tuple[float, float]]] = None
+
         self.path_pub = rospy.Publisher("~active_path", RosPath, queue_size=1)
         self.stop_pub = rospy.Publisher("~stop_required", Bool, queue_size=1)
         self.speed_pub = rospy.Publisher("~target_speed_mps", Float64, queue_size=1)
@@ -293,7 +314,7 @@ class HighwayLaneStrategyNode:
 
         self.timer = rospy.Timer(rospy.Duration(1.0 / max(self.rate_hz, 1.0)), self._tick)
         rospy.logwarn(
-            "Highway lane strategy: event-based LEFT dashed re-arm, cruise=%.2f m/s; camera files are read-only inputs",
+            "Highway lane strategy V7: sampled lane-center + auto recovery + event LEFT dashed re-arm, cruise=%.2f m/s; camera files are read-only inputs",
             self.cruise_speed_mps,
         )
 
@@ -319,6 +340,13 @@ class HighwayLaneStrategyNode:
             if isinstance(data, dict):
                 self.lane_info = data
                 self.lane_info_at = rospy.Time.now()
+                # The committed lane-change path must not be contaminated by
+                # the camera detector switching which lane it calls "ego" while
+                # we are physically crossing the divider.  Freeze the temporal
+                # lane-center model during LANE_CHANGE and resume sampling after
+                # the maneuver.
+                if self.state != self.LANE_CHANGE:
+                    self._update_center_filter(data)
         except Exception as exc:
             rospy.logwarn_throttle(2.0, "lane_info JSON parse failed: %s", exc)
 
@@ -372,8 +400,8 @@ class HighwayLaneStrategyNode:
             return True, "ok"
         return False, "left_not_dashed"
 
-    def _centerline_local(self) -> List[Tuple[float, float]]:
-        raw = (self.lane_info or {}).get("centerline_points") or []
+    def _extract_centerline_local(self, data: Optional[dict] = None) -> List[Tuple[float, float]]:
+        raw = (data if data is not None else (self.lane_info or {})).get("centerline_points") or []
         pts: List[Tuple[float, float]] = [(0.0, 0.0)]
         for p in raw:
             try:
@@ -383,12 +411,107 @@ class HighwayLaneStrategyNode:
             if math.isfinite(x) and math.isfinite(y) and x > 0.5:
                 pts.append((x, y))
         pts.sort(key=lambda q: q[0])
-        # Remove near-duplicates.
         out: List[Tuple[float, float]] = []
         for p in pts:
             if not out or math.hypot(p[0]-out[-1][0], p[1]-out[-1][1]) > 0.15:
                 out.append(p)
         return out
+
+    def _update_center_filter(self, data: dict) -> None:
+        """Robustly sample/low-pass the camera centerline in base_link.
+
+        This is intentionally independent of lane_width: INNER_HOLD only needs
+        a stable centerline.  A passing vehicle can temporarily hide one
+        boundary and make lane_width unavailable even while the centerline is
+        still usable.
+        """
+        raw = self._extract_centerline_local(data)
+        if len(raw) < 3:
+            return
+
+        sample: Dict[float, float] = {}
+        for x in self.center_sample_xs:
+            y = interp_y(raw, x)
+            if y is not None and math.isfinite(float(y)):
+                sample[float(x)] = float(y)
+        if len(sample) < 3:
+            return
+        self.center_sample_history.append(sample)
+
+        for x in self.center_sample_xs:
+            vals = [f[x] for f in self.center_sample_history if x in f]
+            if not vals:
+                continue
+            robust = float(median(vals))
+            prev = self.filtered_center_y.get(x)
+            if prev is None:
+                self.filtered_center_y[x] = robust
+                continue
+            desired = prev + self.center_filter_alpha * (robust - prev)
+            step = clamp(desired - prev, -self.center_filter_max_step_m, self.center_filter_max_step_m)
+            self.filtered_center_y[x] = prev + step
+
+    def _centerline_local(self) -> List[Tuple[float, float]]:
+        # Prefer the temporally sampled centerline once at least three fixed-x
+        # samples are available.  Densify back to 1 m spacing so Pure Pursuit
+        # sees a smooth receding-horizon path rather than sparse camera points.
+        filt = sorted((x, y) for x, y in self.filtered_center_y.items())
+        if len(filt) >= 3:
+            sparse = [(0.0, 0.0)] + filt
+            out: List[Tuple[float, float]] = [(0.0, 0.0)]
+            x = 1.0
+            xmax = max(q[0] for q in sparse)
+            while x <= xmax + 1e-6:
+                y = interp_y(sparse, x)
+                if y is not None:
+                    out.append((x, float(y)))
+                x += 1.0
+            return out
+        return self._extract_centerline_local()
+
+    def _lane_hold_valid(self, now: rospy.Time) -> Tuple[bool, str]:
+        """Validity needed only to KEEP the current lane.
+
+        Unlike a new lane-change decision, holding the lane does not require a
+        measured lane_width.  This avoids permanent stops when an overtaking car
+        briefly occludes one boundary and the publisher switches to a one-sided
+        centerline estimate.
+        """
+        if self.lane_info is None or not self._fresh(self.lane_info_at, self.lane_info_timeout_s, now):
+            return False, "lane_info_missing_or_stale"
+        d = self.lane_info
+        if not bool(d.get("lane_valid", False)):
+            return False, "lane_invalid"
+        if float(d.get("confidence", 0.0) or 0.0) < self.min_lane_confidence:
+            return False, "lane_confidence"
+        heading = d.get("heading_error_rad")
+        if heading is None or abs(float(heading)) > self.max_heading_error_rad:
+            return False, "lane_heading"
+        if len(self._centerline_local()) < 3:
+            return False, "centerline_short"
+        return True, "ok"
+
+    def _smooth_inner_path(self, target_local: Sequence[Tuple[float, float]], now: rospy.Time) -> Optional[RosPath]:
+        target = self._extend_local_polyline(target_local, 45.0)
+        if len(target) < 3:
+            return None
+        prev = self._path_map_to_local(self.last_inner_path)
+        if len(prev) < 3:
+            return self._local_to_map(target, now)
+
+        blended: List[Tuple[float, float]] = []
+        for x, y in target:
+            if x <= 0.1:
+                blended.append((0.0, 0.0))
+                continue
+            py = interp_y(prev, x)
+            if py is None:
+                blended.append((x, y))
+                continue
+            desired = py + self.inner_path_blend_alpha * (y - py)
+            dy = clamp(desired - py, -self.inner_path_max_step_m, self.inner_path_max_step_m)
+            blended.append((x, py + dy))
+        return self._local_to_map(blended, now)
 
 
     def _boundary_local(self, key: str) -> List[Tuple[float, float]]:
@@ -856,6 +979,39 @@ class HighwayLaneStrategyNode:
             "desired_gap": round(desired,2),
         }
 
+    def _fallback_front_emergency(self) -> Tuple[bool, dict]:
+        """Minimal collision guard for temporary lane-camera dropouts.
+
+        When lane geometry is unavailable we do not try to do normal car
+        following, but we still must not creep into an object directly in front
+        of the ego vehicle.  This guard is intentionally narrow and only latches
+        for the current tick; it clears automatically when the object clears.
+        """
+        if self.latest_odom is None:
+            return True, {"reason": "no_odom"}
+        _, _, _, ego_speed = self._odom_pose()
+        ego_front_x = self.vehicle_center_from_base_m + 0.5*self.vehicle_length_m
+        best = None
+        for o in self._map_obstacles_local():
+            if o.x <= 0.0 or abs(o.y) > 1.8:
+                continue
+            gap = (o.x - 0.5*o.length) - ego_front_x
+            closing = ego_speed - o.vx
+            ttc = max(gap, 0.0)/closing if closing > 0.05 else float("inf")
+            if best is None or gap < best[1]:
+                best = (o, gap, ttc)
+        if best is None:
+            return False, {"lead": None}
+        o, gap, ttc = best
+        emergency = gap < self.emergency_gap_m or (math.isfinite(ttc) and ttc < self.emergency_ttc_s)
+        return emergency, {
+            "lead": o.oid,
+            "gap": round(gap, 2),
+            "lead_v": round(o.vx, 2),
+            "ttc": None if not math.isfinite(ttc) else round(ttc, 2),
+            "fallback": True,
+        }
+
     def _limit_speed_rate(self, target: float, dt: float) -> float:
         target = clamp(target, 0.0, self.cruise_speed_mps)
         if target > self.last_output_speed:
@@ -1070,7 +1226,10 @@ class HighwayLaneStrategyNode:
             return
 
         if self.state == self.INNER_HOLD:
-            lane_ok, lane_reason = self._lane_valid(now)
+            # Holding a lane needs a stable centerline, not a fresh two-sided
+            # lane-width estimate.  New lane-change decisions remain strict and
+            # still go through _lane_valid() + divider/gap checks.
+            lane_ok, lane_reason = self._lane_hold_valid(now)
             center_ok = False
             center_y = None
             if lane_ok:
@@ -1080,28 +1239,47 @@ class HighwayLaneStrategyNode:
                     lane_reason = center_reason
 
             if lane_ok:
-                local = self._extend_local_polyline(self._centerline_local(), 40.0)
-                self.last_inner_path = self._local_to_map(local, now)
+                local = self._extend_local_polyline(self._centerline_local(), 45.0)
+                smoothed = self._smooth_inner_path(local, now)
+                if smoothed is not None:
+                    self.last_inner_path = smoothed
+                    self.last_good_center_local = list(local)
                 self.lane_invalid_since = None
-            elif self.lane_invalid_since is None:
-                self.lane_invalid_since = now
+            else:
+                if self.lane_invalid_since is None:
+                    self.lane_invalid_since = now
+                # During a temporary camera occlusion, regenerate a receding
+                # horizon from the last good filtered lane model.  Do not keep
+                # driving toward the finite end of an old map-frame path.
+                age = (now-self.lane_invalid_since).to_sec()
+                if self.last_good_center_local is not None and age <= self.inner_recovery_timeout_s:
+                    recovery = self._smooth_inner_path(self.last_good_center_local, now)
+                    if recovery is not None:
+                        self.last_inner_path = recovery
 
             path = self.last_inner_path
+            invalid_age = 0.0 if self.lane_invalid_since is None else max(0.0, (now-self.lane_invalid_since).to_sec())
             lane_grace = (
                 not lane_ok
                 and path is not None
                 and self.lane_invalid_since is not None
-                and (now-self.lane_invalid_since).to_sec() <= self.inner_lane_invalid_grace_s
+                and invalid_age <= self.inner_recovery_timeout_s
             )
 
             if obs_fresh and lane_ok:
                 adaptive, emergency, follow = self._adaptive_speed(self.cruise_speed_mps)
+            elif obs_fresh and lane_grace:
+                emergency, follow = self._fallback_front_emergency()
+                adaptive = self.inner_lane_grace_speed_mps
             elif obs_fresh:
-                adaptive, emergency, follow = self.inner_lane_grace_speed_mps, False, {}
+                adaptive, emergency, follow = 0.0, False, {"lead": None}
             else:
                 adaptive, emergency, follow = 0.0, False, {}
 
             if emergency:
+                # This condition is recomputed every tick.  It is NOT latched:
+                # as soon as the fast passing/cut-in vehicle clears, target
+                # speed becomes positive again automatically.
                 stop = True
                 inner_reason = "lead_emergency"
             elif not obs_fresh:
@@ -1113,10 +1291,10 @@ class HighwayLaneStrategyNode:
             elif lane_grace:
                 stop = False
                 adaptive = min(adaptive, self.inner_lane_grace_speed_mps)
-                inner_reason = "lane_grace_" + lane_reason
+                inner_reason = "lane_recovery_" + lane_reason
             else:
                 stop = True
-                inner_reason = lane_reason
+                inner_reason = "lane_recovery_timeout_" + lane_reason
 
             # Event-based re-arm: do not count lane changes.  Once the ego has
             # settled in the new lane, the *current ego-left boundary* decides
@@ -1228,6 +1406,9 @@ class HighwayLaneStrategyNode:
                 "inner_hold_travel_m": round(self.inner_hold_travel_m,2),
                 "center_y8_m": None if center_y is None else round(center_y,3),
                 "lane_grace": lane_grace,
+                "lane_invalid_age_s": round(invalid_age,2),
+                "center_filter_ready": len(self.filtered_center_y) >= 3,
+                "center_filter_frames": len(self.center_sample_history),
                 "rearmed": rearmed,
                 "hold_elapsed_s": round(hold_elapsed_s,2),
                 "left_detected": left_detected,
