@@ -12,6 +12,7 @@ if PACKAGE_SRC not in sys.path:
 
 from lidar_perception.lidar_merge_gap import (
     MergeGapTracker,
+    align_tracks_to_road,
     assess_merge_gaps,
     assess_tracked_merge_gaps,
     format_merge_gap_status,
@@ -201,6 +202,33 @@ class LidarMergeGapTest(unittest.TestCase):
 
 
 class TrackedMergeGapTest(unittest.TestCase):
+    def test_road_alignment_excludes_outer_lane_while_ego_turns_left(self):
+        angle = math.radians(-8.0)
+        cosine = math.cos(angle)
+        sine = math.sin(angle)
+
+        def road_to_ego(track_id, road_x, road_y):
+            return _track(
+                track_id,
+                cosine*road_x-sine*road_y,
+                sine*road_x+cosine*road_y,
+            )
+
+        target = road_to_ego(1, 15.0, 3.5)
+        outer = road_to_ego(2, 15.0, 7.0)
+        # The body-aligned selector mistakenly overlaps the outer-lane box.
+        unaligned = _assess_tracks([outer])["left"]
+        self.assertEqual(unaligned["front_obstacle"]["track_id"], 2)
+
+        aligned_outer = _assess_tracks(
+            align_tracks_to_road([outer], angle)
+        )["left"]
+        self.assertIsNone(aligned_outer["front_obstacle"])
+        aligned_target = _assess_tracks(
+            align_tracks_to_road([target], angle)
+        )["left"]
+        self.assertEqual(aligned_target["front_obstacle"]["track_id"], 1)
+
     def test_accepts_static_front_and_rear_tracked_vehicles(self):
         left = _assess_tracks(
             [_track(1, 15.0, 3.5), _track(2, -15.0, 3.5)]

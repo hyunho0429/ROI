@@ -6,6 +6,38 @@ import math
 LANES = (("left", 1.0), ("right", -1.0))
 
 
+def align_tracks_to_road(tracks, road_heading_from_ego_rad):
+    """Rotate ego-frame tracked boxes into a road-heading coordinate frame."""
+    angle = float(road_heading_from_ego_rad)
+    if not math.isfinite(angle):
+        raise ValueError("road heading offset must be finite")
+    cosine = math.cos(angle)
+    sine = math.sin(angle)
+    aligned = []
+    for source in tracks:
+        track = dict(source)
+        x = float(source["center_x_m"])
+        y = float(source["center_y_m"])
+        vx = float(source.get("velocity_x_mps", 0.0))
+        vy = float(source.get("velocity_y_mps", 0.0))
+        size_x = max(0.0, float(source.get("size_x_m", 0.0)))
+        size_y = max(0.0, float(source.get("size_y_m", 0.0)))
+        values = (x, y, vx, vy, size_x, size_y)
+        if not all(math.isfinite(value) for value in values):
+            raise ValueError("tracked obstacle contains a non-finite value")
+        # Road axes are rotated by `angle` from the ego axes. Rotate points by
+        # -angle so a straight road does not follow the vehicle while it steers.
+        track["center_x_m"] = cosine*x + sine*y
+        track["center_y_m"] = -sine*x + cosine*y
+        track["velocity_x_mps"] = cosine*vx + sine*vy
+        track["velocity_y_mps"] = -sine*vx + cosine*vy
+        # Preserve the complete axis-aligned footprint after the rotation.
+        track["size_x_m"] = abs(cosine)*size_x + abs(sine)*size_y
+        track["size_y_m"] = abs(sine)*size_x + abs(cosine)*size_y
+        aligned.append(track)
+    return aligned
+
+
 def select_map_obstacles_in_adjacent_lane(
     obstacles,
     ego_x_map,

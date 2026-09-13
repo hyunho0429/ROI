@@ -173,6 +173,26 @@ class HighwaySafetyTest(unittest.TestCase):
         n._adaptive_speed = Mock(return_value=(2.0, False, {}))
         self.assertTrue(self.tick()[1])
 
+    def test_outer_lane_vehicle_does_not_stop_first_left_change(self):
+        n = self.node
+        n.state = n.LANE_CHANGE
+        diagonal = RosPath()
+        for x in range(41):
+            pose = PoseStamped()
+            pose.pose.position.x = float(x)
+            pose.pose.position.y = 3.5*min(1.0, float(x)/20.0)
+            diagonal.poses.append(pose)
+        n.committed_path = diagonal
+        n.latest_obstacles.obstacles = [obstacle(18.0, 7.0)]
+
+        speed, emergency, diagnostics = n._adaptive_speed(2.0)
+
+        self.assertFalse(emergency)
+        self.assertEqual(speed, 2.0)
+        self.assertIsNone(diagnostics["lead"])
+        self.assertEqual(diagnostics["reference"], "map_path")
+        self.assertEqual(n._dynamic_path_safe(diagonal,2.0),(True,"ok"))
+
     def test_single_boundary_can_hold_lane_but_cannot_authorize_change(self):
         n = self.node
         n._boundary_local = NODE.HighwayLaneStrategyNode._boundary_local.__get__(n)

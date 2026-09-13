@@ -14,6 +14,7 @@ from visualization_msgs.msg import Marker, MarkerArray
 from lidar_perception.msg import MergeGapObstacle, MergeGapObstacleArray
 from lidar_perception.lidar_merge_gap import (
     MergeGapTracker,
+    align_tracks_to_road,
     assess_tracked_merge_gaps,
     format_tracked_merge_gap_status,
     select_map_obstacles_in_adjacent_lane,
@@ -61,6 +62,10 @@ class MergeGapNode:
         self.odometry_topic = _param(
             "odometry_topic", "/localization/odometry"
         )
+        self.lane_info_topic = _param(
+            "lane_info_topic", "/perception/camera/lane_info"
+        )
+        self.lane_heading_hold_s = float(_param("lane_heading_hold_s", 5.0))
         self.highway_gate_required = bool(
             _param("highway_gate_required", False)
         )
@@ -96,6 +101,8 @@ class MergeGapNode:
             raise ValueError("highway_gate_timeout_s must be positive")
         if self.map_state_timeout_s <= 0.0:
             raise ValueError("map_state_timeout_s must be positive")
+        if self.lane_heading_hold_s <= 0.0:
+            raise ValueError("lane_heading_hold_s must be positive")
         self.confirmation = MergeGapTracker(confirmation_scans)
         self.last_input_at = None
         self.stale_published = False
@@ -108,6 +115,8 @@ class MergeGapNode:
         self.latest_obstacle_state_at = None
         self.latest_map_pose = None
         self.latest_map_pose_at = None
+        self.latest_road_yaw = None
+        self.latest_road_yaw_at = None
 
         self.result_publisher = rospy.Publisher(
             self.result_topic, String, queue_size=1
@@ -151,6 +160,12 @@ class MergeGapNode:
             Odometry,
             self._odometry_callback,
             queue_size=10,
+        )
+        self.lane_info_subscriber = rospy.Subscriber(
+            self.lane_info_topic,
+            String,
+            self._lane_info_callback,
+            queue_size=1,
         )
         self.stale_timer = rospy.Timer(
             rospy.Duration(min(0.2, 0.5 * self.stale_timeout_s)),
@@ -234,7 +249,49 @@ class MergeGapNode:
             self.latest_obstacle_state_stamp = timestamp
             self.latest_obstacle_state_at = time.monotonic()
 
-    def _publish_adjacent_obstacles(self, assessment):
+    def _lane_info_callback(self, message):
+        try:
+            payload = json.loads(message.data)
+            heading_error = payload.get("heading_error_rad")
+            if heading_error is None:
+                return
+            heading_error = float(heading_error)
+            if not math.isfinite(heading_error) or abs(heading_error) > 0.7:
+                raise ValueError("lane heading is invalid")
+        except (TypeError, ValueError, json.JSONDecodeError) as error:
+            rospy.logwarn_throttle(1.0, "Invalid lane heading: %s", error)
+            return
+        with self.map_state_lock:
+            if self.latest_map_pose is None:
+                return
+            ego_yaw = self.latest_map_pose[2]
+            self.latest_road_yaw = math.atan2(
+                math.sin(ego_yaw + heading_error),
+                math.cos(ego_yaw + heading_error),
+            )
+            self.latest_road_yaw_at = time.monotonic()
+
+    def _road_heading_reference(self):
+        now = time.monotonic()
+        with self.map_state_lock:
+            pose = self.latest_map_pose
+            road_yaw = self.latest_road_yaw
+            road_at = self.latest_road_yaw_at
+        if (
+            pose is None
+            or road_yaw is None
+            or road_at is None
+            or now-road_at > self.lane_heading_hold_s
+        ):
+            return 0.0, None
+        ego_yaw = pose[2]
+        relative = math.atan2(
+            math.sin(road_yaw-ego_yaw),
+            math.cos(road_yaw-ego_yaw),
+        )
+        return relative, road_yaw
+
+    def _publish_adjacent_obstacles(self, assessment, road_yaw=None):
         if not assessment.get("confirmed_available", False):
             return
 
@@ -276,7 +333,7 @@ class MergeGapNode:
                 states,
                 pose[0],
                 pose[1],
-                pose[2],
+                pose[2] if road_yaw is None else road_yaw,
                 "left",
                 self.lane_width_m,
                 self.vehicle_width_m,
@@ -361,8 +418,10 @@ class MergeGapNode:
             tracks = json.loads(message.data)
             if not isinstance(tracks, list):
                 raise ValueError("tracking result must be a JSON list")
+            road_heading_from_ego, road_yaw = self._road_heading_reference()
+            aligned_tracks = align_tracks_to_road(tracks, road_heading_from_ego)
             assessments = assess_tracked_merge_gaps(
-                tracks=tracks,
+                tracks=aligned_tracks,
                 vehicle_length_m=self.vehicle_length_m,
                 vehicle_width_m=self.vehicle_width_m,
                 vehicle_height_m=self.vehicle_height_m,
@@ -385,7 +444,9 @@ class MergeGapNode:
         )
         payload = {
             "valid": True,
-            "algorithm": "euclidean_bbox_kalman_hungarian_dynamic_gap",
+            "algorithm": "road_aligned_bbox_kalman_hungarian_dynamic_gap",
+            "road_heading_from_ego_rad": round(road_heading_from_ego, 4),
+            "road_heading_source": "camera_lane" if road_yaw is not None else "ego_fallback",
             "left": assessments["left"],
         }
         if self.highway_gate_required:
@@ -394,8 +455,10 @@ class MergeGapNode:
             String(data=json.dumps(_json_safe(payload), ensure_ascii=False))
         )
         self._publish_binary_states(assessments)
-        self._publish_adjacent_obstacles(assessments["left"])
-        self.marker_publisher.publish(self._markers(assessments))
+        self._publish_adjacent_obstacles(assessments["left"], road_yaw)
+        self.marker_publisher.publish(
+            self._markers(assessments, road_heading_from_ego)
+        )
         self.outputs_active = True
 
         left_text = format_tracked_merge_gap_status(assessments["left"])
@@ -465,7 +528,7 @@ class MergeGapNode:
     def _publish_invalid(self, reason):
         payload = {
             "valid": False,
-            "algorithm": "euclidean_bbox_kalman_hungarian_dynamic_gap",
+            "algorithm": "road_aligned_bbox_kalman_hungarian_dynamic_gap",
             "reason": reason,
             "left": {"confirmed_available": False},
         }
@@ -475,7 +538,7 @@ class MergeGapNode:
         delete.action = Marker.DELETEALL
         self.marker_publisher.publish(MarkerArray(markers=[delete]))
 
-    def _markers(self, assessments):
+    def _markers(self, assessments, road_heading_from_ego=0.0):
         stamp = rospy.Time.now()
         marker_array = MarkerArray()
         delete = Marker()
@@ -509,9 +572,15 @@ class MergeGapNode:
             corridor = self._base_marker(
                 stamp, "merge_gap_corridor", index, Marker.CUBE
             )
-            corridor.pose.position.x = 0.5 * (rear + front)
-            corridor.pose.position.y = assessment["lane_center_y_m"]
+            road_x = 0.5 * (rear + front)
+            road_y = assessment["lane_center_y_m"]
+            cosine = math.cos(road_heading_from_ego)
+            sine = math.sin(road_heading_from_ego)
+            corridor.pose.position.x = cosine*road_x - sine*road_y
+            corridor.pose.position.y = sine*road_x + cosine*road_y
             corridor.pose.position.z = 0.05
+            corridor.pose.orientation.z = math.sin(0.5*road_heading_from_ego)
+            corridor.pose.orientation.w = math.cos(0.5*road_heading_from_ego)
             corridor.scale.x = max(0.1, front - rear)
             corridor.scale.y = max(0.1, self.vehicle_width_m)
             corridor.scale.z = 0.1
@@ -526,8 +595,8 @@ class MergeGapNode:
             label = self._base_marker(
                 stamp, "merge_gap_labels", index, Marker.TEXT_VIEW_FACING
             )
-            label.pose.position.x = 0.0
-            label.pose.position.y = assessment["lane_center_y_m"]
+            label.pose.position.x = -sine*road_y
+            label.pose.position.y = cosine*road_y
             label.pose.position.z = 2.8
             label.scale.z = 0.55
             label.color.r, label.color.g, label.color.b, label.color.a = color
