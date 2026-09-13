@@ -174,16 +174,25 @@ class HighwayLaneStrategyNode:
             rospy.get_param("~inner_lane_grace_speed_mps", 1.50)
         )
 
-        # V7 lane-center stabilization.  The camera lane publisher already does
-        # its own EMA, but a lane-identity switch can still move the reported
-        # centerline by a large amount in a single frame.  Sample the geometry at
-        # fixed look-ahead x positions, use a short temporal median, then apply a
-        # second low-pass / slew limit before it is allowed to move the path.
-        self.center_filter_window = int(rospy.get_param("~center_filter_window", 5))
-        self.center_filter_alpha = float(rospy.get_param("~center_filter_alpha", 0.35))
-        self.center_filter_max_step_m = float(rospy.get_param("~center_filter_max_step_m", 0.16))
-        self.inner_path_blend_alpha = float(rospy.get_param("~inner_path_blend_alpha", 0.30))
-        self.inner_path_max_step_m = float(rospy.get_param("~inner_path_max_step_m", 0.10))
+        # V8 lane-hold stabilization.
+        #
+        # V7 stacked a temporal median + EMA + another path blend on top of the
+        # camera publisher's own EMA.  That suppresses one-frame spikes, but it
+        # also adds phase delay to a closed-loop lane-following controller: the
+        # ego moves left while the delayed center estimate still asks for left,
+        # then the same thing happens to the right.  The result can be a slow
+        # left/right weave even though steering no longer spikes.
+        #
+        # V8 therefore does NOT temporally average ego-frame y samples.  It uses
+        # only spatial smoothing inside the current camera frame, then stitches
+        # that new geometry into the already-committed MAP-frame path.  The next
+        # few metres remain physically fixed in the map; camera corrections are
+        # blended in only farther ahead.  This gives Pure Pursuit a stable near
+        # horizon without freezing the whole lane model.
+        self.inner_stitch_keep_m = float(rospy.get_param("~inner_stitch_keep_m", 7.0))
+        self.inner_stitch_blend_m = float(rospy.get_param("~inner_stitch_blend_m", 10.0))
+        self.inner_spatial_window = int(rospy.get_param("~inner_spatial_window", 3))
+        self.inner_spatial_max_dy_per_m = float(rospy.get_param("~inner_spatial_max_dy_per_m", 0.22))
         self.inner_recovery_timeout_s = float(rospy.get_param("~inner_recovery_timeout_s", 3.0))
         self.center_sample_xs = (5.0, 7.5, 10.0, 12.5, 15.0, 17.5, 20.0, 22.5, 25.0)
 
@@ -290,9 +299,9 @@ class HighwayLaneStrategyNode:
         self.last_inner_path: Optional[RosPath] = None
         self.lane_invalid_since: Optional[rospy.Time] = None
 
-        self.center_sample_history: Deque[Dict[float, float]] = deque(
-            maxlen=max(3, self.center_filter_window)
-        )
+        # Retained only for state diagnostics/backward compatibility.  V8 lane
+        # following itself is current-frame spatial + map-frame path stitching.
+        self.center_sample_history: Deque[Dict[float, float]] = deque(maxlen=3)
         self.filtered_center_y: Dict[float, float] = {}
         self.last_good_center_local: Optional[List[Tuple[float, float]]] = None
 
@@ -314,7 +323,7 @@ class HighwayLaneStrategyNode:
 
         self.timer = rospy.Timer(rospy.Duration(1.0 / max(self.rate_hz, 1.0)), self._tick)
         rospy.logwarn(
-            "Highway lane strategy V7: sampled lane-center + auto recovery + event LEFT dashed re-arm, cruise=%.2f m/s; camera files are read-only inputs",
+            "Highway lane strategy V8: map-stitched lane hold + auto recovery + event LEFT dashed re-arm, cruise=%.2f m/s; camera files are read-only inputs",
             self.cruise_speed_mps,
         )
 
@@ -418,56 +427,64 @@ class HighwayLaneStrategyNode:
         return out
 
     def _update_center_filter(self, data: dict) -> None:
-        """Robustly sample/low-pass the camera centerline in base_link.
-
-        This is intentionally independent of lane_width: INNER_HOLD only needs
-        a stable centerline.  A passing vehicle can temporarily hide one
-        boundary and make lane_width unavailable even while the centerline is
-        still usable.
-        """
+        """Keep a tiny diagnostic history only; V8 does no temporal y filtering."""
         raw = self._extract_centerline_local(data)
         if len(raw) < 3:
             return
-
         sample: Dict[float, float] = {}
         for x in self.center_sample_xs:
             y = interp_y(raw, x)
             if y is not None and math.isfinite(float(y)):
                 sample[float(x)] = float(y)
-        if len(sample) < 3:
-            return
-        self.center_sample_history.append(sample)
+        if sample:
+            self.center_sample_history.append(sample)
 
-        for x in self.center_sample_xs:
-            vals = [f[x] for f in self.center_sample_history if x in f]
-            if not vals:
-                continue
-            robust = float(median(vals))
-            prev = self.filtered_center_y.get(x)
-            if prev is None:
-                self.filtered_center_y[x] = robust
-                continue
-            desired = prev + self.center_filter_alpha * (robust - prev)
-            step = clamp(desired - prev, -self.center_filter_max_step_m, self.center_filter_max_step_m)
-            self.filtered_center_y[x] = prev + step
+    def _spatial_centerline_local(self) -> List[Tuple[float, float]]:
+        """Smooth only along x inside the newest camera frame.
+
+        This removes local waypoint wiggles without mixing ego-frame samples from
+        different times/poses.  The camera publisher already applies temporal EMA.
+        """
+        raw = self._extract_centerline_local()
+        if len(raw) < 3:
+            return raw
+
+        xs = []
+        x = 1.0
+        xmax = min(25.0, max(p[0] for p in raw))
+        while x <= xmax + 1e-6:
+            y = interp_y(raw, x)
+            if y is not None and math.isfinite(float(y)):
+                xs.append((x, float(y)))
+            x += 1.0
+        if len(xs) < 3:
+            return raw
+
+        # Odd spatial median window (default 3 samples == 3 m).  This is not a
+        # temporal filter, so it adds essentially no steering phase lag.
+        win = max(1, int(self.inner_spatial_window))
+        if win % 2 == 0:
+            win += 1
+        half = win // 2
+        med = []
+        for i, (x, _) in enumerate(xs):
+            lo = max(0, i-half)
+            hi = min(len(xs), i+half+1)
+            med.append((x, float(median([xs[j][1] for j in range(lo, hi)]))))
+
+        # Bound local slope so a bad far waypoint cannot create a sharp kink.
+        out: List[Tuple[float, float]] = [(0.0, 0.0)]
+        prev_x, prev_y = 0.0, 0.0
+        for x, y in med:
+            dx = max(1e-3, x-prev_x)
+            max_dy = self.inner_spatial_max_dy_per_m * dx
+            y = prev_y + clamp(y-prev_y, -max_dy, max_dy)
+            out.append((x, y))
+            prev_x, prev_y = x, y
+        return out
 
     def _centerline_local(self) -> List[Tuple[float, float]]:
-        # Prefer the temporally sampled centerline once at least three fixed-x
-        # samples are available.  Densify back to 1 m spacing so Pure Pursuit
-        # sees a smooth receding-horizon path rather than sparse camera points.
-        filt = sorted((x, y) for x, y in self.filtered_center_y.items())
-        if len(filt) >= 3:
-            sparse = [(0.0, 0.0)] + filt
-            out: List[Tuple[float, float]] = [(0.0, 0.0)]
-            x = 1.0
-            xmax = max(q[0] for q in sparse)
-            while x <= xmax + 1e-6:
-                y = interp_y(sparse, x)
-                if y is not None:
-                    out.append((x, float(y)))
-                x += 1.0
-            return out
-        return self._extract_centerline_local()
+        return self._spatial_centerline_local()
 
     def _lane_hold_valid(self, now: rospy.Time) -> Tuple[bool, str]:
         """Validity needed only to KEEP the current lane.
@@ -492,6 +509,15 @@ class HighwayLaneStrategyNode:
         return True, "ok"
 
     def _smooth_inner_path(self, target_local: Sequence[Tuple[float, float]], now: rospy.Time) -> Optional[RosPath]:
+        """Stitch current camera geometry into a stable map-frame near horizon.
+
+        Near field: keep the previously committed physical path.
+        Mid field: quintic blend previous path -> newest camera lane center.
+        Far field: use newest camera lane center directly.
+
+        This avoids temporal ego-frame filtering, which can create phase-lag
+        weaving in a feedback controller.
+        """
         target = self._extend_local_polyline(target_local, 45.0)
         if len(target) < 3:
             return None
@@ -499,19 +525,45 @@ class HighwayLaneStrategyNode:
         if len(prev) < 3:
             return self._local_to_map(target, now)
 
-        blended: List[Tuple[float, float]] = []
-        for x, y in target:
-            if x <= 0.1:
-                blended.append((0.0, 0.0))
+        keep = max(2.0, self.inner_stitch_keep_m)
+        blend_len = max(2.0, self.inner_stitch_blend_m)
+        blend_end = keep + blend_len
+        stitched: List[Tuple[float, float]] = [(0.0, 0.0)]
+
+        # Use 1 m x-spacing so the hand-off shape is deterministic.
+        x = 1.0
+        while x <= 45.0 + 1e-6:
+            yt = interp_y(target, x)
+            yp = interp_y(prev, x)
+            if yt is None and yp is None:
+                x += 1.0
                 continue
-            py = interp_y(prev, x)
-            if py is None:
-                blended.append((x, y))
-                continue
-            desired = py + self.inner_path_blend_alpha * (y - py)
-            dy = clamp(desired - py, -self.inner_path_max_step_m, self.inner_path_max_step_m)
-            blended.append((x, py + dy))
-        return self._local_to_map(blended, now)
+            if yp is None:
+                y = yt
+            elif yt is None:
+                y = yp
+            elif x <= keep:
+                y = yp
+            elif x >= blend_end:
+                y = yt
+            else:
+                u = (x-keep)/blend_len
+                w = smoothstep5(u)
+                y = (1.0-w)*yp + w*yt
+            stitched.append((x, float(y)))
+            x += 1.0
+
+        if len(stitched) < 3:
+            return None
+        return self._local_to_map(stitched, now)
+
+    def _recover_inner_path(self, now: rospy.Time) -> Optional[RosPath]:
+        """Advance the last physical map path during a temporary lane dropout."""
+        prev = self._path_map_to_local(self.last_inner_path)
+        if len(prev) < 3:
+            return self.last_inner_path
+        prev = self._extend_local_polyline(prev, 45.0)
+        return self._local_to_map(prev, now)
 
 
     def _boundary_local(self, key: str) -> List[Tuple[float, float]]:
@@ -1252,8 +1304,8 @@ class HighwayLaneStrategyNode:
                 # horizon from the last good filtered lane model.  Do not keep
                 # driving toward the finite end of an old map-frame path.
                 age = (now-self.lane_invalid_since).to_sec()
-                if self.last_good_center_local is not None and age <= self.inner_recovery_timeout_s:
-                    recovery = self._smooth_inner_path(self.last_good_center_local, now)
+                if self.last_inner_path is not None and age <= self.inner_recovery_timeout_s:
+                    recovery = self._recover_inner_path(now)
                     if recovery is not None:
                         self.last_inner_path = recovery
 
@@ -1407,8 +1459,11 @@ class HighwayLaneStrategyNode:
                 "center_y8_m": None if center_y is None else round(center_y,3),
                 "lane_grace": lane_grace,
                 "lane_invalid_age_s": round(invalid_age,2),
-                "center_filter_ready": len(self.filtered_center_y) >= 3,
+                "center_filter_ready": len(self._centerline_local()) >= 3,
                 "center_filter_frames": len(self.center_sample_history),
+                "lane_hold_mode": "map_stitched",
+                "stitch_keep_m": round(self.inner_stitch_keep_m,2),
+                "stitch_blend_m": round(self.inner_stitch_blend_m,2),
                 "rearmed": rearmed,
                 "hold_elapsed_s": round(hold_elapsed_s,2),
                 "left_detected": left_detected,
