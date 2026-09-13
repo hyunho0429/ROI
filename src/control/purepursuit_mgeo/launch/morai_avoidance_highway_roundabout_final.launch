@@ -246,6 +246,7 @@
     <param name="change_time_s" value="7.0" />
     <param name="change_post_hold_m" value="10.0" />
     <param name="change_settle_m" value="6.0" />
+    <param name="change_endpoint_guard_m" value="6.0" />
     <param name="max_lateral_accel_mps2" value="2.5" />
 
     <param name="front_min_gap_m" value="6.0" />
