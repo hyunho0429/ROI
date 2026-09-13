@@ -137,7 +137,8 @@ class HighwayLaneStrategyNode:
 
         self.cruise_speed_mps = float(rospy.get_param("~cruise_speed_mps", 6.0))
         self.rate_hz = float(rospy.get_param("~rate_hz", 20.0))
-        self.target_left_lane_changes = int(rospy.get_param("~target_left_lane_changes", 1))
+        self.target_left_lane_changes = max(1, min(2, int(rospy.get_param("~target_left_lane_changes", 2))))
+        self.min_lane_hold_before_next_change_m = float(rospy.get_param("~min_lane_hold_before_next_change_m", 8.0))
         self.highway_confirm_s = float(rospy.get_param("~highway_confirm_s", 0.5))
         self.ready_confirm_s = float(rospy.get_param("~ready_confirm_s", 0.5))
         self.lane_info_timeout_s = float(rospy.get_param("~lane_info_timeout_s", 0.6))
@@ -1109,6 +1110,7 @@ class HighwayLaneStrategyNode:
                     self.last_hold_xy = (ex,ey)
                     self.release_since = None
                     self.lane_invalid_since = None
+                    self.ready_since = None
                     self.last_inner_path = self.committed_path
                     why = "settled" if settled else "endpoint_guard"
                     rospy.logwarn(
@@ -1197,10 +1199,22 @@ class HighwayLaneStrategyNode:
                 stop = True
                 inner_reason = path_reason
 
-            # Optional repeated left changes for a >2-lane highway. Default is 1.
-            if not stop and self.lane_changes_done < self.target_left_lane_changes:
+            # Up to two changes. Follow and settle in each lane before starting
+            # a NEW uninterrupted gap confirmation; never reuse the first one.
+            lat = (self.lane_info or {}).get("lateral_error_m")
+            heading = (self.lane_info or {}).get("heading_error_rad")
+            settled_for_next = (
+                lane_ok and not stop
+                and self.inner_hold_travel_m >= self.min_lane_hold_before_next_change_m
+                and lat is not None and abs(float(lat)) <= self.change_center_error_m
+                and heading is not None and abs(float(heading)) <= self.change_heading_error_rad
+                and (self.lane_info or {}).get("output_status", "FRESH") == "FRESH"
+            )
+            next_change_pending = False
+            if settled_for_next and self.lane_changes_done < self.target_left_lane_changes:
                 p, v, length, reason, diag = self._choose_lane_change(now)
                 if p is not None:
+                    next_change_pending = True
                     if self.ready_since is None:
                         self.ready_since = now
                     elif (now-self.ready_since).to_sec() >= self.ready_confirm_s:
@@ -1210,15 +1224,19 @@ class HighwayLaneStrategyNode:
                         self.change_travel_m = 0.0
                         self.last_change_xy = (ex,ey)
                         self.complete_since = None
+                        self.ready_since = None
                         self.state = self.LANE_CHANGE
                         self._publish(self.committed_path, False, self.committed_speed_mps, True, {"reason":"next_left_lane_change", "candidate_diag":diag}, now, dt)
                         return
                 else:
                     self.ready_since = None
+            else:
+                self.ready_since = None
 
             global_d = self._global_signed_d()
             can_start_rejoin = (
-                self.lane_changes_done >= self.target_left_lane_changes
+                self.lane_changes_done > 0
+                and not next_change_pending
                 and self.inner_hold_travel_m >= self.min_inner_hold_after_change_m
                 and global_d is not None
                 and abs(global_d) <= self.rejoin_start_global_d_m
@@ -1251,7 +1269,8 @@ class HighwayLaneStrategyNode:
             # coincident. This also prevents a lane-info dropout at the physical
             # merge from stopping the car forever.
             can_direct_release = (
-                self.lane_changes_done >= self.target_left_lane_changes
+                self.lane_changes_done > 0
+                and not next_change_pending
                 and self.inner_hold_travel_m >= self.min_inner_hold_after_change_m
                 and global_d is not None
                 and abs(global_d) <= self.release_global_d_m
