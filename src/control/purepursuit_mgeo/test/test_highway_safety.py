@@ -91,9 +91,9 @@ class HighwaySafetyTest(unittest.TestCase):
             self.node = NODE.HighwayLaneStrategyNode()
         n = self.node
         n.cruise_speed_mps = 2.0
-        # Existing safety cases describe one completed change; repeated-change
-        # behavior has its own tests with the new upper bound of two.
-        n.target_left_lane_changes = 1
+        # Individual safety cases stay in the current lane unless a repeated
+        # lane-change test explicitly enables the next-change distance gate.
+        n.min_lane_hold_before_next_change_m = float("inf")
         n._odom_pose = Mock(return_value=(0.0, 0.0, 0.0, 2.0))
         n.latest_odom = NS()
         n.latest_obstacles = NS(obstacles=[])

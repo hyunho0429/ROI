@@ -141,7 +141,6 @@ class HighwayLaneStrategyNode:
 
         self.cruise_speed_mps = float(rospy.get_param("~cruise_speed_mps", 6.0))
         self.rate_hz = float(rospy.get_param("~rate_hz", 20.0))
-        self.target_left_lane_changes = max(1, min(2, int(rospy.get_param("~target_left_lane_changes", 2))))
         self.min_lane_hold_before_next_change_m = float(rospy.get_param("~min_lane_hold_before_next_change_m", 8.0))
         self.highway_confirm_s = float(rospy.get_param("~highway_confirm_s", 0.5))
         self.ready_confirm_s = float(rospy.get_param("~ready_confirm_s", 0.5))
@@ -309,8 +308,8 @@ class HighwayLaneStrategyNode:
 
         self.timer = rospy.Timer(rospy.Duration(1.0 / max(self.rate_hz, 1.0)), self._tick)
         rospy.logwarn(
-            "Highway lane strategy: LEFT lane changes=%d cruise=%.2f m/s; real-lane centerline enabled",
-            self.target_left_lane_changes, self.cruise_speed_mps,
+            "Highway lane strategy: repeated LEFT lane changes enabled cruise=%.2f m/s; real-lane centerline enabled",
+            self.cruise_speed_mps,
         )
 
     def _base_path_cb(self, msg: RosPath) -> None:
@@ -1472,8 +1471,9 @@ class HighwayLaneStrategyNode:
                 stop = True
                 inner_reason = path_reason
 
-            # Up to two changes. Follow and settle in each lane before starting
-            # a NEW uninterrupted gap confirmation; never reuse the first one.
+            # Follow and settle in each lane before starting a new uninterrupted
+            # gap confirmation. There is no count limit; road geometry, a dashed
+            # left divider and a safe adjacent-lane gap gate every attempt.
             lat = (self.lane_info or {}).get("lateral_error_m")
             heading = (self.lane_info or {}).get("heading_error_rad")
             settled_for_next = (
@@ -1484,7 +1484,7 @@ class HighwayLaneStrategyNode:
                 and (self.lane_info or {}).get("output_status", "FRESH") == "FRESH"
             )
             next_change_pending = False
-            if settled_for_next and self.lane_changes_done < self.target_left_lane_changes:
+            if settled_for_next:
                 p, v, length, reason, diag = self._choose_lane_change(now)
                 if p is not None:
                     next_change_pending = True

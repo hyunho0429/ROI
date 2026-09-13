@@ -12,7 +12,7 @@ class RepeatedLaneChangeTest(unittest.TestCase):
         fixture.setUp()
         self.node = fixture.node
         n = self.node
-        n.target_left_lane_changes = 2
+        n.min_lane_hold_before_next_change_m = 8.0
         n._global_signed_d.return_value = 3.5
         n._choose_lane_change = Mock(return_value=(safety.path_at(3.5), 2.0, 32.0, 'ok', {}))
 
@@ -41,12 +41,14 @@ class RepeatedLaneChangeTest(unittest.TestCase):
         self.assertEqual(n.state, n.LANE_CHANGE)
         self.assertEqual(n._publish.call_args.args[4]['reason'], 'next_left_lane_change')
 
-    def test_no_third_change_even_when_gap_is_clear(self):
+    def test_third_change_is_allowed_after_a_new_confirmation(self):
         n = self.node
         n.lane_changes_done = 2
-        self.tick()
+        self.tick(100.0)
         self.assertEqual(n.state, n.INNER_HOLD)
-        n._choose_lane_change.assert_not_called()
+        self.tick(100.6)
+        self.assertEqual(n.state, n.LANE_CHANGE)
+        self.assertEqual(n._publish.call_args.args[4]['reason'], 'next_left_lane_change')
 
     def test_heading_or_lateral_error_delays_second_change(self):
         n = self.node
