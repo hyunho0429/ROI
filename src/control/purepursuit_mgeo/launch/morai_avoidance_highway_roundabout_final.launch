@@ -21,8 +21,8 @@
   <arg name="managed_timeout_s" default="1.0" />
 
   <!-- The wrapper launches the camera team's real-lane post-processing pipeline. -->
-  <!-- LiDAR-only RRT test: no camera UDP receiver or inference process. -->
-  <arg name="enable_lane_info_publisher" default="false" />
+  <!-- Camera lane geometry only; object/highway detection remains disabled. -->
+  <arg name="enable_lane_info_publisher" default="true" />
   <arg name="enable_camera_object_detection" default="false" />
   <arg name="lane_info_topic" default="/perception/camera/lane_info" />
   <arg name="lane_info_ip" default="$(arg bind_ip)" />
@@ -241,7 +241,8 @@
     <param name="mission_request_bypass_sensor_merge_gate" value="true" />
     <!-- Test/rrt mode: arm immediately; LiDAR gap/TTC/collision checks remain. -->
     <param name="force_highway_active" value="true" />
-    <param name="rrt_lidar_only_mode" value="true" />
+    <!-- Use measured lane boundaries for the RRT corridor and post-change hold. -->
+    <param name="rrt_lidar_only_mode" value="false" />
 
     <param name="cruise_speed_mps" value="$(arg target_speed_mps)" />
     <!-- Keep merge speed within 12.5% of cruise; wait for a faster gap otherwise. -->
