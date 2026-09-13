@@ -161,6 +161,20 @@ class HighwaySafetyTest(unittest.TestCase):
         n.latest_obstacles.obstacles = [obstacle(16.0, 3.5)]
         self.assertTrue(self.tick()[1])
 
+    def test_guide_lane_cannot_authorize_left_change(self):
+        self.node.require_left_dashed = True
+        self.node.lane_info = {
+            "left_lane": {"detected": True, "dashed": True, "from_guide": True}
+        }
+        self.assertEqual(self.node._left_dashed_ok(), (False, "left_from_guide"))
+
+    def test_coasted_lane_cannot_authorize_left_change(self):
+        self.node.require_left_dashed = True
+        self.node.lane_info = {
+            "left_lane": {"detected": True, "dashed": True, "coasted": True}
+        }
+        self.assertEqual(self.node._left_dashed_ok(), (False, "left_coasted"))
+
     def test_emergency_does_not_commit_rejoin(self):
         self.node.latest_obstacles.obstacles = [obstacle(7.0)]
         self.assertTrue(self.tick()[1])
