@@ -215,6 +215,36 @@ class HighwaySafetyTest(unittest.TestCase):
         }
         self.assertEqual(self.node._left_dashed_ok(), (False, "left_coasted"))
 
+    def test_inner_handover_waits_for_stable_new_lane_without_slowing(self):
+        n = self.node
+        n.inner_handover_pending = True
+        n.committed_speed_mps = n.cruise_speed_mps
+        n._global_signed_d.return_value = 3.5
+
+        path, stop, speed, _, status, *_ = self.tick()
+
+        self.assertFalse(stop)
+        self.assertEqual(speed, n.cruise_speed_mps)
+        self.assertTrue(status["lane_handover_pending"])
+        self.assertEqual(status["reason"], "lane_handover_confirming")
+        self.assertGreater(len(path.poses), 20)
+
+        n.inner_lane_candidate_since = Stamp(99.0)
+        self.tick()
+        self.assertFalse(n.inner_handover_pending)
+        self.assertEqual(n._publish.call_args.args[4]["reason"], "ok")
+
+    def test_straddling_lane_is_rejected_during_handover(self):
+        n = self.node
+        n._lane_valid = NODE.HighwayLaneStrategyNode._lane_valid.__get__(n)
+        n.lane_info_at = Stamp()
+        n.lane_info = {
+            "lane_valid": True,
+            "confidence": 0.9,
+            "straddling_lane": {"detected": True},
+        }
+        self.assertEqual(n._lane_valid(Stamp()), (False, "lane_straddling"))
+
     def test_emergency_does_not_commit_rejoin(self):
         self.node.latest_obstacles.obstacles = [obstacle(7.0)]
         self.assertTrue(self.tick()[1])

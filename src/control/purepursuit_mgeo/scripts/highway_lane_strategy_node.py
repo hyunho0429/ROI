@@ -172,6 +172,9 @@ class HighwayLaneStrategyNode:
         self.inner_lane_invalid_grace_s = float(
             rospy.get_param("~inner_lane_invalid_grace_s", 1.20)
         )
+        self.inner_handover_confirm_s = float(
+            rospy.get_param("~inner_handover_confirm_s", 0.30)
+        )
         self.inner_lane_grace_speed_mps = float(
             rospy.get_param("~inner_lane_grace_speed_mps", 1.50)
         )
@@ -281,6 +284,9 @@ class HighwayLaneStrategyNode:
         self.last_timer_time: Optional[rospy.Time] = None
         self.last_inner_path: Optional[RosPath] = None
         self.lane_invalid_since: Optional[rospy.Time] = None
+        self.inner_handover_pending = False
+        self.inner_lane_candidate_since: Optional[rospy.Time] = None
+        self.inner_lane_candidate_signature = None
 
         self.path_pub = rospy.Publisher("~active_path", RosPath, queue_size=1)
         self.stop_pub = rospy.Publisher("~stop_required", Bool, queue_size=1)
@@ -300,7 +306,7 @@ class HighwayLaneStrategyNode:
 
         self.timer = rospy.Timer(rospy.Duration(1.0 / max(self.rate_hz, 1.0)), self._tick)
         rospy.logwarn(
-            "Highway lane strategy: LEFT lane changes=%d cruise=%.2f m/s; camera files are read-only inputs",
+            "Highway lane strategy: LEFT lane changes=%d cruise=%.2f m/s; real-lane centerline enabled",
             self.target_left_lane_changes, self.cruise_speed_mps,
         )
 
@@ -356,6 +362,9 @@ class HighwayLaneStrategyNode:
         d = self.lane_info
         if not bool(d.get("lane_valid", False)):
             return False, "lane_invalid"
+        straddling = d.get("straddling_lane") or {}
+        if bool(straddling.get("detected", False)):
+            return False, "lane_straddling"
         confidence_value = d.get("confidence")
         if confidence_value is None:
             boundary_confidences = [
@@ -400,10 +409,24 @@ class HighwayLaneStrategyNode:
         return False, "left_not_dashed"
 
     def _centerline_local(self) -> List[Tuple[float, float]]:
-        # Reconstruct the driving center from the two physical boundaries when
-        # both are available.  This makes the control contract explicit: the
-        # requested path is the midpoint between the solid/dashed (or two
-        # dashed) markings, even if a publisher's derived centerline is biased.
+        straddling = (self.lane_info or {}).get("straddling_lane") or {}
+        if bool(straddling.get("detected", False)):
+            return [(0.0, 0.0)]
+
+        raw = (self.lane_info or {}).get("centerline_points") or []
+        reported: List[Tuple[float, float]] = [(0.0, 0.0)]
+        for p in raw:
+            try:
+                x, y = float(p[0]), float(p[1])
+            except Exception:
+                continue
+            if math.isfinite(x) and math.isfinite(y) and x > 0.5:
+                reported.append((x, y))
+        reported.sort(key=lambda q: q[0])
+
+        # Use the real-lane pipeline center as the primary lane-hold path after
+        # checking it against the two physical boundaries.  If the reported
+        # center is inconsistent, fall back to a direct boundary midpoint.
         left = self._boundary_local("left_boundary_points")
         right = self._boundary_local("right_boundary_points")
         midpoint: List[Tuple[float, float]] = [(0.0, 0.0)]
@@ -424,7 +447,17 @@ class HighwayLaneStrategyNode:
                         midpoint.append((float(x), 0.5*(float(ly)+float(ry))))
                 x += 1.0
             if len(midpoint) >= 4:
+                center_errors = []
+                for x, y in reported[1:]:
+                    midpoint_y = interp_y(midpoint, x)
+                    if midpoint_y is not None:
+                        center_errors.append(abs(y-midpoint_y))
+                if len(reported) >= 4 and len(center_errors) >= 3 and max(center_errors) <= 0.35:
+                    return reported
                 return midpoint
+
+        if len(reported) >= 4:
+            return reported
 
         # The six-class pipeline reports lane_valid for a stable single physical
         # boundary.  It cannot measure width then, but lane hold can still use a
@@ -439,22 +472,22 @@ class HighwayLaneStrategyNode:
         if len(right) >= 3 and not bool(right_meta.get("from_guide", False)):
             return [(0.0, 0.0)] + [(x, y+0.5*one_side_width) for x, y in right if x > 0.5]
 
-        raw = (self.lane_info or {}).get("centerline_points") or []
-        pts: List[Tuple[float, float]] = [(0.0, 0.0)]
-        for p in raw:
-            try:
-                x, y = float(p[0]), float(p[1])
-            except Exception:
-                continue
-            if math.isfinite(x) and math.isfinite(y) and x > 0.5:
-                pts.append((x, y))
-        pts.sort(key=lambda q: q[0])
         # Remove near-duplicates.
         out: List[Tuple[float, float]] = []
-        for p in pts:
+        for p in reported:
             if not out or math.hypot(p[0]-out[-1][0], p[1]-out[-1][1]) > 0.15:
                 out.append(p)
         return out
+
+    def _lane_signature(self):
+        info = self.lane_info or {}
+        left = info.get("left_lane") or {}
+        right = info.get("right_lane") or {}
+        return (
+            info.get("lane_state"),
+            left.get("track_id") if bool(left.get("detected", False)) else None,
+            right.get("track_id") if bool(right.get("detected", False)) else None,
+        )
 
 
     def _boundary_local(self, key: str) -> List[Tuple[float, float]]:
@@ -1243,6 +1276,9 @@ class HighwayLaneStrategyNode:
                     self.lane_invalid_since = None
                     self.ready_since = None
                     self.last_inner_path = self.committed_path
+                    self.inner_handover_pending = True
+                    self.inner_lane_candidate_since = None
+                    self.inner_lane_candidate_signature = None
                     why = "settled" if settled else "endpoint_guard"
                     rospy.logwarn(
                         "HIGHWAY lane change COMPLETE count=%d reason=%s remaining=%.2fm",
@@ -1274,6 +1310,28 @@ class HighwayLaneStrategyNode:
             lane_ok, lane_reason = self._lane_valid(now)
             center_ok = False
             center_y = None
+            if self.inner_handover_pending:
+                if lane_ok:
+                    signature = self._lane_signature()
+                    if signature != self.inner_lane_candidate_signature:
+                        self.inner_lane_candidate_signature = signature
+                        self.inner_lane_candidate_since = now
+                        lane_ok = False
+                        lane_reason = "lane_handover_confirming"
+                    elif self.inner_lane_candidate_since is None:
+                        self.inner_lane_candidate_since = now
+                        lane_ok = False
+                        lane_reason = "lane_handover_confirming"
+                    elif (now-self.inner_lane_candidate_since).to_sec() < self.inner_handover_confirm_s:
+                        lane_ok = False
+                        lane_reason = "lane_handover_confirming"
+                    else:
+                        self.inner_handover_pending = False
+                        self.inner_lane_candidate_since = None
+                        self.inner_lane_candidate_signature = None
+                else:
+                    self.inner_lane_candidate_since = None
+                    self.inner_lane_candidate_signature = None
             if lane_ok:
                 center_ok, center_reason, center_y = self._inner_center_sanity()
                 if not center_ok:
@@ -1300,6 +1358,7 @@ class HighwayLaneStrategyNode:
                 and self.lane_invalid_since is not None
                 and (now-self.lane_invalid_since).to_sec() <= self.inner_lane_invalid_grace_s
             )
+            handover_wait = self.inner_handover_pending and lane_grace
             lane_fallback = False
             if not lane_ok:
                 fallback = self._rolling_inner_fallback(now)
@@ -1310,6 +1369,8 @@ class HighwayLaneStrategyNode:
 
             if obs_fresh and lane_ok:
                 adaptive, emergency, follow = self._adaptive_speed(self.cruise_speed_mps)
+            elif obs_fresh and handover_wait:
+                adaptive, emergency, follow = min(self.cruise_speed_mps, self.committed_speed_mps), False, {}
             elif obs_fresh:
                 adaptive, emergency, follow = self.inner_lane_grace_speed_mps, False, {}
             else:
@@ -1324,6 +1385,10 @@ class HighwayLaneStrategyNode:
             elif lane_ok:
                 stop = path is None
                 inner_reason = "ok" if path is not None else "inner_path_missing"
+            elif handover_wait:
+                stop = False
+                inner_reason = (lane_reason if lane_reason.startswith("lane_handover_")
+                                else "lane_handover_" + lane_reason)
             elif lane_grace or lane_fallback:
                 stop = False
                 adaptive = min(adaptive, self.inner_lane_grace_speed_mps)
@@ -1446,8 +1511,11 @@ class HighwayLaneStrategyNode:
                 "global_d": None if global_d is None else round(global_d,2),
                 "inner_hold_travel_m": round(self.inner_hold_travel_m,2),
                 "center_y8_m": None if center_y is None else round(center_y,3),
+                "lane_center_source": (self.lane_info or {}).get("center_source"),
+                "lane_straddling": bool(((self.lane_info or {}).get("straddling_lane") or {}).get("detected", False)),
                 "lane_grace": lane_grace,
                 "lane_fallback": lane_fallback,
+                "lane_handover_pending": self.inner_handover_pending,
                 "follow": follow,
             }, now, dt)
             return

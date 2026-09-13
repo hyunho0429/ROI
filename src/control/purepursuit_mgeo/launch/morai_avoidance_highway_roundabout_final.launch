@@ -248,6 +248,7 @@
     <param name="left_divider_expected_tol_m" value="0.90" />
     <param name="inner_center_max_abs_y_m" value="0.90" />
     <param name="inner_lane_invalid_grace_s" value="1.20" />
+    <param name="inner_handover_confirm_s" value="0.30" />
     <param name="inner_lane_grace_speed_mps" value="1.50" />
     <param name="inner_fallback_path_length_m" value="60.0" />
 

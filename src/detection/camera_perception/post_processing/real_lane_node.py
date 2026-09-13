@@ -145,6 +145,20 @@ def _sample(c, step=POINT_STEP_M, cap=POINT_MAX):
     return [[round(float(a), 3), round(float(b), 3)] for a, b in zip(xs, ys)]
 
 
+def _sample_center(left, right, step=POINT_STEP_M, cap=POINT_MAX):
+    """Sample both boundaries at the same x positions and return their midpoint."""
+    if left is None or right is None:
+        return None
+    lo = max(float(left.x_range[0]), float(right.x_range[0]))
+    hi = min(float(left.x_range[1]), float(right.x_range[1]))
+    if hi <= lo + 1e-6:
+        return None
+    n = min(int((hi-lo)/step)+1, cap)
+    xs = np.linspace(lo, hi, max(n, 2))
+    ys = 0.5*(np.polyval(left.coef, xs)+np.polyval(right.coef, xs))
+    return [[round(float(x), 3), round(float(y), 3)] for x, y in zip(xs, ys)]
+
+
 def build_payload(res, opt, timing):
     """LaneResult -> 계약 JSON (+ 선택 블록)."""
     lanes = res.lanes or []
@@ -157,9 +171,11 @@ def build_payload(res, opt, timing):
     center = None
     width = None
     lat = head = None
-    if lp and rp:
-        n = min(len(lp), len(rp))
-        center = [[lp[i][0], round((lp[i][1] + rp[i][1]) / 2.0, 3)] for i in range(n)]
+    # While crossing a divider, left/right refer to the outer boundaries of two
+    # lanes. Their midpoint is the divider under the vehicle, not a target-lane
+    # center, so wait until straddling clears before publishing a control path.
+    if lp and rp and straddle is None:
+        center = _sample_center(left, right)
         width = round(abs(left.y_at(rl.ORDER_X_M) - right.y_at(rl.ORDER_X_M)), 3)
     if center and len(center) >= 2:
         # 횡오차는 가장 가까운 중심점의 y, 방위오차는 중심선 기울기
@@ -179,6 +195,8 @@ def build_payload(res, opt, timing):
         reasons.append("NO_LEFT")
     if right is None:
         reasons.append("NO_RIGHT")
+    if straddle is not None:
+        reasons.append("STRADDLING")
     if left is not None and left.from_guide:
         reasons.append("LEFT_FROM_GUIDE")
 

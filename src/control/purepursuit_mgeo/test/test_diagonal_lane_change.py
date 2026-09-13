@@ -117,6 +117,29 @@ class DiagonalLaneChangeTest(unittest.TestCase):
         self.assertAlmostEqual(center[1][1], 0.05)
         self.assertTrue(all(abs(y-0.05) < 1e-6 for _, y in center[1:]))
 
+    def test_valid_reported_centerline_is_primary_hold_path(self):
+        n = node_fixture()
+        n._boundary_local = safety.NODE.HighwayLaneStrategyNode._boundary_local.__get__(n)
+        n._centerline_local = safety.NODE.HighwayLaneStrategyNode._centerline_local.__get__(n)
+        n.lane_info = {
+            'lane_width_m': 3.5,
+            'centerline_points': [[float(x), 0.05] for x in range(5, 26)],
+            'left_boundary_points': [[float(x), 1.75] for x in range(5, 26)],
+            'right_boundary_points': [[float(x), -1.75] for x in range(5, 26)],
+            'straddling_lane': None,
+        }
+        center = n._centerline_local()
+        self.assertAlmostEqual(center[1][1], 0.05)
+
+    def test_straddling_line_is_not_used_as_lane_center(self):
+        n = node_fixture()
+        n._centerline_local = safety.NODE.HighwayLaneStrategyNode._centerline_local.__get__(n)
+        n.lane_info = {
+            'straddling_lane': {'detected': True},
+            'centerline_points': [[float(x), 0.0] for x in range(5, 26)],
+        }
+        self.assertEqual(n._centerline_local(), [(0.0, 0.0)])
+
     def test_camera_jump_is_blended_without_delayed_stop(self):
         n = node_fixture()
         n._global_signed_d.return_value = 3.5
