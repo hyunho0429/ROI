@@ -108,6 +108,10 @@ class LocalObstacle:
     length: float
     width: float
     yaw: float
+    map_x: float
+    map_y: float
+    map_vx: float
+    map_vy: float
 
 
 class HighwayLaneStrategyNode:
@@ -779,6 +783,8 @@ class HighwayLaneStrategyNode:
             out.append(LocalObstacle(
                 int(o.id), x, y, vx, vy,
                 max(0.5, float(o.length)), max(0.4, float(o.width)), float(o.yaw),
+                float(o.center_x_map), float(o.center_y_map),
+                float(o.velocity_x_map), float(o.velocity_y_map),
             ))
         return out
 
@@ -983,42 +989,111 @@ class HighwayLaneStrategyNode:
                 return path, v, length, "ok", diagnostics
         return None, None, None, "no_safe_speed_path_pair", diagnostics
 
+    def _path_obstacle_coordinates(
+        self, path: Optional[RosPath], obstacle: LocalObstacle
+    ) -> Optional[Tuple[float, float, float]]:
+        """Project one obstacle onto the driven path in the map frame.
+
+        Returns (forward arc distance, signed lateral distance, path-relative
+        obstacle speed).  Keeping both operands in the map frame makes lane
+        membership independent of the ego yaw during a diagonal lane change.
+        """
+        if path is None or self.latest_odom is None or len(path.poses) < 2:
+            return None
+        ex, ey, _, _ = self._odom_pose()
+        source = [
+            (float(ps.pose.position.x), float(ps.pose.position.y))
+            for ps in path.poses
+        ]
+        nearest = min(
+            range(len(source)),
+            key=lambda i: (source[i][0]-ex)**2 + (source[i][1]-ey)**2,
+        )
+        points = [(ex, ey)] + source[nearest+1:]
+        if len(points) < 2:
+            return None
+
+        obstacle_map_x = float(obstacle.map_x)
+        obstacle_map_y = float(obstacle.map_y)
+        velocity_map_x = float(obstacle.map_vx)
+        velocity_map_y = float(obstacle.map_vy)
+
+        best = None
+        arc = 0.0
+        for a, b in zip(points, points[1:]):
+            vx, vy = b[0]-a[0], b[1]-a[1]
+            length2 = vx*vx + vy*vy
+            if length2 < 1e-9:
+                continue
+            length = math.sqrt(length2)
+            u = clamp(
+                ((obstacle_map_x-a[0])*vx + (obstacle_map_y-a[1])*vy) / length2,
+                0.0,
+                1.0,
+            )
+            px, py = a[0]+u*vx, a[1]+u*vy
+            dx, dy = obstacle_map_x-px, obstacle_map_y-py
+            d2 = dx*dx + dy*dy
+            tx, ty = vx/length, vy/length
+            signed_lateral = tx*dy - ty*dx
+            path_speed = tx*velocity_map_x + ty*velocity_map_y
+            candidate = (d2, arc+u*length, signed_lateral, path_speed)
+            if best is None or candidate[0] < best[0]:
+                best = candidate
+            arc += length
+        if best is None:
+            return None
+        return float(best[1]), float(best[2]), float(best[3])
+
     def _current_lane_lead(self) -> Tuple[Optional[LocalObstacle], Optional[float], Optional[float]]:
-        # During and immediately after a change, classify traffic against the
-        # path actually being driven.  The camera may still label the previous
-        # ego lane for a few frames while yaw is returning to zero.
+        # Once a maneuver is committed, classify traffic by its projection onto
+        # the actual map-frame path.  An ego-parallel RViz corridor or a changing
+        # vehicle yaw must not turn adjacent traffic into a false lead vehicle.
+        driven_path = None
         if self.state == self.LANE_CHANGE:
-            center = self._path_map_to_local(self.committed_path)
+            driven_path = self.committed_path
         elif self.state == self.INNER_HOLD:
-            center = self._path_map_to_local(self.last_inner_path)
-        else:
-            center = self._centerline_local()
-        if len(center) < 2:
-            center = self._centerline_local()
-        lane_width = float((self.lane_info or {}).get("lane_width_m") or 3.5)
+            driven_path = self.last_inner_path
+        elif self.state == self.REJOIN:
+            driven_path = self.committed_rejoin_path
+
+        center = self._centerline_local() if driven_path is None else []
         best = None
         best_gap = None
         best_ttc = None
         _, _, _, ego_speed = self._odom_pose()
         for o in self._map_obstacles_local():
-            if o.x <= 0.0 or o.x > self.follow_search_m:
-                continue
-            cy = interp_y(center, clamp(o.x, 0.0, 25.0))
-            if cy is None:
-                cy = 0.0
+            path_speed = o.vx
+            if driven_path is not None:
+                projected = self._path_obstacle_coordinates(driven_path, o)
+                if projected is None:
+                    continue
+                forward, lateral, path_speed = projected
+                if forward <= 0.0 or forward > self.follow_search_m:
+                    continue
+                if abs(lateral) > self.current_lane_center_gate_m:
+                    continue
+                longitudinal = forward
+            else:
+                if o.x <= 0.0 or o.x > self.follow_search_m:
+                    continue
+                cy = interp_y(center, clamp(o.x, 0.0, 25.0))
+                if cy is None:
+                    cy = 0.0
+                if abs(o.y - cy) > self.current_lane_center_gate_m:
+                    continue
+                longitudinal = o.x
             # Strict current-lane center gate.  Adjacent-lane vehicles must
             # never trigger emergency following/stop while ego is still in the
             # current lane.
-            if abs(o.y - cy) > self.current_lane_center_gate_m:
-                continue
             # Lane membership already excludes adjacent traffic. Keep a negative
             # bumper gap: a close same-lane obstacle is an emergency, not an
             # absent lead. Discarding it would restore cruise as it gets closer.
             ego_front_x = self.vehicle_center_from_base_m + 0.5*self.vehicle_length_m
-            obstacle_rear_x = o.x - 0.5*o.length
+            obstacle_rear_x = longitudinal - 0.5*o.length
             gap = obstacle_rear_x - ego_front_x
             if best_gap is None or gap < best_gap:
-                closing = ego_speed - o.vx
+                closing = ego_speed - path_speed
                 ttc = max(gap, 0.0)/closing if closing > 0.05 else float("inf")
                 best, best_gap, best_ttc = o, gap, ttc
         return best, best_gap, best_ttc
@@ -1075,12 +1150,20 @@ class HighwayLaneStrategyNode:
         _, _, _, ego_speed = self._odom_pose()
         lead, gap, ttc = self._current_lane_lead()
         if lead is None or gap is None:
-            return cruise, False, {"lead": None}
+            return cruise, False, {
+                "lead": None,
+                "reference": "map_path" if self.state in (
+                    self.LANE_CHANGE, self.INNER_HOLD, self.REJOIN
+                ) else "camera_lane",
+            }
         desired = self.follow_standstill_gap_m + self.follow_time_headway_s * ego_speed
         target = min(cruise, max(0.0, lead.vx + self.follow_gain*(gap-desired)))
         emergency = gap < self.emergency_gap_m or (ttc is not None and math.isfinite(ttc) and ttc < self.emergency_ttc_s)
         return target, emergency, {
             "lead": lead.oid,
+            "reference": "map_path" if self.state in (
+                self.LANE_CHANGE, self.INNER_HOLD, self.REJOIN
+            ) else "camera_lane",
             "gap": round(gap,2),
             "lead_v": round(lead.vx,2),
             "ttc": None if ttc is None or not math.isfinite(ttc) else round(ttc,2),

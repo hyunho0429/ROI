@@ -6,6 +6,7 @@ Set PYTHONPATH to src/control/purepursuit_mgeo/src first.
 No ROS master, simulator, or control publisher is used.
 """
 import importlib.util
+import math
 import os
 from pathlib import Path
 import sys
@@ -303,6 +304,30 @@ class HighwaySafetyTest(unittest.TestCase):
         lead, _, _ = n._current_lane_lead()
 
         self.assertIsNone(lead)
+
+    def test_turning_yaw_cannot_rotate_adjacent_car_into_committed_path(self):
+        n = self.node
+        n.state = n.LANE_CHANGE
+        n.committed_path = path_at(0.0)
+        n._odom_pose.return_value = (5.0, 0.0, math.radians(20.0),2.0)
+        n.latest_obstacles.obstacles = [obstacle(15.0,3.5)]
+
+        lead, _, _ = n._current_lane_lead()
+
+        self.assertIsNone(lead)
+
+    def test_committed_path_lead_gap_is_independent_of_vehicle_yaw(self):
+        n = self.node
+        n.state = n.LANE_CHANGE
+        n.committed_path = path_at(0.0)
+        n.latest_obstacles.obstacles = [obstacle(15.0,0.0)]
+        gaps = []
+        for yaw in (0.0, math.radians(20.0)):
+            n._odom_pose.return_value = (5.0,0.0,yaw,2.0)
+            lead, gap, _ = n._current_lane_lead()
+            self.assertIsNotNone(lead)
+            gaps.append(gap)
+        self.assertAlmostEqual(gaps[0],gaps[1],places=6)
 
     def test_direct_release_preserves_emergency(self):
         n = self.node
