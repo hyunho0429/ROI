@@ -154,6 +154,25 @@ class HighwayLaneStrategyNode:
         self.max_heading_error_rad = float(rospy.get_param("~max_heading_error_rad", math.radians(22.0)))
         self.require_left_dashed = bool(rospy.get_param("~require_left_dashed", True))
 
+        # Geometry sanity: the detected LEFT dashed divider must really be the
+        # divider immediately next to the ego lane. The lane-info publisher can
+        # fall back to a one-sided lane estimate; blindly shifting that estimated
+        # centerline by one full lane width can command an accidental two-lane
+        # jump. Highway lane-change geometry therefore uses the LEFT divider
+        # itself and rejects a divider that is not adjacent to the ego lane.
+        self.left_divider_expected_tol_m = float(
+            rospy.get_param("~left_divider_expected_tol_m", 0.90)
+        )
+        self.inner_center_max_abs_y_m = float(
+            rospy.get_param("~inner_center_max_abs_y_m", 0.90)
+        )
+        self.inner_lane_invalid_grace_s = float(
+            rospy.get_param("~inner_lane_invalid_grace_s", 1.20)
+        )
+        self.inner_lane_grace_speed_mps = float(
+            rospy.get_param("~inner_lane_grace_speed_mps", 1.50)
+        )
+
         self.vehicle_length_m = float(rospy.get_param("~vehicle_length_m", 4.635))
         self.vehicle_width_m = float(rospy.get_param("~vehicle_width_m", 1.892))
         self.vehicle_center_from_base_m = float(rospy.get_param("~vehicle_center_from_base_m", 1.50))
@@ -246,6 +265,7 @@ class HighwayLaneStrategyNode:
         self.last_output_speed = self.cruise_speed_mps
         self.last_timer_time: Optional[rospy.Time] = None
         self.last_inner_path: Optional[RosPath] = None
+        self.lane_invalid_since: Optional[rospy.Time] = None
 
         self.path_pub = rospy.Publisher("~active_path", RosPath, queue_size=1)
         self.stop_pub = rospy.Publisher("~stop_required", Bool, queue_size=1)
@@ -362,6 +382,64 @@ class HighwayLaneStrategyNode:
                 out.append(p)
         return out
 
+
+    def _boundary_local(self, key: str) -> List[Tuple[float, float]]:
+        """Return a lane boundary in base_link and extrapolate it back to x=0."""
+        raw = (self.lane_info or {}).get(key) or []
+        pts: List[Tuple[float, float]] = []
+        for q in raw:
+            try:
+                x, y = float(q[0]), float(q[1])
+            except Exception:
+                continue
+            if math.isfinite(x) and math.isfinite(y) and x > 0.2:
+                pts.append((x, y))
+        pts.sort(key=lambda q: q[0])
+        out: List[Tuple[float, float]] = []
+        for q in pts:
+            if not out or math.hypot(q[0]-out[-1][0], q[1]-out[-1][1]) > 0.15:
+                out.append(q)
+        if len(out) >= 2 and out[0][0] > 0.5:
+            x0, y0 = out[0]
+            x1, y1 = out[1]
+            dx = x1 - x0
+            slope = (y1-y0)/dx if abs(dx) > 1e-6 else 0.0
+            out.insert(0, (0.0, y0 - slope*x0))
+        return out
+
+    def _left_divider_sanity(self, lane_width: float) -> Tuple[bool, str, dict]:
+        divider = self._boundary_local("left_boundary_points")
+        if len(divider) < 3:
+            return False, "left_divider_short", {"n": len(divider)}
+        y5 = interp_y(divider, 5.0)
+        if y5 is None:
+            y5 = divider[min(1, len(divider)-1)][1]
+        expected = 0.5*lane_width
+        err = abs(float(y5) - expected)
+        diag = {
+            "left_divider_y5_m": round(float(y5), 3),
+            "expected_half_width_m": round(expected, 3),
+            "divider_error_m": round(err, 3),
+        }
+        if float(y5) <= 0.0:
+            return False, "left_divider_wrong_side", diag
+        if err > self.left_divider_expected_tol_m:
+            return False, "left_divider_not_adjacent", diag
+        return True, "ok", diag
+
+    def _inner_center_sanity(self) -> Tuple[bool, str, Optional[float]]:
+        center = self._centerline_local()
+        if len(center) < 3:
+            return False, "inner_center_short", None
+        y = interp_y(center, 8.0)
+        if y is None:
+            y = interp_y(center, 5.0)
+        if y is None:
+            return False, "inner_center_missing", None
+        if abs(float(y)) > self.inner_center_max_abs_y_m:
+            return False, "inner_center_not_ego_lane", float(y)
+        return True, "ok", float(y)
+
     def _odom_pose(self) -> Tuple[float, float, float, float]:
         odom = self.latest_odom
         pose = odom.pose.pose
@@ -449,21 +527,35 @@ class HighwayLaneStrategyNode:
         return self._local_to_map(blended, now)
 
     def _generate_lane_change_local(self, lane_width: float, speed_mps: float) -> Tuple[List[Tuple[float, float]], float]:
-        base = self._centerline_local()
-        length = clamp(max(speed_mps, 1.0) * self.change_time_s, self.change_min_length_m, self.change_max_length_m)
-        # Camera centerline ends at ~25 m. Extend only its final tangent so the
-        # quintic lane change can be longer and still give Pure Pursuit a stable
-        # post-change segment to follow.
+        """Generate exactly ONE left-lane move from the detected left divider."""
+        divider = self._boundary_local("left_boundary_points")
+        length = clamp(
+            max(speed_mps, 1.0) * self.change_time_s,
+            self.change_min_length_m,
+            self.change_max_length_m,
+        )
         target_len = self.change_start_m + length + self.change_post_hold_m
-        base = self._extend_local_polyline(base, target_len)
-        arc = polyline_arclength(base)
+        divider = self._extend_local_polyline(divider, target_len)
+        if len(divider) < 3:
+            return [], length
+
+        current: List[Tuple[float, float]] = []
+        target: List[Tuple[float, float]] = []
+        for i, (x, y) in enumerate(divider):
+            tx, ty = tangent_at(divider, i)
+            nx, ny = -ty, tx
+            current.append((x - 0.5*lane_width*nx, y - 0.5*lane_width*ny))
+            target.append((x + 0.5*lane_width*nx, y + 0.5*lane_width*ny))
+
+        current[0] = (0.0, 0.0)
+        arc = polyline_arclength(current)
+
         shifted: List[Tuple[float, float]] = []
-        for i, (x, y) in enumerate(base):
-            tx, ty = tangent_at(base, i)
-            nx, ny = -ty, tx  # left normal; for straight +x this is +y
+        for i, (cx, cy) in enumerate(current):
             u = (arc[i] - self.change_start_m) / max(length, 1e-6)
             w = smoothstep5(u)
-            shifted.append((x + w * lane_width * nx, y + w * lane_width * ny))
+            tx, ty = target[i]
+            shifted.append(((1.0-w)*cx + w*tx, (1.0-w)*cy + w*ty))
         return shifted, length
 
     def _map_obstacles_local(self) -> List[LocalObstacle]:
@@ -625,6 +717,10 @@ class HighwayLaneStrategyNode:
             return None, None, None, "obstacles_stale", {}
 
         width = float(self.lane_info.get("lane_width_m"))
+        divider_ok, divider_reason, divider_diag = self._left_divider_sanity(width)
+        if not divider_ok:
+            return None, None, None, divider_reason, {"divider": divider_diag}
+
         _, _, _, ego_speed = self._odom_pose()
         raw_candidates = [
             min(self.cruise_speed_mps, max(ego_speed, 2.0) + 0.5),
@@ -636,13 +732,22 @@ class HighwayLaneStrategyNode:
         diagnostics = {}
         for v in candidates:
             local, length = self._generate_lane_change_local(width, v)
+            if len(local) < 3:
+                diagnostics[str(v)] = {"divider": divider_diag, "reason": "lane_change_geometry_short"}
+                continue
             curv_ok, max_k = self._path_curvature_ok(local, v)
             gap_ok, gap_reason, gap_diag = self._gap_safe_for_speed(v, width, length)
             path = self._local_to_map(local, now)
             dyn_ok, dyn_reason = self._dynamic_path_safe(
                 path, v, self.change_start_m + length + 4.0
             )
-            diagnostics[str(v)] = {"curvature": round(max_k,5), "gap": gap_diag, "gap_reason": gap_reason, "dyn": dyn_reason}
+            diagnostics[str(v)] = {
+                "curvature": round(max_k,5),
+                "gap": gap_diag,
+                "gap_reason": gap_reason,
+                "dyn": dyn_reason,
+                "divider": divider_diag,
+            }
             if curv_ok and gap_ok and dyn_ok:
                 return path, v, length, "ok", diagnostics
         return None, None, None, "no_safe_speed_path_pair", diagnostics
@@ -926,6 +1031,8 @@ class HighwayLaneStrategyNode:
                     self.inner_hold_travel_m = 0.0
                     self.last_hold_xy = (ex,ey)
                     self.release_since = None
+                    self.lane_invalid_since = None
+                    self.last_inner_path = self.committed_path
                     why = "settled" if settled else "endpoint_guard"
                     rospy.logwarn(
                         "HIGHWAY lane change COMPLETE count=%d reason=%s remaining=%.2fm",
@@ -953,21 +1060,51 @@ class HighwayLaneStrategyNode:
 
         if self.state == self.INNER_HOLD:
             lane_ok, lane_reason = self._lane_valid(now)
+            center_ok = False
+            center_y = None
+            if lane_ok:
+                center_ok, center_reason, center_y = self._inner_center_sanity()
+                if not center_ok:
+                    lane_ok = False
+                    lane_reason = center_reason
+
             if lane_ok:
                 local = self._extend_local_polyline(self._centerline_local(), 40.0)
                 self.last_inner_path = self._local_to_map(local, now)
+                self.lane_invalid_since = None
+            elif self.lane_invalid_since is None:
+                self.lane_invalid_since = now
+
             path = self.last_inner_path
-            adaptive, emergency, follow = self._adaptive_speed(self.cruise_speed_mps) if obs_fresh and lane_ok else (0.0, True, {})
-            stop = emergency or not obs_fresh or not lane_ok or path is None
+            lane_grace = (
+                not lane_ok
+                and path is not None
+                and self.lane_invalid_since is not None
+                and (now-self.lane_invalid_since).to_sec() <= self.inner_lane_invalid_grace_s
+            )
+
+            if obs_fresh and lane_ok:
+                adaptive, emergency, follow = self._adaptive_speed(self.cruise_speed_mps)
+            elif obs_fresh:
+                adaptive, emergency, follow = self.inner_lane_grace_speed_mps, False, {}
+            else:
+                adaptive, emergency, follow = 0.0, False, {}
+
             if emergency:
+                stop = True
                 inner_reason = "lead_emergency"
             elif not obs_fresh:
+                stop = True
                 inner_reason = "obstacles_stale"
-            elif not lane_ok:
-                inner_reason = lane_reason
-            elif path is None:
-                inner_reason = "inner_path_missing"
+            elif lane_ok:
+                stop = path is None
+                inner_reason = "ok" if path is not None else "inner_path_missing"
+            elif lane_grace:
+                stop = False
+                adaptive = min(adaptive, self.inner_lane_grace_speed_mps)
+                inner_reason = "lane_grace_" + lane_reason
             else:
+                stop = True
                 inner_reason = lane_reason
 
             # Optional repeated left changes for a >2-lane highway. Default is 1.
@@ -1032,7 +1169,14 @@ class HighwayLaneStrategyNode:
             else:
                 self.release_since = None
 
-            self._publish(path, stop, adaptive, True, {"reason":inner_reason, "global_d":None if global_d is None else round(global_d,2), "inner_hold_travel_m":round(self.inner_hold_travel_m,2), "follow":follow}, now, dt)
+            self._publish(path, stop, adaptive, True, {
+                "reason": inner_reason,
+                "global_d": None if global_d is None else round(global_d,2),
+                "inner_hold_travel_m": round(self.inner_hold_travel_m,2),
+                "center_y8_m": None if center_y is None else round(center_y,3),
+                "lane_grace": lane_grace,
+                "follow": follow,
+            }, now, dt)
             return
 
         if self.state == self.REJOIN:
