@@ -173,6 +173,59 @@ class HighwaySafetyTest(unittest.TestCase):
         n._adaptive_speed = Mock(return_value=(2.0, False, {}))
         self.assertTrue(self.tick()[1])
 
+    def test_lane_change_does_not_commit_slow_candidate(self):
+        n = self.node
+        n.cruise_speed_mps = 4.0
+        n._odom_pose.return_value = (0.0,0.0,0.0,4.0)
+        n.highway_request = True
+        n.mission_request_bypass_sensor_merge_gate = True
+        n._left_dashed_ok = Mock(return_value=(True,"ok"))
+        n._left_divider_sanity = Mock(return_value=(True,"ok",{}))
+        n._generate_lane_change_local = Mock(return_value=([(0.0,0.0),(1.0,0.1),(2.0,0.2)],32.0))
+        n._path_curvature_ok = Mock(return_value=(True,0.01))
+        n._gap_safe_for_speed = Mock(side_effect=lambda v,*_: (v <= 2.0,"test",{}))
+        n._local_to_map = Mock(return_value=path_at())
+        n._dynamic_path_safe = Mock(return_value=(True,"ok"))
+
+        path, speed, _, reason, _ = n._choose_lane_change(Stamp())
+
+        self.assertIsNone(path)
+        self.assertIsNone(speed)
+        self.assertEqual(reason,"no_safe_speed_path_pair")
+        tried = [call.args[0] for call in n._gap_safe_for_speed.call_args_list]
+        self.assertTrue(tried)
+        self.assertGreaterEqual(min(tried),3.5)
+
+    def test_lane_change_suppresses_non_emergency_slow_following(self):
+        n = self.node
+        n.cruise_speed_mps = 4.0
+        n.committed_speed_mps = 4.0
+        n.state = n.LANE_CHANGE
+        n._adaptive_speed = Mock(return_value=(2.0,False,{"lead":1}))
+        n._dynamic_path_safe = Mock(return_value=(True,"ok"))
+
+        _, stop, speed, _, status, *_ = self.tick()
+
+        self.assertFalse(stop)
+        self.assertEqual(speed,3.5)
+        self.assertFalse(status["speed_floor_blocked"])
+
+    def test_lane_change_speed_floor_yields_to_collision_guard(self):
+        n = self.node
+        n.cruise_speed_mps = 4.0
+        n.committed_speed_mps = 4.0
+        n.state = n.LANE_CHANGE
+        n._adaptive_speed = Mock(return_value=(2.0,False,{"lead":1}))
+        n._dynamic_path_safe = Mock(
+            side_effect=lambda _path,v: (v <= 2.0,"ok" if v <= 2.0 else "collision")
+        )
+
+        _, stop, speed, _, status, *_ = self.tick()
+
+        self.assertFalse(stop)
+        self.assertEqual(speed,2.0)
+        self.assertTrue(status["speed_floor_blocked"])
+
     def test_outer_lane_vehicle_does_not_stop_first_left_change(self):
         n = self.node
         n.state = n.LANE_CHANGE

@@ -234,6 +234,9 @@
     <param name="mission_request_bypass_sensor_merge_gate" value="true" />
 
     <param name="cruise_speed_mps" value="$(arg target_speed_mps)" />
+    <!-- Keep merge speed within 12.5% of cruise; wait for a faster gap otherwise. -->
+    <param name="lane_change_min_speed_ratio" value="0.875" />
+    <param name="lane_change_min_speed_mps" value="2.5" />
     <param name="min_lane_hold_before_next_change_m" value="8.0" />
     <param name="highway_confirm_s" value="0.5" />
     <param name="ready_confirm_s" value="0.5" />

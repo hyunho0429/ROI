@@ -232,6 +232,15 @@ class HighwayLaneStrategyNode:
         self.change_settle_m = float(rospy.get_param("~change_settle_m", 6.0))
         self.speed_rise_mps2 = float(rospy.get_param("~speed_rise_mps2", 0.8))
         self.speed_fall_mps2 = float(rospy.get_param("~speed_fall_mps2", 1.8))
+        # Reject merge slots that require giving up most of the cruise speed.
+        # The vehicle waits for a faster slot instead of changing lanes at a
+        # crawl. Emergency and predicted-collision handling remain authoritative.
+        self.lane_change_min_speed_ratio = float(
+            rospy.get_param("~lane_change_min_speed_ratio", 0.875)
+        )
+        self.lane_change_min_speed_mps = float(
+            rospy.get_param("~lane_change_min_speed_mps", 2.5)
+        )
 
         self.collision_long_margin_m = float(rospy.get_param("~collision_long_margin_m", 0.5))
         self.collision_lat_margin_m = float(rospy.get_param("~collision_lat_margin_m", 0.35))
@@ -946,13 +955,16 @@ class HighwayLaneStrategyNode:
             return None, None, None, divider_reason, {"divider": divider_diag}
 
         _, _, _, ego_speed = self._odom_pose()
+        speed_floor = self._lane_change_speed_floor()
         raw_candidates = [
+            self.cruise_speed_mps,
             min(self.cruise_speed_mps, max(ego_speed, 2.0) + 0.5),
             min(self.cruise_speed_mps, max(ego_speed, 2.0)),
-            max(1.5, min(self.cruise_speed_mps, ego_speed - 1.0)),
-            max(1.5, min(self.cruise_speed_mps, ego_speed - 2.0)),
+            speed_floor,
         ]
-        candidates = sorted({round(v, 2) for v in raw_candidates if v > 0.1}, reverse=True)
+        candidates = sorted({
+            round(v, 2) for v in raw_candidates if v >= speed_floor - 1e-6
+        }, reverse=True)
         diagnostics = {}
         for v in candidates:
             local, length = self._generate_lane_change_local(width, v)
@@ -1085,6 +1097,15 @@ class HighwayLaneStrategyNode:
                 best, best_gap, best_ttc = o, gap, ttc
         return best, best_gap, best_ttc
 
+    def _lane_change_speed_floor(self) -> float:
+        return min(
+            self.cruise_speed_mps,
+            max(
+                self.lane_change_min_speed_mps,
+                self.lane_change_min_speed_ratio*self.cruise_speed_mps,
+            ),
+        )
+
     def _gap_shaping_speed(self, lane_width: float) -> Tuple[float, dict]:
         """Choose a safe longitudinal speed that tends to create a LEFT-lane slot.
 
@@ -1095,15 +1116,19 @@ class HighwayLaneStrategyNode:
         _, _, _, ego_speed = self._odom_pose()
         front, rear, _ = self._target_lane_neighbors(lane_width)
         horizon = 3.0
+        speed_floor = self._lane_change_speed_floor()
         candidates = []
-        v = 1.5
+        v = speed_floor
         while v < self.cruise_speed_mps + 1e-6:
             candidates.append(round(v, 2))
             v += 0.5
-        candidates.extend([round(clamp(ego_speed, 1.5, self.cruise_speed_mps), 2), round(self.cruise_speed_mps, 2)])
+        candidates.extend([
+            round(clamp(ego_speed, speed_floor, self.cruise_speed_mps), 2),
+            round(self.cruise_speed_mps, 2),
+        ])
         candidates = sorted(set(candidates), reverse=True)
 
-        best_v = min(self.cruise_speed_mps, max(1.5, ego_speed))
+        best_v = min(self.cruise_speed_mps, max(speed_floor, ego_speed))
         best_score = -1e9
         best_diag = {}
         for cand in candidates:
@@ -1298,12 +1323,27 @@ class HighwayLaneStrategyNode:
             # camera's ego-lane identity can switch midway through the maneuver.
             lane_ok, lane_reason = self._lane_valid(now)
             adaptive, emergency, follow = self._adaptive_speed(self.committed_speed_mps) if obs_fresh and lane_ok else (self.committed_speed_mps, False, {})
-            speed = min(self.committed_speed_mps, adaptive)
+            adaptive_speed = min(self.committed_speed_mps, adaptive)
+            speed_floor = min(self.committed_speed_mps, self._lane_change_speed_floor())
+            speed = adaptive_speed if emergency else max(adaptive_speed, speed_floor)
 
             # Do not re-run the entry gap threshold after commitment, but keep
             # checking actual predicted collisions along the remaining trajectory
             # even if the camera changes lane identity or drops out.
             path_safe, path_reason = self._dynamic_path_safe(self.committed_path, speed) if obs_fresh else (False, "obstacles_stale")
+            floor_blocked = False
+            # Suppress a conservative following slowdown only while the faster
+            # trajectory is collision-free. New traffic after commitment can
+            # still lower the command or force a stop through the safety guard.
+            if (
+                obs_fresh and not path_safe and not emergency
+                and speed > adaptive_speed + 1e-6
+            ):
+                floor_blocked = True
+                speed = adaptive_speed
+                path_safe, path_reason = self._dynamic_path_safe(
+                    self.committed_path, speed
+                )
             stop = emergency or not path_safe
 
             lat = None if self.lane_info is None else self.lane_info.get("lateral_error_m")
@@ -1372,6 +1412,8 @@ class HighwayLaneStrategyNode:
                 "aligned":aligned,
                 "alignment":alignment_diag,
                 "follow":follow,
+                "lane_change_speed_floor_mps":round(speed_floor,2),
+                "speed_floor_blocked":floor_blocked,
             }, now, dt)
             return
 
