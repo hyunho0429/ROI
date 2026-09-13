@@ -21,6 +21,6 @@ install(DIRECTORY launch
   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
 )
 
-install(DIRECTORY lane models
+install(DIRECTORY lane models post_processing
   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
 )

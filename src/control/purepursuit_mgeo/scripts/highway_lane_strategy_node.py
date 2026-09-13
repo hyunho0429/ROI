@@ -153,6 +153,7 @@ class HighwayLaneStrategyNode:
         self.min_lane_confidence = float(rospy.get_param("~min_lane_confidence", 0.45))
         self.lane_width_min_m = float(rospy.get_param("~lane_width_min_m", 2.7))
         self.lane_width_max_m = float(rospy.get_param("~lane_width_max_m", 4.2))
+        self.nominal_lane_width_m = float(rospy.get_param("~nominal_lane_width_m", 3.5))
         self.max_heading_error_rad = float(rospy.get_param("~max_heading_error_rad", math.radians(22.0)))
         self.require_left_dashed = bool(rospy.get_param("~require_left_dashed", True))
 
@@ -349,23 +350,39 @@ class HighwayLaneStrategyNode:
     def _activation_present(self) -> bool:
         return bool(self.highway_environment or self.highway_request)
 
-    def _lane_valid(self, now: rospy.Time) -> Tuple[bool, str]:
+    def _lane_valid(self, now: rospy.Time, require_measured_width: bool = False) -> Tuple[bool, str]:
         if self.lane_info is None or not self._fresh(self.lane_info_at, self.lane_info_timeout_s, now):
             return False, "lane_info_missing_or_stale"
         d = self.lane_info
         if not bool(d.get("lane_valid", False)):
             return False, "lane_invalid"
-        if float(d.get("confidence", 0.0) or 0.0) < self.min_lane_confidence:
+        confidence_value = d.get("confidence")
+        if confidence_value is None:
+            boundary_confidences = [
+                float(lane.get("confidence", 0.0) or 0.0)
+                for lane in (d.get("left_lane") or {}, d.get("right_lane") or {})
+                if bool(lane.get("detected", False))
+            ]
+            confidence_value = min(boundary_confidences) if boundary_confidences else 0.0
+        if float(confidence_value or 0.0) < self.min_lane_confidence:
             return False, "lane_confidence"
         width = d.get("lane_width_m")
-        if width is None or not (self.lane_width_min_m <= float(width) <= self.lane_width_max_m):
+        if require_measured_width and width is None:
             return False, "lane_width"
-        heading = d.get("heading_error_rad")
-        if heading is None or abs(float(heading)) > self.max_heading_error_rad:
-            return False, "lane_heading"
-        pts = d.get("centerline_points") or []
+        if width is not None and not (self.lane_width_min_m <= float(width) <= self.lane_width_max_m):
+            return False, "lane_width"
+        pts = self._centerline_local()
         if len(pts) < 3:
             return False, "centerline_short"
+        heading = d.get("heading_error_rad")
+        if heading is None:
+            y_near = interp_y(pts, 5.0)
+            y_far = interp_y(pts, 12.0)
+            if y_near is None or y_far is None:
+                return False, "lane_heading"
+            heading = math.atan2(float(y_far)-float(y_near), 7.0)
+        if abs(float(heading)) > self.max_heading_error_rad:
+            return False, "lane_heading"
         return True, "ok"
 
     def _left_dashed_ok(self) -> Tuple[bool, str]:
@@ -374,6 +391,10 @@ class HighwayLaneStrategyNode:
         left = (self.lane_info or {}).get("left_lane") or {}
         if not bool(left.get("detected", False)):
             return False, "left_not_detected"
+        if bool(left.get("from_guide", False)):
+            return False, "left_from_guide"
+        if bool(left.get("coasted", False)):
+            return False, "left_coasted"
         if left.get("dashed") is True:
             return True, "ok"
         return False, "left_not_dashed"
@@ -404,6 +425,19 @@ class HighwayLaneStrategyNode:
                 x += 1.0
             if len(midpoint) >= 4:
                 return midpoint
+
+        # The six-class pipeline reports lane_valid for a stable single physical
+        # boundary.  It cannot measure width then, but lane hold can still use a
+        # nominal-width center.  Lane-change authorization below continues to
+        # require a measured width and a fresh dashed divider.
+        one_side_width = float((self.lane_info or {}).get("lane_width_m")
+                               or self.nominal_lane_width_m)
+        left_meta = (self.lane_info or {}).get("left_lane") or {}
+        right_meta = (self.lane_info or {}).get("right_lane") or {}
+        if len(left) >= 3 and not bool(left_meta.get("from_guide", False)):
+            return [(0.0, 0.0)] + [(x, y-0.5*one_side_width) for x, y in left if x > 0.5]
+        if len(right) >= 3 and not bool(right_meta.get("from_guide", False)):
+            return [(0.0, 0.0)] + [(x, y+0.5*one_side_width) for x, y in right if x > 0.5]
 
         raw = (self.lane_info or {}).get("centerline_points") or []
         pts: List[Tuple[float, float]] = [(0.0, 0.0)]
@@ -857,7 +891,7 @@ class HighwayLaneStrategyNode:
         return True, "ok"
 
     def _choose_lane_change(self, now: rospy.Time) -> Tuple[Optional[RosPath], Optional[float], Optional[float], str, dict]:
-        ok, reason = self._lane_valid(now)
+        ok, reason = self._lane_valid(now, require_measured_width=True)
         if not ok:
             return None, None, None, reason, {}
         dashed, dreason = self._left_dashed_ok()
@@ -1133,7 +1167,7 @@ class HighwayLaneStrategyNode:
             adaptive, emergency, follow = self._adaptive_speed(self.cruise_speed_mps) if obs_fresh and self.lane_info is not None else (self.cruise_speed_mps, False, {})
             shaping = self.cruise_speed_mps
             shaping_diag = {}
-            lane_ok_for_shape, _ = self._lane_valid(now)
+            lane_ok_for_shape, _ = self._lane_valid(now, require_measured_width=True)
             if obs_fresh and lane_ok_for_shape:
                 shaping, shaping_diag = self._gap_shaping_speed(float(self.lane_info.get("lane_width_m")))
             wait_speed = min(adaptive, shaping)

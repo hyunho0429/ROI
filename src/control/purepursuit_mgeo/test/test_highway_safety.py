@@ -172,6 +172,49 @@ class HighwaySafetyTest(unittest.TestCase):
         n._adaptive_speed = Mock(return_value=(2.0, False, {}))
         self.assertTrue(self.tick()[1])
 
+    def test_single_boundary_can_hold_lane_but_cannot_authorize_change(self):
+        n = self.node
+        n._boundary_local = NODE.HighwayLaneStrategyNode._boundary_local.__get__(n)
+        n._centerline_local = NODE.HighwayLaneStrategyNode._centerline_local.__get__(n)
+        n._lane_valid = NODE.HighwayLaneStrategyNode._lane_valid.__get__(n)
+        n.lane_info_at = Stamp()
+        n.lane_info = {
+            "lane_valid": True,
+            "left_lane": {
+                "detected": True, "confidence": 0.8,
+                "from_guide": False, "coasted": False,
+            },
+            "right_lane": {"detected": False, "confidence": 0.0},
+            "left_boundary_points": [[float(x), 1.75] for x in range(5, 26)],
+            "right_boundary_points": [],
+            "centerline_points": None,
+            "lane_width_m": None,
+            "heading_error_rad": None,
+        }
+
+        self.assertEqual(n._lane_valid(Stamp()), (True, "ok"))
+        self.assertEqual(
+            n._lane_valid(Stamp(), require_measured_width=True),
+            (False, "lane_width"),
+        )
+        center = n._centerline_local()
+        self.assertGreaterEqual(len(center), 3)
+        self.assertTrue(all(abs(y) < 1e-6 for _, y in center[1:]))
+
+    def test_guide_lane_cannot_authorize_left_change(self):
+        self.node.require_left_dashed = True
+        self.node.lane_info = {
+            "left_lane": {"detected": True, "dashed": True, "from_guide": True}
+        }
+        self.assertEqual(self.node._left_dashed_ok(), (False, "left_from_guide"))
+
+    def test_coasted_lane_cannot_authorize_left_change(self):
+        self.node.require_left_dashed = True
+        self.node.lane_info = {
+            "left_lane": {"detected": True, "dashed": True, "coasted": True}
+        }
+        self.assertEqual(self.node._left_dashed_ok(), (False, "left_coasted"))
+
     def test_emergency_does_not_commit_rejoin(self):
         self.node.latest_obstacles.obstacles = [obstacle(7.0)]
         self.assertTrue(self.tick()[1])

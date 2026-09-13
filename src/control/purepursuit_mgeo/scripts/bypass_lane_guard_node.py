@@ -454,7 +454,15 @@ class BypassLaneGuard:
         info = self.lane_info
         if not bool(info.get("lane_valid", False)):
             return None, "lane_invalid"
-        confidence = float(info.get("confidence", 0.0) or 0.0)
+        confidence_value = info.get("confidence")
+        if confidence_value is None:
+            boundary_confidences = [
+                float(lane.get("confidence", 0.0) or 0.0)
+                for lane in (info.get("left_lane") or {}, info.get("right_lane") or {})
+                if bool(lane.get("detected", False))
+            ]
+            confidence_value = min(boundary_confidences) if boundary_confidences else 0.0
+        confidence = float(confidence_value or 0.0)
         if confidence < self.min_lane_confidence:
             return None, "lane_low_confidence"
         heading = info.get("heading_error_rad")
@@ -497,6 +505,10 @@ class BypassLaneGuard:
         lane = info.get(key) or {}
         if not bool(lane.get("detected", False)):
             return False, f"{side}_boundary_missing"
+        if bool(lane.get("from_guide", False)):
+            return False, f"{side}_boundary_from_guide"
+        if bool(lane.get("coasted", False)):
+            return False, f"{side}_boundary_coasted"
         lane_type = str(lane.get("type") or "").lower()
         dashed = lane.get("dashed")
         if lane_type == "yellow" or "solid" in lane_type:
