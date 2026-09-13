@@ -136,7 +136,6 @@ class HighwayLaneStrategyNode:
 
         self.cruise_speed_mps = float(rospy.get_param("~cruise_speed_mps", 6.0))
         self.rate_hz = float(rospy.get_param("~rate_hz", 20.0))
-        self.target_left_lane_changes = int(rospy.get_param("~target_left_lane_changes", 1))
         self.highway_confirm_s = float(rospy.get_param("~highway_confirm_s", 0.5))
         self.ready_confirm_s = float(rospy.get_param("~ready_confirm_s", 0.5))
         self.lane_info_timeout_s = float(rospy.get_param("~lane_info_timeout_s", 0.6))
@@ -221,7 +220,14 @@ class HighwayLaneStrategyNode:
 
         self.release_global_d_m = float(rospy.get_param("~release_global_d_m", 0.55))
         self.release_confirm_s = float(rospy.get_param("~release_confirm_s", 0.6))
-        self.min_inner_hold_after_change_m = float(rospy.get_param("~min_inner_hold_after_change_m", 8.0))
+        # Event-based re-arm after each completed lane change.  A new left
+        # change is considered only after the ego has actually settled in the
+        # new lane; there is no fixed target_left_lane_changes counter anymore.
+        self.left_change_rearm_min_s = float(rospy.get_param("~left_change_rearm_min_s", 2.5))
+        self.left_change_rearm_min_m = float(rospy.get_param("~left_change_rearm_min_m", 8.0))
+        self.left_change_stable_lateral_m = float(rospy.get_param("~left_change_stable_lateral_m", 0.35))
+        self.left_change_stable_heading_rad = float(rospy.get_param("~left_change_stable_heading_rad", math.radians(7.0)))
+        self.left_change_stable_confirm_s = float(rospy.get_param("~left_change_stable_confirm_s", 0.8))
         self.rejoin_start_global_d_m = float(rospy.get_param("~rejoin_start_global_d_m", 1.8))
         self.rejoin_length_m = float(rospy.get_param("~rejoin_length_m", 18.0))
         self.rejoin_complete_global_d_m = float(rospy.get_param("~rejoin_complete_global_d_m", 0.45))
@@ -250,6 +256,8 @@ class HighwayLaneStrategyNode:
         self.release_since: Optional[rospy.Time] = None
         self.lane_changes_done = 0
         self.completed_once = False
+        self.inner_hold_started_at: Optional[rospy.Time] = None
+        self.inner_stable_since: Optional[rospy.Time] = None
 
         self.committed_path: Optional[RosPath] = None
         self.committed_speed_mps = self.cruise_speed_mps
@@ -285,8 +293,8 @@ class HighwayLaneStrategyNode:
 
         self.timer = rospy.Timer(rospy.Duration(1.0 / max(self.rate_hz, 1.0)), self._tick)
         rospy.logwarn(
-            "Highway lane strategy: LEFT lane changes=%d cruise=%.2f m/s; camera files are read-only inputs",
-            self.target_left_lane_changes, self.cruise_speed_mps,
+            "Highway lane strategy: event-based LEFT dashed re-arm, cruise=%.2f m/s; camera files are read-only inputs",
+            self.cruise_speed_mps,
         )
 
     def _base_path_cb(self, msg: RosPath) -> None:
@@ -1030,6 +1038,9 @@ class HighwayLaneStrategyNode:
                     self.state = self.INNER_HOLD
                     self.inner_hold_travel_m = 0.0
                     self.last_hold_xy = (ex,ey)
+                    self.inner_hold_started_at = now
+                    self.inner_stable_since = None
+                    self.ready_since = None
                     self.release_since = None
                     self.lane_invalid_since = None
                     self.last_inner_path = self.committed_path
@@ -1107,8 +1118,42 @@ class HighwayLaneStrategyNode:
                 stop = True
                 inner_reason = lane_reason
 
-            # Optional repeated left changes for a >2-lane highway. Default is 1.
-            if self.lane_changes_done < self.target_left_lane_changes:
+            # Event-based re-arm: do not count lane changes.  Once the ego has
+            # settled in the new lane, the *current ego-left boundary* decides
+            # what happens next.  Dashed + safe gap => another left change.
+            # Reliably detected non-dashed boundary => stay in this lane and
+            # wait for the global route to naturally converge for REJOIN.
+            lat = None if self.lane_info is None else self.lane_info.get("lateral_error_m")
+            head = None if self.lane_info is None else self.lane_info.get("heading_error_rad")
+            hold_elapsed_s = 0.0 if self.inner_hold_started_at is None else max(0.0, (now-self.inner_hold_started_at).to_sec())
+            stable_now = (
+                lane_ok
+                and center_ok
+                and lat is not None
+                and head is not None
+                and abs(float(lat)) <= self.left_change_stable_lateral_m
+                and abs(float(head)) <= self.left_change_stable_heading_rad
+                and hold_elapsed_s >= self.left_change_rearm_min_s
+                and self.inner_hold_travel_m >= self.left_change_rearm_min_m
+            )
+            if stable_now:
+                if self.inner_stable_since is None:
+                    self.inner_stable_since = now
+            else:
+                self.inner_stable_since = None
+                self.ready_since = None
+
+            rearmed = (
+                self.inner_stable_since is not None
+                and (now-self.inner_stable_since).to_sec() >= self.left_change_stable_confirm_s
+            )
+
+            left = (self.lane_info or {}).get("left_lane") or {}
+            left_detected = bool(left.get("detected", False))
+            left_is_dashed = left.get("dashed") is True
+            left_is_nondashed = left_detected and left.get("dashed") is False
+
+            if rearmed and left_is_dashed:
                 p, v, length, reason, diag = self._choose_lane_change(now)
                 if p is not None:
                     if self.ready_since is None:
@@ -1120,16 +1165,24 @@ class HighwayLaneStrategyNode:
                         self.change_travel_m = 0.0
                         self.last_change_xy = (ex,ey)
                         self.complete_since = None
+                        self.inner_stable_since = None
+                        self.ready_since = None
                         self.state = self.LANE_CHANGE
-                        self._publish(self.committed_path, False, self.committed_speed_mps, True, {"reason":"next_left_lane_change", "candidate_diag":diag}, now, dt)
+                        rospy.logwarn(
+                            "HIGHWAY next LEFT lane change COMMITTED by dashed boundary speed=%.2f length=%.1f",
+                            v, length,
+                        )
+                        self._publish(self.committed_path, False, self.committed_speed_mps, True, {"reason":"left_dashed_rearmed", "candidate_diag":diag}, now, dt)
                         return
                 else:
                     self.ready_since = None
+            elif not left_is_dashed:
+                self.ready_since = None
 
             global_d = self._global_signed_d()
             can_start_rejoin = (
-                self.lane_changes_done >= self.target_left_lane_changes
-                and self.inner_hold_travel_m >= self.min_inner_hold_after_change_m
+                rearmed
+                and left_is_nondashed
                 and global_d is not None
                 and abs(global_d) <= self.rejoin_start_global_d_m
                 and lane_ok
@@ -1151,8 +1204,8 @@ class HighwayLaneStrategyNode:
             # coincident. This also prevents a lane-info dropout at the physical
             # merge from stopping the car forever.
             can_direct_release = (
-                self.lane_changes_done >= self.target_left_lane_changes
-                and self.inner_hold_travel_m >= self.min_inner_hold_after_change_m
+                rearmed
+                and left_is_nondashed
                 and global_d is not None
                 and abs(global_d) <= self.release_global_d_m
                 and base_fresh
@@ -1175,6 +1228,12 @@ class HighwayLaneStrategyNode:
                 "inner_hold_travel_m": round(self.inner_hold_travel_m,2),
                 "center_y8_m": None if center_y is None else round(center_y,3),
                 "lane_grace": lane_grace,
+                "rearmed": rearmed,
+                "hold_elapsed_s": round(hold_elapsed_s,2),
+                "left_detected": left_detected,
+                "left_dashed": left_is_dashed,
+                "left_nondashed": left_is_nondashed,
+                "stable_now": stable_now,
                 "follow": follow,
             }, now, dt)
             return
