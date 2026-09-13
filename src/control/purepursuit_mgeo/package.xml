@@ -10,11 +10,15 @@
   <buildtool_depend>catkin</buildtool_depend>
 
   <depend>geometry_msgs</depend>
+  <depend>lidar_perception</depend>
   <depend>morai_msgs</depend>
   <depend>nav_msgs</depend>
   <depend>path_planning</depend>
   <depend>rospy</depend>
   <depend>std_msgs</depend>
+  <depend>visualization_msgs</depend>
+  <exec_depend>python3-rospkg</exec_depend>
+  <exec_depend>camera_perception</exec_depend>
 
   <export>
   </export>

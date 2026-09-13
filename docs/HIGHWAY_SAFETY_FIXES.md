@@ -1,0 +1,30 @@
+# dev/test_highway 안전 제어 수정
+
+기준: `dev/merged_code`의 `c44d8b0` 전체 코드.
+
+- 같은 차로의 앞차와 범퍼 간격이 음수여도 앞차를 제외하지 않고 긴급 정지를 유지한다.
+- 차선 변경, 안쪽 차로 유지, 복귀 중에는 매 주기 현재 차량 위치부터 남은 경로의 충돌을 예측한다. 이미 지나온 경로의 이동 시간을 다시 더하지 않으며, 시작점과 처음 2m도 검사한다.
+- 복귀 시작과 완료, 기존 경로로 바로 전환하는 경우에도 장애물 정보의 유효성, 충돌 검사, 긴급 정지 및 기존 경로의 정지 신호를 반영한다. 거절된 복귀를 바로 전환하는 분기로 우회하지 않는다.
+- 카메라 정보만 끊겼고 기존 경로와 거의 일치하는 경우에는, 장애물 정보와 두 경로의 안전성이 확인되면 기존 직접 복귀 기능을 유지한다.
+- 새 ROS 노드의 실행 권한과 `catkin_install_python` 등록을 추가했다. 보조 Python 모듈은 devel/install 실행 디렉터리에 실제 파일로 배치하고 메시지·실행 의존성을 선언했다.
+
+## 로컬 회귀 테스트
+
+저장소 루트에서 Linux/ROS 환경:
+
+```bash
+PYTHONPATH="$PWD/src/control/purepursuit_mgeo/src${PYTHONPATH:+:$PYTHONPATH}" \
+  python3 -m unittest discover -s src/control/purepursuit_mgeo/test -v
+```
+
+ROS 통신을 모의 객체로 대체하고 실제 노드의 판단 및 상태 전환 메서드를 실행한다. 안전 회귀 17개와 기존 경로 추종 1개가 통과했다. 앞차 접근, 목표 차로 장애물, 카메라 단절, 오래된 장애물 정보, 복귀 전환의 정지 유지 및 정상 복귀를 포함한다.
+
+## 검증 범위
+
+Windows에서 회귀 테스트, Python 구문, launch/package XML 및 실행 파일 등록을 확인했다. ROS/catkin 빌드와 MORAI 주행은 실행하지 않았다. 동적 충돌 예측은 기존 등속 모델과 차량 박스 근사를 사용하며, 실제 가감속·조향 응답은 시뮬레이터에서 추가 검증해야 한다. 시작 구간의 충돌 검사 면제를 제거했으므로 가까운 LiDAR 박스에 대한 정지가 이전보다 보수적이다.
+
+ROS 환경에서는 `catkin_make` 후 `devel/setup.bash`를 불러오고 다음 launch를 사용한다. 기본값은 제어 비활성화 및 목표 속도 2m/s다.
+
+```bash
+roslaunch purepursuit_mgeo morai_avoidance_highway_roundabout_final.launch enable_control:=false
+```

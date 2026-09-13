@@ -210,7 +210,6 @@ class HighwayLaneStrategyNode:
         self.follow_search_m = float(rospy.get_param("~follow_search_m", 60.0))
         self.emergency_gap_m = float(rospy.get_param("~emergency_gap_m", 1.5))
         self.emergency_ttc_s = float(rospy.get_param("~emergency_ttc_s", 1.0))
-        self.lead_overlap_tolerance_m = float(rospy.get_param("~lead_overlap_tolerance_m", 0.25))
         self.change_settle_m = float(rospy.get_param("~change_settle_m", 6.0))
         self.speed_rise_mps2 = float(rospy.get_param("~speed_rise_mps2", 0.8))
         self.speed_fall_mps2 = float(rospy.get_param("~speed_fall_mps2", 1.8))
@@ -653,30 +652,35 @@ class HighwayLaneStrategyNode:
             max_k = max(max_k, k)
         return speed_mps*speed_mps*max_k <= self.max_lateral_accel_mps2 + 1e-6, max_k
 
-    def _dynamic_path_safe(self, path: RosPath, candidate_speed: float, max_arc_m: Optional[float] = None) -> Tuple[bool, str]:
-        if self.latest_obstacles is None or len(path.poses) < 3:
+    def _dynamic_path_safe(self, path: Optional[RosPath], candidate_speed: float, max_arc_m: Optional[float] = None) -> Tuple[bool, str]:
+        if self.latest_obstacles is None or self.latest_odom is None or path is None or len(path.poses) < 3:
             return False, "no_obstacles_or_short_path"
-        # Arc length / time along the ego base_link path.
+        # A committed path starts at the OLD ego pose. Predict from the current
+        # pose and remaining path, otherwise elapsed travel is counted twice and
+        # obstacles behind us can veto a maneuver that has already passed them.
+        ex, ey, ego_yaw, _ = self._odom_pose()
+        nearest = min(range(len(path.poses)), key=lambda i: (
+            (path.poses[i].pose.position.x-ex)**2 + (path.poses[i].pose.position.y-ey)**2
+        ))
+        points = [(ex, ey)] + [
+            (ps.pose.position.x, ps.pose.position.y) for ps in path.poses[nearest+1:]
+        ]
         arc = [0.0]
-        for i in range(1, len(path.poses)):
-            a = path.poses[i-1].pose.position
-            b = path.poses[i].pose.position
-            arc.append(arc[-1] + math.hypot(b.x-a.x, b.y-a.y))
+        for i in range(1, len(points)):
+            a, b = points[i-1], points[i]
+            arc.append(arc[-1] + math.hypot(b[0]-a[0], b[1]-a[1]))
 
         obs = list(self.latest_obstacles.obstacles)
-        for i, ps in enumerate(path.poses):
-            if i == 0:
-                continue
+        for i, (px, py) in enumerate(points):
             if max_arc_m is not None and arc[i] > max_arc_m:
                 break
-            p = ps.pose.position
-            p0 = path.poses[max(0, i-1)].pose.position
-            p1 = path.poses[min(len(path.poses)-1, i+1)].pose.position
-            yaw = math.atan2(p1.y-p0.y, p1.x-p0.x)
+            p0 = points[max(0, i-1)]
+            p1 = points[min(len(points)-1, i+1)]
+            yaw = ego_yaw if i == 0 else math.atan2(p1[1]-p0[1], p1[0]-p0[0])
             c, s = math.cos(yaw), math.sin(yaw)
             t = arc[i] / max(candidate_speed, 0.5)
-            ego_cx = p.x + self.vehicle_center_from_base_m*c
-            ego_cy = p.y + self.vehicle_center_from_base_m*s
+            ego_cx = px + self.vehicle_center_from_base_m*c
+            ego_cy = py + self.vehicle_center_from_base_m*s
             for o in obs:
                 ox = float(o.center_x_map) + float(o.velocity_x_map)*t
                 oy = float(o.center_y_map) + float(o.velocity_y_map)*t
@@ -686,10 +690,7 @@ class HighwayLaneStrategyNode:
                 lon_lim = 0.5*self.vehicle_length_m + 0.5*max(0.5,float(o.length)) + self.collision_long_margin_m
                 lat_lim = 0.5*self.vehicle_width_m + 0.5*max(0.4,float(o.width)) + self.collision_lat_margin_m
                 if abs(lon) <= lon_lim and abs(lat) <= lat_lim:
-                    # Allow a very short prefix if the obstacle box already overlaps
-                    # because LiDAR boxes can transiently touch the ego footprint.
-                    if arc[i] > 2.0:
-                        return False, "predicted_collision_id_%d" % int(o.id)
+                    return False, "predicted_collision_id_%d" % int(o.id)
         return True, "ok"
 
     def _choose_lane_change(self, now: rospy.Time) -> Tuple[Optional[RosPath], Optional[float], Optional[float], str, dict]:
@@ -770,14 +771,12 @@ class HighwayLaneStrategyNode:
             # current lane.
             if abs(o.y - cy) > self.current_lane_center_gate_m:
                 continue
-            # Lead following is bumper-to-bumper, not center-x based.  A vehicle
-            # whose rear bumper is still alongside/behind the ego front must not be
-            # treated as a front lead merely because its CENTER transformed to x>0.
+            # Lane membership already excludes adjacent traffic. Keep a negative
+            # bumper gap: a close same-lane obstacle is an emergency, not an
+            # absent lead. Discarding it would restore cruise as it gets closer.
             ego_front_x = self.vehicle_center_from_base_m + 0.5*self.vehicle_length_m
             obstacle_rear_x = o.x - 0.5*o.length
             gap = obstacle_rear_x - ego_front_x
-            if gap < -self.lead_overlap_tolerance_m:
-                continue
             if best_gap is None or gap < best_gap:
                 closing = ego_speed - o.vx
                 ttc = max(gap, 0.0)/closing if closing > 0.05 else float("inf")
@@ -991,9 +990,11 @@ class HighwayLaneStrategyNode:
             adaptive, emergency, follow = self._adaptive_speed(self.committed_speed_mps) if obs_fresh and lane_ok else (self.committed_speed_mps, False, {})
             speed = min(self.committed_speed_mps, adaptive)
 
-            # Only front/imminent safety may stop a committed change. Rear-gap
-            # changes after commitment must not make us brake into the approaching car.
-            stop = emergency or not obs_fresh or self.committed_path is None
+            # Do not re-run the entry gap threshold after commitment, but keep
+            # checking actual predicted collisions along the remaining trajectory
+            # even if the camera changes lane identity or drops out.
+            path_safe, path_reason = self._dynamic_path_safe(self.committed_path, speed) if obs_fresh else (False, "obstacles_stale")
+            stop = emergency or not path_safe
 
             lat = None if self.lane_info is None else self.lane_info.get("lateral_error_m")
             head = None if self.lane_info is None else self.lane_info.get("heading_error_rad")
@@ -1022,7 +1023,7 @@ class HighwayLaneStrategyNode:
             )
             geometry_complete = settled or endpoint_guard_complete
 
-            if geometry_complete:
+            if geometry_complete and not stop:
                 if self.complete_since is None:
                     self.complete_since = now
                 elif (now-self.complete_since).to_sec() >= self.change_complete_confirm_s:
@@ -1042,7 +1043,7 @@ class HighwayLaneStrategyNode:
             else:
                 self.complete_since = None
 
-            stop_reason = "lead_emergency" if emergency else ("obstacles_stale" if not obs_fresh else lane_reason)
+            stop_reason = "lead_emergency" if emergency else (path_reason if not path_safe else lane_reason)
             self._publish(self.committed_path, stop, speed, True, {
                 "reason":stop_reason,
                 "travel_m":round(self.change_travel_m,2),
@@ -1107,8 +1108,13 @@ class HighwayLaneStrategyNode:
                 stop = True
                 inner_reason = lane_reason
 
+            path_safe, path_reason = self._dynamic_path_safe(path, adaptive) if obs_fresh else (False, "obstacles_stale")
+            if not stop and not path_safe:
+                stop = True
+                inner_reason = path_reason
+
             # Optional repeated left changes for a >2-lane highway. Default is 1.
-            if self.lane_changes_done < self.target_left_lane_changes:
+            if not stop and self.lane_changes_done < self.target_left_lane_changes:
                 p, v, length, reason, diag = self._choose_lane_change(now)
                 if p is not None:
                     if self.ready_since is None:
@@ -1134,10 +1140,15 @@ class HighwayLaneStrategyNode:
                 and abs(global_d) <= self.rejoin_start_global_d_m
                 and lane_ok
                 and base_fresh
+                and base_stop_fresh
+                and not self.base_stop
+                and not stop
             )
+            rejoin_blocked = False
             if can_start_rejoin:
                 rejoin = self._generate_rejoin_path(now)
-                if rejoin is not None:
+                rejoin_safe, rejoin_reason = self._dynamic_path_safe(rejoin, adaptive)
+                if rejoin_safe:
                     self.committed_rejoin_path = rejoin
                     self.rejoin_travel_m = 0.0
                     self.last_rejoin_xy = (ex, ey)
@@ -1146,6 +1157,11 @@ class HighwayLaneStrategyNode:
                     rospy.logwarn("HIGHWAY REJOIN COMMITTED global_d=%.2f length=%.1f", global_d, self.rejoin_length_m)
                     self._publish(rejoin, False, adaptive, True, {"reason":"rejoin_committed", "global_d":round(global_d,2), "follow":follow}, now, dt)
                     return
+                # Keep the current lane and stop until the proposed merge is
+                # clear. Do not fall through to the direct-release shortcut.
+                stop = True
+                inner_reason = "rejoin_" + rejoin_reason
+                rejoin_blocked = True
 
             # Failsafe direct release only when the two paths are already almost
             # coincident. This also prevents a lane-info dropout at the physical
@@ -1156,9 +1172,22 @@ class HighwayLaneStrategyNode:
                 and global_d is not None
                 and abs(global_d) <= self.release_global_d_m
                 and base_fresh
+                and base_stop_fresh
+                and not self.base_stop
+                # A camera-only stop may release onto the coincident base path,
+                # but a motion safety stop or rejected rejoin must never do so.
+                and obs_fresh
+                and not emergency
+                and path_safe
+                and not rejoin_blocked
             )
             if can_direct_release:
-                if self.release_since is None:
+                release_safe, release_reason = self._dynamic_path_safe(self.latest_base_path, adaptive)
+                if not release_safe:
+                    self.release_since = None
+                    stop = True
+                    inner_reason = "release_" + release_reason
+                elif self.release_since is None:
                     self.release_since = now
                 elif (now-self.release_since).to_sec() >= self.release_confirm_s:
                     self.completed_once = True
@@ -1182,11 +1211,17 @@ class HighwayLaneStrategyNode:
         if self.state == self.REJOIN:
             adaptive, emergency, follow = self._adaptive_speed(self.cruise_speed_mps) if obs_fresh and self.lane_info is not None else (self.cruise_speed_mps, False, {})
             global_d = self._global_signed_d()
-            stop = emergency or not obs_fresh or self.committed_rejoin_path is None
+            path_safe, path_reason = self._dynamic_path_safe(self.committed_rejoin_path, adaptive) if obs_fresh else (False, "obstacles_stale")
+            stop = emergency or not path_safe or not base_stop_fresh or self.base_stop
             close_enough = global_d is not None and abs(global_d) <= self.rejoin_complete_global_d_m
             progressed = self.rejoin_travel_m >= 0.65*self.rejoin_length_m
-            if (progressed or close_enough) and base_fresh:
-                if self.release_since is None:
+            if (progressed or close_enough) and base_fresh and not stop:
+                release_safe, release_reason = self._dynamic_path_safe(self.latest_base_path, adaptive)
+                if not release_safe:
+                    self.release_since = None
+                    stop = True
+                    path_reason = "release_" + release_reason
+                elif self.release_since is None:
                     self.release_since = now
                 elif (now-self.release_since).to_sec() >= self.release_confirm_s:
                     self.completed_once = True
@@ -1196,7 +1231,8 @@ class HighwayLaneStrategyNode:
                     return
             else:
                 self.release_since = None
-            self._publish(self.committed_rejoin_path, stop, adaptive, True, {"reason":"rejoining", "global_d":None if global_d is None else round(global_d,2), "travel_m":round(self.rejoin_travel_m,2), "progressed":progressed, "follow":follow}, now, dt)
+            reason = "lead_emergency" if emergency else ("base_stop" if self.base_stop else ("base_stop_stale" if not base_stop_fresh else (path_reason if stop else "rejoining")))
+            self._publish(self.committed_rejoin_path, stop, adaptive, True, {"reason":reason, "global_d":None if global_d is None else round(global_d,2), "travel_m":round(self.rejoin_travel_m,2), "progressed":progressed, "follow":follow}, now, dt)
             return
 
 
