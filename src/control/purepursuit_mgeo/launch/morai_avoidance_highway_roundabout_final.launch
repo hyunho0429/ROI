@@ -113,6 +113,7 @@
     <arg name="trigger_distance_m" value="35.0" />
     <arg name="trigger_lateral_margin_m" value="0.05" />
     <arg name="trigger_lateral_half_cap_m" value="1.25" />
+    <arg name="bypass_static_speed_max_mps" value="0.60" />
     <arg name="candidate_corridor_margin_m" value="0.45" />
     <arg name="enable_mgeo_lane_candidates" value="false" />
     <arg name="allow_bypass_with_adjacent_lane" value="true" />
@@ -239,6 +240,10 @@
     <param name="lane_width_min_m" value="2.7" />
     <param name="lane_width_max_m" value="4.2" />
     <param name="require_left_dashed" value="true" />
+    <param name="left_divider_expected_tol_m" value="0.90" />
+    <param name="inner_center_max_abs_y_m" value="0.90" />
+    <param name="inner_lane_invalid_grace_s" value="1.20" />
+    <param name="inner_lane_grace_speed_mps" value="1.50" />
 
     <param name="change_start_m" value="3.0" />
     <param name="change_min_length_m" value="28.0" />
