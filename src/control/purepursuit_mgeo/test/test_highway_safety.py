@@ -140,6 +140,13 @@ class HighwaySafetyTest(unittest.TestCase):
         n.highway_request = False
         self.assertTrue(n._activation_present())
 
+    def test_yolo_highway_topic_activates_without_force_mode(self):
+        n = self.node
+        n.force_highway_active = False
+        n.highway_request = False
+        n.highway_environment = True
+        self.assertTrue(n._activation_present())
+
     def test_lidar_only_mode_supplies_lane_geometry_without_camera(self):
         n = self.node
         n.rrt_lidar_only_mode = True
@@ -159,9 +166,10 @@ class HighwaySafetyTest(unittest.TestCase):
         self.assertGreater(len(left),3)
         self.assertAlmostEqual(left[0][1],0.5*n.nominal_lane_width_m)
 
-    def test_forced_rrt_uses_nominal_lane_when_camera_lane_is_stale(self):
+    def test_active_highway_uses_nominal_lane_when_camera_lane_is_stale(self):
         n = self.node
-        n.force_highway_active = True
+        n.force_highway_active = False
+        n.highway_environment = True
         n.allow_nominal_lane_fallback = True
         n.rrt_lidar_only_mode = False
         n.lane_info = None
@@ -178,13 +186,17 @@ class HighwaySafetyTest(unittest.TestCase):
         self.assertEqual(n._active_lane_width(), n.nominal_lane_width_m)
         self.assertGreater(len(n._centerline_local()), 3)
 
-    def test_empty_adjacent_lane_generates_rrt_path_around_lead_vehicle(self):
+    def test_yolo_highway_with_empty_adjacent_lane_generates_rrt_path(self):
         n = self.node
-        n.force_highway_active = True
+        n.force_highway_active = False
+        n.highway_environment = True
         n.allow_nominal_lane_fallback = True
         n.rrt_lidar_only_mode = False
         n.require_left_dashed = False
         n.cruise_speed_mps = 4.0
+        n.merge_at = Stamp()
+        n.merge_available = True
+        n.merge_unavailable = False
         n.lane_info = None
         n.lane_info_at = None
         n.latest_obstacles.obstacles = [obstacle(20.0)]

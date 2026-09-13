@@ -8,7 +8,7 @@
        + sensor-team Pure Pursuit geometry / longlCmdType=1.
   -->
 
-  <!-- RRT test network: MORAI host/source and this algorithm PC destination. -->
+  <!-- MORAI host/source and this algorithm PC destination. -->
   <arg name="morai_host_ip" default="192.168.56.1" />
   <arg name="bind_ip" default="192.168.56.101" />
   <arg name="path_file"
@@ -21,9 +21,9 @@
   <arg name="managed_timeout_s" default="1.0" />
 
   <!-- The wrapper launches the camera team's real-lane post-processing pipeline. -->
-  <!-- Camera lane geometry only; object/highway detection remains disabled. -->
+  <!-- Camera lane geometry and YOLO highway-situation recognition. -->
   <arg name="enable_lane_info_publisher" default="true" />
-  <arg name="enable_camera_object_detection" default="false" />
+  <arg name="enable_camera_object_detection" default="true" />
   <arg name="lane_info_topic" default="/perception/camera/lane_info" />
   <arg name="lane_info_ip" default="$(arg bind_ip)" />
   <arg name="lane_info_port" default="1101" />
@@ -31,7 +31,15 @@
   <arg name="lane_info_cam_set" default="$(find camera_perception)/lane/cam_set.json" />
   <arg name="lane_info_device" default="auto" />
   <arg name="lane_info_every" default="1" />
+  <arg name="yolo_port" default="1131" />
+  <arg name="yolo_base_model" default="$(find camera_perception)/models/yolov8n.pt" />
+  <arg name="yolo_custom_model" default="$(find camera_perception)/models/best0902.pt" />
+  <arg name="yolo_confidence" default="0.4" />
+  <arg name="yolo_inference_size" default="320" />
   <arg name="highway_environment_topic" default="/perception/camera/highway_environment" />
+  <!-- Existing highway gate: unified YOLO Car AND a recent left dashed lane. -->
+  <arg name="highway_require_dashed_lane" default="true" />
+  <arg name="highway_latch_once" default="true" />
   <arg name="highway_request_topic" default="/planning/highway_lane_change_request" />
   <!-- Upper bound, not a requirement to change twice. -->
 
@@ -84,8 +92,16 @@
     <arg name="enable_control" value="$(arg enable_control)" />
     <!-- One UDP consumer only: real_lane_node.py owns MORAI lane port 1101. -->
     <arg name="enable_lane" value="false" />
-    <!-- RRT test needs lane geometry, not camera vehicle/highway activation. -->
     <arg name="enable_yolo" value="$(arg enable_camera_object_detection)" />
+    <arg name="yolo_port" value="$(arg yolo_port)" />
+    <arg name="base_model_path" value="$(arg yolo_base_model)" />
+    <arg name="custom_model_path" value="$(arg yolo_custom_model)" />
+    <arg name="yolo_confidence" value="$(arg yolo_confidence)" />
+    <arg name="yolo_inference_size" value="$(arg yolo_inference_size)" />
+    <arg name="enable_highway_gate" value="$(arg enable_camera_object_detection)" />
+    <arg name="highway_environment_topic" value="$(arg highway_environment_topic)" />
+    <arg name="require_dashed_lane" value="$(arg highway_require_dashed_lane)" />
+    <arg name="highway_latch_once" value="$(arg highway_latch_once)" />
   </include>
 
   <!-- Launch the camera team's post-processing lane pipeline.
@@ -239,12 +255,12 @@
     <param name="merge_available_topic" value="/perception/merge_gap/available" />
     <param name="merge_unavailable_topic" value="/perception/merge_gap/unavailable" />
     <param name="mission_request_bypass_sensor_merge_gate" value="true" />
-    <!-- Test/rrt mode: arm immediately; LiDAR gap/TTC/collision checks remain. -->
-    <param name="force_highway_active" value="true" />
+    <!-- Arm from the YOLO + dashed-lane highway-environment topic. -->
+    <param name="force_highway_active" value="false" />
     <!-- Use measured lane boundaries for the RRT corridor and post-change hold. -->
     <param name="rrt_lidar_only_mode" value="false" />
-    <!-- Keep measured lanes primary, but do not block the LiDAR RRT test when
-         camera geometry is briefly missing or inconsistent. -->
+    <!-- Keep measured lanes primary, but allow a nominal straight-lane bridge
+         after the highway gate has activated if geometry briefly drops out. -->
     <param name="allow_nominal_lane_fallback" value="true" />
 
     <param name="cruise_speed_mps" value="$(arg target_speed_mps)" />

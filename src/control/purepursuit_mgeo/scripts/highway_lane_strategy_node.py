@@ -401,7 +401,7 @@ class HighwayLaneStrategyNode:
     def _nominal_lane_fallback_allowed(self) -> bool:
         return bool(
             self.rrt_lidar_only_mode
-            or (self.force_highway_active and self.allow_nominal_lane_fallback)
+            or (self._activation_present() and self.allow_nominal_lane_fallback)
         )
 
     def _lane_failure(self, reason: str) -> Tuple[bool, str]:
