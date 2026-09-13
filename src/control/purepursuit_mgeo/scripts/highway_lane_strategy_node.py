@@ -11,7 +11,7 @@ and LiDAR tracked obstacles / odometry.
 Outside the highway scenario, it simply republishes the existing avoidance
 PathManager path/stop and the cruise speed. During the highway scenario it:
   1) waits for a safe LEFT merge gap while staying on the base path;
-  2) generates a committed quintic lateral shift into the inner lane;
+  2) generates a committed shallow diagonal shift with eased entry/exit;
   3) keeps following the camera-reported current lane centerline after the
      change, so the vehicle does NOT get pulled back to the original outer
      global path;
@@ -37,6 +37,7 @@ from std_msgs.msg import Bool, Float64, String
 
 from lidar_perception.msg import LidarObstacleArray
 from purepursuit_mgeo.path import PathPoint, load_mgeo_path
+from purepursuit_mgeo.motion import diagonal_progress
 
 
 def clamp(v: float, lo: float, hi: float) -> float:
@@ -178,8 +179,14 @@ class HighwayLaneStrategyNode:
         self.vehicle_center_from_base_m = float(rospy.get_param("~vehicle_center_from_base_m", 1.50))
 
         self.change_start_m = float(rospy.get_param("~change_start_m", 3.0))
-        self.change_min_length_m = float(rospy.get_param("~change_min_length_m", 22.0))
-        self.change_max_length_m = float(rospy.get_param("~change_max_length_m", 26.0))
+        self.change_min_length_m = float(rospy.get_param("~change_min_length_m", 32.0))
+        self.change_max_length_m = float(rospy.get_param("~change_max_length_m", 40.0))
+        self.change_ramp_ratio = float(rospy.get_param("~change_ramp_ratio", 0.2))
+        self.change_max_heading_rad = math.radians(float(rospy.get_param("~change_max_heading_deg", 8.0)))
+        if not 0.0 < self.change_ramp_ratio < 0.5 or not 0.0 < self.change_max_heading_rad < math.pi/4:
+            raise ValueError("invalid diagonal lane-change ramp or heading limit")
+        self.inner_path_blend_time_s = max(0.05, float(rospy.get_param("~inner_path_blend_time_s", 1.0)))
+        self.inner_path_max_jump_m = float(rospy.get_param("~inner_path_max_jump_m", 0.75))
         self.change_time_s = float(rospy.get_param("~change_time_s", 5.5))
         self.change_post_hold_m = float(rospy.get_param("~change_post_hold_m", 10.0))
         self.change_complete_min_ratio = float(rospy.get_param("~change_complete_min_ratio", 0.72))
@@ -526,10 +533,19 @@ class HighwayLaneStrategyNode:
         return self._local_to_map(blended, now)
 
     def _generate_lane_change_local(self, lane_width: float, speed_mps: float) -> Tuple[List[Tuple[float, float]], float]:
-        """Generate exactly ONE left-lane move from the detected left divider."""
+        """One shallow diagonal lane move with eased entry and exit."""
         divider = self._boundary_local("left_boundary_points")
+        if len(divider) < 3:
+            return [], self.change_min_length_m
+        tx, ty = tangent_at(divider, 0)
+        # Include ego's initial offset from the detected source-lane center.
+        shift_m = max(lane_width, math.hypot(
+            divider[0][0]-0.5*lane_width*ty, divider[0][1]+0.5*lane_width*tx))
+        heading_length = shift_m / ((1.0-self.change_ramp_ratio) * math.tan(self.change_max_heading_rad))
+        if heading_length > self.change_max_length_m:
+            return [], heading_length
         length = clamp(
-            max(speed_mps, 1.0) * self.change_time_s,
+            max(max(speed_mps, 1.0) * self.change_time_s, heading_length),
             self.change_min_length_m,
             self.change_max_length_m,
         )
@@ -537,6 +553,19 @@ class HighwayLaneStrategyNode:
         divider = self._extend_local_polyline(divider, target_len)
         if len(divider) < 3:
             return [], length
+        # Camera samples can start five metres ahead. Uniform sampling prevents
+        # that first long segment from skipping the eased steering entry.
+        divider_arc = polyline_arclength(divider)
+        sampled = []
+        j = 1
+        for k in range(int(divider_arc[-1]/0.5)+1):
+            distance = k*0.5
+            while j < len(divider)-1 and divider_arc[j] < distance:
+                j += 1
+            fraction = (distance-divider_arc[j-1])/max(divider_arc[j]-divider_arc[j-1], 1e-6)
+            a, b = divider[j-1], divider[j]
+            sampled.append((a[0]+fraction*(b[0]-a[0]), a[1]+fraction*(b[1]-a[1])))
+        divider = sampled
 
         current: List[Tuple[float, float]] = []
         target: List[Tuple[float, float]] = []
@@ -546,16 +575,62 @@ class HighwayLaneStrategyNode:
             current.append((x - 0.5*lane_width*nx, y - 0.5*lane_width*ny))
             target.append((x + 0.5*lane_width*nx, y + 0.5*lane_width*ny))
 
-        current[0] = (0.0, 0.0)
+        origin_x, origin_y = current[0]
         arc = polyline_arclength(current)
 
         shifted: List[Tuple[float, float]] = []
         for i, (cx, cy) in enumerate(current):
             u = (arc[i] - self.change_start_m) / max(length, 1e-6)
-            w = smoothstep5(u)
+            w = diagonal_progress(u, self.change_ramp_ratio)
             tx, ty = target[i]
-            shifted.append(((1.0-w)*cx + w*tx, (1.0-w)*cy + w*ty))
+            shifted.append(((1.0-w)*(cx-origin_x) + w*tx, (1.0-w)*(cy-origin_y) + w*ty))
         return shifted, length
+
+    def _committed_alignment(self) -> Tuple[bool, dict]:
+        """Check actual pose against the final lane, not odometry distance alone."""
+        if self.committed_path is None or len(self.committed_path.poses) < 3:
+            return False, {"reason": "committed_path_missing"}
+        points = [(p.pose.position.x, p.pose.position.y) for p in self.committed_path.poses]
+        arc = polyline_arclength(points)
+        ex, ey, yaw, _ = self._odom_pose()
+        best = None
+        for i in range(len(points)-1):
+            ax, ay = points[i]
+            bx, by = points[i+1]
+            dx, dy = bx-ax, by-ay
+            length2 = dx*dx+dy*dy
+            if length2 < 1e-9:
+                continue
+            u = clamp(((ex-ax)*dx+(ey-ay)*dy)/length2, 0.0, 1.0)
+            error = math.hypot(ex-ax-u*dx, ey-ay-u*dy)
+            heading = math.atan2(math.sin(yaw-math.atan2(dy, dx)), math.cos(yaw-math.atan2(dy, dx)))
+            if best is None or error < best[0]:
+                best = (error, abs(heading), arc[i]+u*math.sqrt(length2))
+        if best is None:
+            return False, {"reason": "committed_path_degenerate"}
+        error, heading, progress = best
+        aligned = (error <= self.change_center_error_m
+                   and heading <= self.change_heading_error_rad
+                   and progress >= self.change_start_m+self.committed_change_length_m)
+        return aligned, {"path_error_m": round(error, 3), "heading_error_rad": round(heading, 4), "path_progress_m": round(progress, 2)}
+
+    def _filtered_inner_path(self, now: rospy.Time, dt: float) -> Tuple[Optional[RosPath], str]:
+        """Blend camera updates with the previous path in a common map frame.
+
+        Reject lane-identity jumps before they reach steering. Small accepted
+        corrections are spread over time, including the first post-change frame.
+        """
+        camera = self._extend_local_polyline(self._centerline_local(), 40.0)
+        previous = self._path_map_to_local(self.last_inner_path)
+        if len(camera) < 3 or len(previous) < 3:
+            return None, "inner_path_reference_short"
+        for x in (5.0, 8.0, 12.0):
+            if abs(interp_y(camera, x)-interp_y(previous, x)) > self.inner_path_max_jump_m:
+                return None, "inner_path_jump"
+        previous = self._extend_local_polyline(previous, 40.0)
+        alpha = 1.0-math.exp(-max(0.0, dt)/self.inner_path_blend_time_s)
+        blended = [(x, (1.0-alpha)*interp_y(previous, x)+alpha*y) for x, y in camera]
+        return self._local_to_map(blended, now), "ok"
 
     def _map_obstacles_local(self) -> List[LocalObstacle]:
         if self.latest_obstacles is None or self.latest_odom is None:
@@ -1008,7 +1083,7 @@ class HighwayLaneStrategyNode:
             # Pure Pursuit intentionally stops at the end of any finite path.
             # Do not wait for a camera-centering condition all the way to the
             # endpoint: after the planned lateral transition plus the settle
-            # distance, the manoeuvre is geometrically complete.  A second
+            # distance, check actual position and heading before hand-over. A second
             # endpoint-distance guard guarantees hand-over before PP enters its
             # ~1.5 m goal-stop zone even if odometry distance accumulation is a
             # little noisy.
@@ -1022,8 +1097,9 @@ class HighwayLaneStrategyNode:
                 and remaining_to_end <= self.change_endpoint_guard_m
             )
             geometry_complete = settled or endpoint_guard_complete
+            aligned, alignment_diag = self._committed_alignment()
 
-            if geometry_complete and not stop:
+            if geometry_complete and aligned and not stop:
                 if self.complete_since is None:
                     self.complete_since = now
                 elif (now-self.complete_since).to_sec() >= self.change_complete_confirm_s:
@@ -1055,6 +1131,8 @@ class HighwayLaneStrategyNode:
                 "remaining_to_end_m":None if remaining_to_end is None else round(remaining_to_end,2),
                 "endpoint_guard_complete":endpoint_guard_complete,
                 "geometry_complete":geometry_complete,
+                "aligned":aligned,
+                "alignment":alignment_diag,
                 "follow":follow,
             }, now, dt)
             return
@@ -1070,8 +1148,14 @@ class HighwayLaneStrategyNode:
                     lane_reason = center_reason
 
             if lane_ok:
-                local = self._extend_local_polyline(self._centerline_local(), 40.0)
-                self.last_inner_path = self._local_to_map(local, now)
+                filtered, filter_reason = self._filtered_inner_path(now, dt)
+                if filtered is None:
+                    lane_ok = False
+                    lane_reason = filter_reason
+                else:
+                    self.last_inner_path = filtered
+
+            if lane_ok:
                 self.lane_invalid_since = None
             elif self.lane_invalid_since is None:
                 self.lane_invalid_since = now

@@ -24,6 +24,7 @@ from path_planning.longitudinal_controller import PedalSpeedController
 from std_msgs.msg import Bool, Float64
 
 from purepursuit_mgeo.path import MgeoPurePursuit, PathPoint, load_mgeo_path
+from purepursuit_mgeo.motion import SteeringRateLimiter
 
 
 def quaternion_to_yaw(x: float, y: float, z: float, w: float) -> float:
@@ -44,6 +45,14 @@ class PurePursuitNode:
             raise ValueError("target_speed_mps must be zero or positive")
         self.max_steering = float(rospy.get_param("~max_steering_rad", math.radians(40.0)))
         self.rate_hz = float(rospy.get_param("~control_rate_hz", 20.0))
+        self.steering_limiter = SteeringRateLimiter(
+            float(rospy.get_param("~steering_rate_limit_rad_s", 0.0)),
+            1.0/max(self.rate_hz, 1.0),
+        )
+        steering_rate_active_topic = rospy.get_param("~steering_rate_limit_active_topic", "")
+        self.steering_rate_active = not bool(steering_rate_active_topic)
+        if steering_rate_active_topic:
+            rospy.Subscriber(steering_rate_active_topic, Bool, self.steering_rate_active_callback, queue_size=1)
         self.enable_control = bool(rospy.get_param("~enable_control", False))
         self.longl_cmd_type = int(rospy.get_param("~longl_cmd_type", 1))
         self.steering_sign = float(rospy.get_param("~steering_sign", 1.0))
@@ -226,6 +235,9 @@ class PurePursuitNode:
         self.target_speed_override = value
         self.target_speed_override_at = rospy.Time.now()
 
+    def steering_rate_active_callback(self, msg: Bool) -> None:
+        self.steering_rate_active = bool(msg.data)
+
     def merge_stop_callback(self, msg: Bool) -> None:
         self.merge_stop_required = bool(msg.data)
         self.merge_gate_at = rospy.Time.now()
@@ -272,6 +284,7 @@ class PurePursuitNode:
         managed_fault = self._managed_fault_reason(now)
         merge_fresh = self._merge_gate_fresh(now)
         if managed_fault is not None or not merge_fresh:
+            self.steering_limiter.reset(now.to_sec())
             if self.enable_control:
                 self.speed_controller.reset()
                 self.command_pub.publish(self.make_command(0.0, True, 0.0, 1.0))
@@ -330,6 +343,10 @@ class PurePursuitNode:
             or avoidance_stop
             or merge_stop
         )
+        # Stop commands still apply immediately. Match the limiter state to the
+        # zero steering actually sent by make_command, so restart is also smooth.
+        steering = (self.steering_limiter.reset(now.to_sec()) if stop else
+                    self.steering_limiter.update(steering, now.to_sec(), self.steering_rate_active))
 
         target_msg = PointStamped()
         target_msg.header.stamp = now
