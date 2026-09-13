@@ -290,7 +290,6 @@ class HighwayLaneStrategyNode:
         self.lane_invalid_since: Optional[rospy.Time] = None
         self.inner_handover_pending = False
         self.inner_lane_candidate_since: Optional[rospy.Time] = None
-        self.inner_lane_candidate_signature = None
 
         self.path_pub = rospy.Publisher("~active_path", RosPath, queue_size=1)
         self.stop_pub = rospy.Publisher("~stop_required", Bool, queue_size=1)
@@ -482,17 +481,6 @@ class HighwayLaneStrategyNode:
             if not out or math.hypot(p[0]-out[-1][0], p[1]-out[-1][1]) > 0.15:
                 out.append(p)
         return out
-
-    def _lane_signature(self):
-        info = self.lane_info or {}
-        left = info.get("left_lane") or {}
-        right = info.get("right_lane") or {}
-        return (
-            info.get("lane_state"),
-            left.get("track_id") if bool(left.get("detected", False)) else None,
-            right.get("track_id") if bool(right.get("detected", False)) else None,
-        )
-
 
     def _boundary_local(self, key: str) -> List[Tuple[float, float]]:
         """Return a lane boundary in base_link and extrapolate it back to x=0."""
@@ -1361,7 +1349,6 @@ class HighwayLaneStrategyNode:
                     self.last_inner_path = self.committed_path
                     self.inner_handover_pending = True
                     self.inner_lane_candidate_since = None
-                    self.inner_lane_candidate_signature = None
                     why = "settled" if settled else "endpoint_guard"
                     rospy.logwarn(
                         "HIGHWAY lane change COMPLETE count=%d reason=%s remaining=%.2fm",
@@ -1395,12 +1382,11 @@ class HighwayLaneStrategyNode:
             center_y = None
             if self.inner_handover_pending:
                 if lane_ok:
-                    signature = self._lane_signature()
-                    if signature != self.inner_lane_candidate_signature:
-                        self.inner_lane_candidate_signature = signature
-                        self.inner_lane_candidate_since = now
+                    center_ok, center_reason, center_y = self._inner_center_sanity()
+                    if not center_ok:
+                        self.inner_lane_candidate_since = None
                         lane_ok = False
-                        lane_reason = "lane_handover_confirming"
+                        lane_reason = center_reason
                     elif self.inner_lane_candidate_since is None:
                         self.inner_lane_candidate_since = now
                         lane_ok = False
@@ -1411,12 +1397,11 @@ class HighwayLaneStrategyNode:
                     else:
                         self.inner_handover_pending = False
                         self.inner_lane_candidate_since = None
-                        self.inner_lane_candidate_signature = None
                 else:
                     self.inner_lane_candidate_since = None
-                    self.inner_lane_candidate_signature = None
             if lane_ok:
-                center_ok, center_reason, center_y = self._inner_center_sanity()
+                if not center_ok:
+                    center_ok, center_reason, center_y = self._inner_center_sanity()
                 if not center_ok:
                     lane_ok = False
                     lane_reason = center_reason

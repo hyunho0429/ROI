@@ -236,6 +236,28 @@ class HighwaySafetyTest(unittest.TestCase):
         }
         self.assertEqual(self.node._left_dashed_ok(), (False, "left_coasted"))
 
+    def test_two_dashed_boundaries_are_valid_for_lane_center_hold(self):
+        n = self.node
+        n._boundary_local = NODE.HighwayLaneStrategyNode._boundary_local.__get__(n)
+        n._centerline_local = NODE.HighwayLaneStrategyNode._centerline_local.__get__(n)
+        n._lane_valid = NODE.HighwayLaneStrategyNode._lane_valid.__get__(n)
+        n.lane_info_at = Stamp()
+        n.lane_info = {
+            "lane_valid": True,
+            "confidence": 0.8,
+            "lane_width_m": 3.5,
+            "straddling_lane": None,
+            "left_lane": {"detected": True,"type": "white_dashed","dashed": True},
+            "right_lane": {"detected": True,"type": "white_dashed","dashed": True},
+            "left_boundary_points": [[float(x),1.75] for x in range(5,26)],
+            "right_boundary_points": [[float(x),-1.75] for x in range(5,26)],
+            "centerline_points": [[float(x),0.0] for x in range(5,26)],
+        }
+
+        self.assertEqual(n._lane_valid(Stamp()),(True,"ok"))
+        self.assertEqual(n._left_dashed_ok(),(True,"ok"))
+        self.assertAlmostEqual(n._centerline_local()[1][1],0.0)
+
     def test_inner_handover_waits_for_stable_new_lane_without_slowing(self):
         n = self.node
         n.inner_handover_pending = True
@@ -254,6 +276,46 @@ class HighwaySafetyTest(unittest.TestCase):
         self.tick()
         self.assertFalse(n.inner_handover_pending)
         self.assertEqual(n._publish.call_args.args[4]["reason"], "ok")
+
+    def test_dashed_track_id_changes_do_not_reset_center_handover(self):
+        n = self.node
+        n.inner_handover_pending = True
+        n.committed_speed_mps = n.cruise_speed_mps
+        n._global_signed_d.return_value = 3.5
+        n.lane_info.update({
+            "lane_state": "both",
+            "left_lane": {"detected": True,"type": "white_dashed","track_id": 10},
+            "right_lane": {"detected": True,"type": "white_dashed","track_id": 11},
+        })
+
+        with patch.object(NODE.rospy.Time,"now",return_value=Stamp(100.0)):
+            n._tick(None)
+        self.assertTrue(n.inner_handover_pending)
+        self.assertEqual(n.inner_lane_candidate_since.seconds,100.0)
+
+        n.lane_info["left_lane"]["track_id"] = 20
+        n.lane_info["right_lane"]["track_id"] = 21
+        with patch.object(NODE.rospy.Time,"now",return_value=Stamp(100.2)):
+            n._tick(None)
+        self.assertTrue(n.inner_handover_pending)
+        self.assertEqual(n.inner_lane_candidate_since.seconds,100.0)
+
+        with patch.object(NODE.rospy.Time,"now",return_value=Stamp(100.31)):
+            n._tick(None)
+        self.assertFalse(n.inner_handover_pending)
+
+    def test_invalid_center_restarts_handover_confirmation(self):
+        n = self.node
+        n.inner_handover_pending = True
+        n.inner_lane_candidate_since = Stamp(99.9)
+        n._inner_center_sanity.return_value = (False,"inner_center_not_ego_lane",1.2)
+        n._global_signed_d.return_value = 3.5
+
+        self.tick()
+
+        self.assertTrue(n.inner_handover_pending)
+        self.assertIsNone(n.inner_lane_candidate_since)
+        self.assertIn("inner_center_not_ego_lane",n._publish.call_args.args[4]["reason"])
 
     def test_straddling_lane_is_rejected_during_handover(self):
         n = self.node
