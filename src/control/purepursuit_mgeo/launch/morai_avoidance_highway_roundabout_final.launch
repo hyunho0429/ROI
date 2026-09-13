@@ -243,6 +243,16 @@
     <param name="inner_lane_invalid_grace_s" value="1.20" />
     <param name="inner_lane_grace_speed_mps" value="1.50" />
 
+    <!-- V7: sample camera centerline over several frames, then slew-limit the
+         receding-horizon lane-hold path so a lane-identity jump cannot create
+         an instantaneous steering jump. -->
+    <param name="center_filter_window" value="5" />
+    <param name="center_filter_alpha" value="0.35" />
+    <param name="center_filter_max_step_m" value="0.16" />
+    <param name="inner_path_blend_alpha" value="0.30" />
+    <param name="inner_path_max_step_m" value="0.10" />
+    <param name="inner_recovery_timeout_s" value="3.0" />
+
     <!-- Event-based repeated left change: after each change, require the ego
          to settle before the current ego-left dashed boundary can trigger again. -->
     <param name="left_change_rearm_min_s" value="2.5" />
