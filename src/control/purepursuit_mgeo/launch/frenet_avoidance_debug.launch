@@ -44,6 +44,8 @@
        global-path vehicle corridor and is close enough ahead. -->
   <arg name="trigger_distance_m" default="35.0" />
   <arg name="trigger_lateral_margin_m" default="0.35" />
+  <arg name="trigger_lateral_half_cap_m" default="1.25" />
+  <arg name="bypass_static_speed_max_mps" default="0.60" />
 
   <!-- Adjacent-lane sampling. -->
   <arg name="lane_change_start_distances_m" default="[3.0, 7.0, 11.0]" />
@@ -113,6 +115,8 @@
 
     <param name="trigger_distance_m" value="$(arg trigger_distance_m)" />
     <param name="trigger_lateral_margin_m" value="$(arg trigger_lateral_margin_m)" />
+    <param name="trigger_lateral_half_cap_m" value="$(arg trigger_lateral_half_cap_m)" />
+    <param name="bypass_static_speed_max_mps" value="$(arg bypass_static_speed_max_mps)" />
 
     <param name="lane_change_start_distances_m" value="$(arg lane_change_start_distances_m)" />
     <param name="lane_change_lengths_m" value="$(arg lane_change_lengths_m)" />
