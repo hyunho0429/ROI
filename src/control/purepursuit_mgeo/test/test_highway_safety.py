@@ -132,6 +132,16 @@ class HighwaySafetyTest(unittest.TestCase):
         self.assertEqual(speed, 2.0)
         self.assertTrue(self.node._dynamic_path_safe(path_at(), 2.0)[0])
 
+    def test_rear_vehicle_does_not_stop_completed_merge(self):
+        self.node.latest_obstacles.obstacles = [obstacle(-6.0, vx=12.0)]
+        safe, reason = self.node._dynamic_path_safe(path_at(), 2.0)
+        self.assertTrue(safe)
+        self.assertEqual(reason, "ok")
+
+    def test_dynamic_guard_uses_bounded_replanning_horizon(self):
+        self.node.latest_obstacles.obstacles = [obstacle(30.0)]
+        self.assertTrue(self.node._dynamic_path_safe(path_at(), 2.0)[0])
+
     def test_collision_in_first_two_metres_is_not_waived(self):
         self.node.latest_obstacles.obstacles = [obstacle(1.5, vx=-10.0)]
         self.assertFalse(self.node._dynamic_path_safe(path_at(), 2.0)[0])
@@ -159,6 +169,7 @@ class HighwaySafetyTest(unittest.TestCase):
         n.state = n.LANE_CHANGE
         n.committed_path = path_at(3.5)
         n.latest_obstacles.obstacles = [obstacle(16.0, 3.5)]
+        n._adaptive_speed = Mock(return_value=(2.0, False, {}))
         self.assertTrue(self.tick()[1])
 
     def test_emergency_does_not_commit_rejoin(self):
@@ -194,6 +205,31 @@ class HighwaySafetyTest(unittest.TestCase):
     def test_clear_rejoin_still_commits(self):
         self.assertFalse(self.tick()[1])
         self.assertEqual(self.node.state, self.node.REJOIN)
+
+    def test_inner_hold_continues_after_camera_grace_expires(self):
+        n = self.node
+        n._lane_valid.return_value = (False, "lane_info_missing_or_stale")
+        n.lane_invalid_since = Stamp(90.0)
+        n._global_signed_d.return_value = 3.5
+
+        path, stop, speed, _, status, *_ = self.tick()
+
+        self.assertFalse(stop)
+        self.assertEqual(speed, n.inner_lane_grace_speed_mps)
+        self.assertTrue(status["lane_fallback"])
+        self.assertEqual(status["reason"], "lane_fallback_lane_info_missing_or_stale")
+        self.assertGreater(len(path.poses), len(n.committed_path.poses))
+
+    def test_inner_hold_lead_gate_uses_commanded_lane_during_camera_handover(self):
+        n = self.node
+        n._odom_pose.return_value = (0.0, 3.5, 0.0, 2.0)
+        n.last_inner_path = path_at(3.5)
+        n._centerline_local.return_value = [(float(x), -3.5) for x in range(51)]
+        n.latest_obstacles.obstacles = [obstacle(10.0, 0.0)]
+
+        lead, _, _ = n._current_lane_lead()
+
+        self.assertIsNone(lead)
 
     def test_direct_release_preserves_emergency(self):
         n = self.node

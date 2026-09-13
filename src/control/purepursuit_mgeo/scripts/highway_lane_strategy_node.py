@@ -174,6 +174,9 @@ class HighwayLaneStrategyNode:
         self.inner_lane_grace_speed_mps = float(
             rospy.get_param("~inner_lane_grace_speed_mps", 1.50)
         )
+        self.inner_fallback_path_length_m = float(
+            rospy.get_param("~inner_fallback_path_length_m", 60.0)
+        )
 
         self.vehicle_length_m = float(rospy.get_param("~vehicle_length_m", 4.635))
         self.vehicle_width_m = float(rospy.get_param("~vehicle_width_m", 1.892))
@@ -225,6 +228,9 @@ class HighwayLaneStrategyNode:
 
         self.collision_long_margin_m = float(rospy.get_param("~collision_long_margin_m", 0.5))
         self.collision_lat_margin_m = float(rospy.get_param("~collision_lat_margin_m", 0.35))
+        self.dynamic_prediction_horizon_s = float(
+            rospy.get_param("~dynamic_prediction_horizon_s", 5.0)
+        )
         self.max_lateral_accel_mps2 = float(rospy.get_param("~max_lateral_accel_mps2", 2.5))
 
         self.release_global_d_m = float(rospy.get_param("~release_global_d_m", 0.55))
@@ -644,6 +650,22 @@ class HighwayLaneStrategyNode:
             blended.append((x, previous_y+alpha*spatial*bounded_delta))
         return self._local_to_map(blended, now), "limited" if limited else "ok"
 
+    def _rolling_inner_fallback(self, now: rospy.Time) -> Optional[RosPath]:
+        """Keep a receding path after the camera briefly loses the new lane.
+
+        The committed lane-change path has only a few metres left when the
+        completion hand-over occurs.  Re-expressing it from the current pose
+        and extending its final tangent prevents Pure Pursuit from reaching a
+        finite endpoint while lane perception settles after crossing a line.
+        """
+        previous = self._path_map_to_local(self.last_inner_path or self.committed_path)
+        if len(previous) < 2:
+            previous = [(0.0, 0.0), (1.0, 0.0)]
+        previous = self._extend_local_polyline(
+            previous, max(20.0, self.inner_fallback_path_length_m)
+        )
+        return self._local_to_map(previous, now) if len(previous) >= 3 else None
+
     def _map_obstacles_local(self) -> List[LocalObstacle]:
         if self.latest_obstacles is None or self.latest_odom is None:
             return []
@@ -757,9 +779,33 @@ class HighwayLaneStrategyNode:
             a, b = points[i-1], points[i]
             arc.append(arc[-1] + math.hypot(b[0]-a[0], b[1]-a[1]))
 
-        obs = list(self.latest_obstacles.obstacles)
+        # This check is repeated every control tick.  Extrapolating the entire
+        # 40~60 m hold path at a low speed creates a 20+ second prediction and
+        # turns normal rear traffic into a false future collision.  A bounded
+        # horizon is safer and is refreshed before the vehicle reaches it.
+        horizon_arc_m = (
+            max(candidate_speed, 0.5) * max(self.dynamic_prediction_horizon_s, 0.5)
+            + self.vehicle_length_m
+        )
+        effective_max_arc_m = (
+            horizon_arc_m if max_arc_m is None else min(max_arc_m, horizon_arc_m)
+        )
+
+        # A vehicle wholly behind the ego cannot be avoided by braking.  Rear
+        # traffic is checked before lane-change commitment by the dedicated gap
+        # and TTC rules; it must not stop INNER_HOLD after the merge succeeds.
+        ego_rear_x = self.vehicle_center_from_base_m - 0.5*self.vehicle_length_m
+        obs = []
+        for o in self.latest_obstacles.obstacles:
+            dx0 = float(o.center_x_map) - ex
+            dy0 = float(o.center_y_map) - ey
+            lon0 = math.cos(ego_yaw)*dx0 + math.sin(ego_yaw)*dy0
+            obstacle_front_x = lon0 + 0.5*max(0.5, float(o.length))
+            if obstacle_front_x <= ego_rear_x:
+                continue
+            obs.append(o)
         for i, (px, py) in enumerate(points):
-            if max_arc_m is not None and arc[i] > max_arc_m:
+            if arc[i] > effective_max_arc_m:
                 break
             p0 = points[max(0, i-1)]
             p1 = points[min(len(points)-1, i+1)]
@@ -841,7 +887,17 @@ class HighwayLaneStrategyNode:
         return None, None, None, "no_safe_speed_path_pair", diagnostics
 
     def _current_lane_lead(self) -> Tuple[Optional[LocalObstacle], Optional[float], Optional[float]]:
-        center = self._centerline_local()
+        # During and immediately after a change, classify traffic against the
+        # path actually being driven.  The camera may still label the previous
+        # ego lane for a few frames while yaw is returning to zero.
+        if self.state == self.LANE_CHANGE:
+            center = self._path_map_to_local(self.committed_path)
+        elif self.state == self.INNER_HOLD:
+            center = self._path_map_to_local(self.last_inner_path)
+        else:
+            center = self._centerline_local()
+        if len(center) < 2:
+            center = self._centerline_local()
         lane_width = float((self.lane_info or {}).get("lane_width_m") or 3.5)
         best = None
         best_gap = None
@@ -1180,6 +1236,13 @@ class HighwayLaneStrategyNode:
                 and self.lane_invalid_since is not None
                 and (now-self.lane_invalid_since).to_sec() <= self.inner_lane_invalid_grace_s
             )
+            lane_fallback = False
+            if not lane_ok:
+                fallback = self._rolling_inner_fallback(now)
+                if fallback is not None:
+                    path = fallback
+                    self.last_inner_path = fallback
+                    lane_fallback = True
 
             if obs_fresh and lane_ok:
                 adaptive, emergency, follow = self._adaptive_speed(self.cruise_speed_mps)
@@ -1197,10 +1260,12 @@ class HighwayLaneStrategyNode:
             elif lane_ok:
                 stop = path is None
                 inner_reason = "ok" if path is not None else "inner_path_missing"
-            elif lane_grace:
+            elif lane_grace or lane_fallback:
                 stop = False
                 adaptive = min(adaptive, self.inner_lane_grace_speed_mps)
-                inner_reason = "lane_grace_" + lane_reason
+                inner_reason = (
+                    "lane_grace_" if lane_grace else "lane_fallback_"
+                ) + lane_reason
             else:
                 stop = True
                 inner_reason = lane_reason
@@ -1318,6 +1383,7 @@ class HighwayLaneStrategyNode:
                 "inner_hold_travel_m": round(self.inner_hold_travel_m,2),
                 "center_y8_m": None if center_y is None else round(center_y,3),
                 "lane_grace": lane_grace,
+                "lane_fallback": lane_fallback,
                 "follow": follow,
             }, now, dt)
             return
