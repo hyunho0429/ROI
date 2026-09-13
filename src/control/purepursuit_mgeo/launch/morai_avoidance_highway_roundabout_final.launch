@@ -263,6 +263,15 @@
     <param name="inner_path_join_length_m" value="8.0" />
     <param name="change_time_s" value="7.0" />
     <param name="change_post_hold_m" value="10.0" />
+    <!-- Live vehicle-frame RRT*: consumes current lane/odom/LiDAR in memory. -->
+    <param name="rrt_step_size_m" value="2.0" />
+    <param name="rrt_max_iterations" value="50" />
+    <param name="rrt_goal_sample_rate" value="0.15" />
+    <param name="rrt_search_radius_m" value="6.0" />
+    <param name="rrt_goal_tolerance_m" value="2.5" />
+    <param name="rrt_max_heading_deg" value="12.0" />
+    <param name="rrt_corridor_margin_m" value="0.35" />
+    <param name="rrt_smooth_iterations" value="1" />
     <param name="change_settle_m" value="6.0" />
     <param name="change_endpoint_guard_m" value="6.0" />
     <param name="max_lateral_accel_mps2" value="2.5" />

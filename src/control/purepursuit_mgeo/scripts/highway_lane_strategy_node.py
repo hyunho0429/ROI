@@ -11,7 +11,7 @@ and LiDAR tracked obstacles / odometry.
 Outside the highway scenario, it simply republishes the existing avoidance
 PathManager path/stop and the cruise speed. During the highway scenario it:
   1) waits for a safe LEFT merge gap while staying on the base path;
-  2) generates a committed shallow diagonal shift with eased entry/exit;
+  2) plans a live RRT* path from the current lane into the left lane;
   3) keeps following the camera-reported current lane centerline after the
      change, so the vehicle does NOT get pulled back to the original outer
      global path;
@@ -37,7 +37,12 @@ from std_msgs.msg import Bool, Float64, String
 
 from lidar_perception.msg import LidarObstacleArray
 from purepursuit_mgeo.path import PathPoint, load_mgeo_path
-from purepursuit_mgeo.motion import diagonal_progress
+from purepursuit_mgeo.rrt_star import (
+    RRTStarPlanner,
+    RectObstacle,
+    elastic_smooth,
+    resample_path,
+)
 
 
 def clamp(v: float, lo: float, hi: float) -> float:
@@ -201,6 +206,17 @@ class HighwayLaneStrategyNode:
         self.inner_path_join_length_m = float(rospy.get_param("~inner_path_join_length_m", 8.0))
         self.change_time_s = float(rospy.get_param("~change_time_s", 5.5))
         self.change_post_hold_m = float(rospy.get_param("~change_post_hold_m", 10.0))
+        self.rrt_step_size_m = float(rospy.get_param("~rrt_step_size_m", 2.0))
+        self.rrt_max_iterations = int(rospy.get_param("~rrt_max_iterations", 50))
+        self.rrt_goal_sample_rate = float(rospy.get_param("~rrt_goal_sample_rate", 0.15))
+        self.rrt_search_radius_m = float(rospy.get_param("~rrt_search_radius_m", 6.0))
+        self.rrt_goal_tolerance_m = float(rospy.get_param("~rrt_goal_tolerance_m", 2.5))
+        self.rrt_max_heading_rad = math.radians(
+            float(rospy.get_param("~rrt_max_heading_deg", 12.0))
+        )
+        self.rrt_corridor_margin_m = float(rospy.get_param("~rrt_corridor_margin_m", 0.35))
+        self.rrt_smooth_iterations = int(rospy.get_param("~rrt_smooth_iterations", 1))
+        self.rrt_random_seed = int(rospy.get_param("~rrt_random_seed", 20))
         self.change_complete_min_ratio = float(rospy.get_param("~change_complete_min_ratio", 0.72))
         self.change_center_error_m = float(rospy.get_param("~change_center_error_m", 0.45))
         self.change_heading_error_rad = float(rospy.get_param("~change_heading_error_rad", math.radians(10.0)))
@@ -297,6 +313,7 @@ class HighwayLaneStrategyNode:
         self.last_inner_path: Optional[RosPath] = None
         self.lane_invalid_since: Optional[rospy.Time] = None
         self.inner_handover_pending = False
+        self.last_rrt_diag = {}
         self.inner_lane_candidate_since: Optional[rospy.Time] = None
 
         self.path_pub = rospy.Publisher("~active_path", RosPath, queue_size=1)
@@ -634,9 +651,11 @@ class HighwayLaneStrategyNode:
         return self._local_to_map(blended, now)
 
     def _generate_lane_change_local(self, lane_width: float, speed_mps: float) -> Tuple[List[Tuple[float, float]], float]:
-        """One shallow diagonal lane move with eased entry and exit."""
+        """Plan one live LEFT lane change with RRT* in the vehicle frame."""
+        self.last_rrt_diag = {"planner":"rrt_star", "source":"live_lidar"}
         divider = self._boundary_local("left_boundary_points")
         if len(divider) < 3:
+            self.last_rrt_diag["reason"] = "divider_short"
             return [], self.change_min_length_m
         tx, ty = tangent_at(divider, 0)
         # Include ego's initial offset from the detected source-lane center.
@@ -644,6 +663,7 @@ class HighwayLaneStrategyNode:
             divider[0][0]-0.5*lane_width*ty, divider[0][1]+0.5*lane_width*tx))
         heading_length = shift_m / ((1.0-self.change_ramp_ratio) * math.tan(self.change_max_heading_rad))
         if heading_length > self.change_max_length_m:
+            self.last_rrt_diag.update({"reason":"heading_length", "heading_length_m":round(heading_length,2)})
             return [], heading_length
         length = clamp(
             max(max(speed_mps, 1.0) * self.change_time_s, heading_length),
@@ -653,6 +673,7 @@ class HighwayLaneStrategyNode:
         target_len = self.change_start_m + length + self.change_post_hold_m
         divider = self._extend_local_polyline(divider, target_len)
         if len(divider) < 3:
+            self.last_rrt_diag["reason"] = "extended_divider_short"
             return [], length
         # Camera samples can start five metres ahead. Uniform sampling prevents
         # that first long segment from skipping the eased steering entry.
@@ -677,15 +698,125 @@ class HighwayLaneStrategyNode:
             target.append((x + 0.5*lane_width*nx, y + 0.5*lane_width*ny))
 
         origin_x, origin_y = current[0]
+        current = [(x-origin_x, y-origin_y) for x, y in current]
         arc = polyline_arclength(current)
+        change_end_m = self.change_start_m + length
+        start_index = min(range(len(arc)), key=lambda i: abs(arc[i]-self.change_start_m))
+        goal_index = min(range(len(arc)), key=lambda i: abs(arc[i]-change_end_m))
+        if goal_index <= start_index:
+            self.last_rrt_diag["reason"] = "reference_too_short"
+            return [], length
 
-        shifted: List[Tuple[float, float]] = []
-        for i, (cx, cy) in enumerate(current):
-            u = (arc[i] - self.change_start_m) / max(length, 1e-6)
-            w = diagonal_progress(u, self.change_ramp_ratio)
-            tx, ty = target[i]
-            shifted.append(((1.0-w)*(cx-origin_x) + w*tx, (1.0-w)*(cy-origin_y) + w*ty))
-        return shifted, length
+        start = current[start_index]
+        goal = target[goal_index]
+        current_ref = current[start_index:goal_index+1]
+        target_ref = target[start_index:goal_index+1]
+        x_min = min(start[0], goal[0])
+        x_max = max(start[0], goal[0])
+        y_values = [p[1] for p in current_ref] + [p[1] for p in target_ref]
+        y_min = min(y_values)-self.rrt_corridor_margin_m
+        y_max = max(y_values)+self.rrt_corridor_margin_m
+
+        def inside_lane_corridor(x: float, y: float) -> bool:
+            current_y = interp_y(current_ref, x)
+            target_y = interp_y(target_ref, x)
+            if current_y is None or target_y is None:
+                return False
+            low = min(current_y, target_y)-self.rrt_corridor_margin_m
+            high = max(current_y, target_y)+self.rrt_corridor_margin_m
+            return low <= y <= high
+
+        obstacles = []
+        obstacle_ids = []
+        for obstacle in self._map_obstacles_local():
+            # A physically rearward vehicle is handled by the target-lane gap
+            # and TTC gate. Its ego-inflated box must not cover the RRT start.
+            if obstacle.x+0.5*obstacle.length <= 0.0:
+                continue
+            half_length = (
+                0.5*obstacle.length + 0.5*self.vehicle_length_m
+                + self.collision_long_margin_m
+            )
+            half_width = (
+                0.5*obstacle.width + 0.5*self.vehicle_width_m
+                + self.collision_lat_margin_m
+            )
+            if obstacle.x+half_length < x_min or obstacle.x-half_length > x_max:
+                continue
+            if obstacle.y+half_width < y_min or obstacle.y-half_width > y_max:
+                continue
+            obstacles.append(RectObstacle(
+                obstacle.x, obstacle.y, half_length, half_width
+            ))
+            obstacle_ids.append(obstacle.oid)
+
+        seed = self.rrt_random_seed + 997*self.lane_changes_done
+        seed += sum((index+1)*oid for index, oid in enumerate(sorted(obstacle_ids)))
+        planner = RRTStarPlanner(
+            start,
+            goal,
+            obstacles,
+            x_bounds=(x_min, x_max),
+            y_bounds=(y_min, y_max),
+            state_is_valid=inside_lane_corridor,
+            step_size_m=self.rrt_step_size_m,
+            max_iterations=self.rrt_max_iterations,
+            goal_sample_rate=self.rrt_goal_sample_rate,
+            search_radius_m=self.rrt_search_radius_m,
+            goal_tolerance_m=self.rrt_goal_tolerance_m,
+            max_edge_heading_rad=self.rrt_max_heading_rad,
+            random_seed=seed,
+        )
+        try:
+            rrt_path = planner.plan()
+        except RuntimeError as error:
+            self.last_rrt_diag.update({
+                "reason":str(error), "obstacles":obstacle_ids,
+                "nodes":len(planner.nodes),
+            })
+            return [], length
+
+        anchors = current[:start_index+1] + rrt_path[1:]
+        anchors.extend(target[goal_index+1:])
+        dense_anchors = resample_path(anchors, 0.5)
+        selected = None
+        used_weight = None
+        # Start with the smoothest result. If that rounds a corner too close to
+        # an obstacle, progressively retain more of the collision-free RRT path.
+        for data_weight in (0.05, 0.08, 0.10, 0.15):
+            candidate = elastic_smooth(
+                dense_anchors,
+                iterations=max(50, 80*self.rrt_smooth_iterations),
+                weight_data=data_weight,
+            )
+            transition = [p for p in candidate if x_min-1e-6 <= p[0] <= x_max+1e-6]
+            if len(transition) >= 2 and planner.path_is_safe(transition):
+                selected = candidate
+                used_weight = data_weight
+                break
+        if selected is None:
+            self.last_rrt_diag.update({
+                "reason":"rrt_smoothing_collision", "obstacles":obstacle_ids,
+                "nodes":len(planner.nodes),
+            })
+            return [], length
+
+        path = resample_path(selected, 0.5)
+        if len(path) >= 2:
+            end_tx, end_ty = tangent_at(target, len(target)-1)
+            end_step = math.hypot(
+                path[-1][0]-path[-2][0], path[-1][1]-path[-2][1]
+            )
+            path[-2] = (
+                path[-1][0]-end_step*end_tx,
+                path[-1][1]-end_step*end_ty,
+            )
+        self.last_rrt_diag.update({
+            "reason":"ok", "obstacles":obstacle_ids,
+            "nodes":len(planner.nodes), "raw_points":len(rrt_path),
+            "path_points":len(path), "smooth_weight_data":used_weight,
+        })
+        return path, length
 
     def _committed_alignment(self) -> Tuple[bool, dict]:
         """Check actual pose against the final lane, not odometry distance alone."""
@@ -983,6 +1114,7 @@ class HighwayLaneStrategyNode:
                 "gap_reason": gap_reason,
                 "dyn": dyn_reason,
                 "divider": divider_diag,
+                "rrt":dict(self.last_rrt_diag),
             }
             if curv_ok and gap_ok and dyn_ok:
                 return path, v, length, "ok", diagnostics

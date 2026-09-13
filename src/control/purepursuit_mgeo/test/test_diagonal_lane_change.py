@@ -55,6 +55,20 @@ class DiagonalLaneChangeTest(unittest.TestCase):
         self.assertLessEqual(max(headings), math.radians(8.0)+1e-5)
         self.assertAlmostEqual(points[-1][1], 4.3)
 
+    def test_live_lidar_obstacle_is_routed_by_rrt_star(self):
+        n = node_fixture()
+        n.cruise_speed_mps = 4.0
+        n.latest_obstacles.obstacles = [safety.obstacle(25.0,0.0)]
+
+        points, _ = n._generate_lane_change_local(3.5,4.0)
+
+        self.assertGreater(len(points),3)
+        self.assertEqual(n.last_rrt_diag["planner"],"rrt_star")
+        self.assertEqual(n.last_rrt_diag["source"],"live_lidar")
+        self.assertIn(1,n.last_rrt_diag["obstacles"])
+        self.assertGreater(n.last_rrt_diag["raw_points"],2)
+        self.assertTrue(n._path_curvature_ok(points,4.0)[0])
+
     def test_distance_alone_cannot_complete_lane_change(self):
         n = node_fixture()
         n.state = n.LANE_CHANGE
