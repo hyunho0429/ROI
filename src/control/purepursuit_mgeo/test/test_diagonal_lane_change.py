@@ -91,7 +91,31 @@ class DiagonalLaneChangeTest(unittest.TestCase):
         n._centerline_local.return_value = [(0.0, 0.0)] + [(float(x), -0.6) for x in range(5, 26)]
         path, reason = n._filtered_inner_path(Stamp(), .05)
         self.assertEqual(reason, 'ok')
-        self.assertLess(abs(path.poses[1].pose.position.y), .03)
+        self.assertLess(abs(path.poses[1].pose.position.y), .08)
+
+    def test_inner_path_converges_at_controller_lookahead(self):
+        n = node_fixture()
+        n.last_inner_path = path_at()
+        n._centerline_local.return_value = [(0.0, 0.0)] + [(float(x), -0.8) for x in range(5, 26)]
+        for _ in range(20):
+            path, _ = n._filtered_inner_path(Stamp(), .05)
+            n.last_inner_path = path
+        self.assertLess(path.poses[1].pose.position.y, -0.5)
+
+    def test_control_center_is_midpoint_of_physical_boundaries(self):
+        n = node_fixture()
+        n._boundary_local = safety.NODE.HighwayLaneStrategyNode._boundary_local.__get__(n)
+        n._centerline_local = safety.NODE.HighwayLaneStrategyNode._centerline_local.__get__(n)
+        n.lane_info = {
+            'lane_width_m': 3.5,
+            # Deliberately biased derived data: control should use boundaries.
+            'centerline_points': [[float(x), 1.6] for x in range(5, 26)],
+            'left_boundary_points': [[float(x), 1.8] for x in range(5, 26)],
+            'right_boundary_points': [[float(x), -1.7] for x in range(5, 26)],
+        }
+        center = n._centerline_local()
+        self.assertAlmostEqual(center[1][1], 0.05)
+        self.assertTrue(all(abs(y-0.05) < 1e-6 for _, y in center[1:]))
 
     def test_camera_jump_is_blended_without_delayed_stop(self):
         n = node_fixture()
@@ -101,7 +125,7 @@ class DiagonalLaneChangeTest(unittest.TestCase):
         path, stop, _, _, status, *_ = n._publish.call_args.args
         self.assertFalse(stop)
         self.assertEqual(status['reason'], 'ok')
-        self.assertLess(abs(path.poses[1].pose.position.y), .01)
+        self.assertLess(abs(path.poses[1].pose.position.y), .08)
         n.lane_invalid_since = Stamp(98.0)
         n._tick(None)
         self.assertFalse(n._publish.call_args.args[1])

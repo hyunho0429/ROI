@@ -189,9 +189,9 @@ class HighwayLaneStrategyNode:
         self.change_max_heading_rad = math.radians(float(rospy.get_param("~change_max_heading_deg", 8.0)))
         if not 0.0 < self.change_ramp_ratio < 0.5 or not 0.0 < self.change_max_heading_rad < math.pi/4:
             raise ValueError("invalid diagonal lane-change ramp or heading limit")
-        self.inner_path_blend_time_s = max(0.05, float(rospy.get_param("~inner_path_blend_time_s", 1.0)))
+        self.inner_path_blend_time_s = max(0.05, float(rospy.get_param("~inner_path_blend_time_s", 0.35)))
         self.inner_path_max_jump_m = float(rospy.get_param("~inner_path_max_jump_m", 0.75))
-        self.inner_path_join_length_m = float(rospy.get_param("~inner_path_join_length_m", 18.0))
+        self.inner_path_join_length_m = float(rospy.get_param("~inner_path_join_length_m", 8.0))
         self.change_time_s = float(rospy.get_param("~change_time_s", 5.5))
         self.change_post_hold_m = float(rospy.get_param("~change_post_hold_m", 10.0))
         self.change_complete_min_ratio = float(rospy.get_param("~change_complete_min_ratio", 0.72))
@@ -379,6 +379,32 @@ class HighwayLaneStrategyNode:
         return False, "left_not_dashed"
 
     def _centerline_local(self) -> List[Tuple[float, float]]:
+        # Reconstruct the driving center from the two physical boundaries when
+        # both are available.  This makes the control contract explicit: the
+        # requested path is the midpoint between the solid/dashed (or two
+        # dashed) markings, even if a publisher's derived centerline is biased.
+        left = self._boundary_local("left_boundary_points")
+        right = self._boundary_local("right_boundary_points")
+        midpoint: List[Tuple[float, float]] = [(0.0, 0.0)]
+        if len(left) >= 3 and len(right) >= 3:
+            x_start = max(0.5, left[0][0], right[0][0])
+            x_end = min(left[-1][0], right[-1][0])
+            reported_width = (self.lane_info or {}).get("lane_width_m")
+            expected_width = float(reported_width) if reported_width is not None else None
+            x = math.ceil(x_start)
+            while x <= x_end + 1e-6:
+                ly = interp_y(left, x)
+                ry = interp_y(right, x)
+                if ly is not None and ry is not None:
+                    width = float(ly) - float(ry)
+                    width_ok = self.lane_width_min_m <= width <= self.lane_width_max_m
+                    agrees = expected_width is None or abs(width-expected_width) <= 0.8
+                    if width_ok and agrees:
+                        midpoint.append((float(x), 0.5*(float(ly)+float(ry))))
+                x += 1.0
+            if len(midpoint) >= 4:
+                return midpoint
+
         raw = (self.lane_info or {}).get("centerline_points") or []
         pts: List[Tuple[float, float]] = [(0.0, 0.0)]
         for p in raw:
@@ -646,7 +672,11 @@ class HighwayLaneStrategyNode:
             delta = camera_y-previous_y
             bounded_delta = clamp(delta, -self.inner_path_max_jump_m, self.inner_path_max_jump_m)
             limited = limited or abs(delta) > self.inner_path_max_jump_m
-            spatial = smoothstep5((x-1.5)/max(self.inner_path_join_length_m, 1.0))
+            # Start the correction just ahead of the bumper and complete it in
+            # the normal Pure Pursuit look-ahead range.  The old 18 m join made
+            # the effective time constant around x=5 m tens of seconds, so an
+            # offset at lane-change completion was effectively preserved.
+            spatial = smoothstep5((x-0.5)/max(self.inner_path_join_length_m, 1.0))
             blended.append((x, previous_y+alpha*spatial*bounded_delta))
         return self._local_to_map(blended, now), "limited" if limited else "ok"
 
