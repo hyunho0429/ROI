@@ -30,7 +30,6 @@
   <arg name="lane_info_every" default="1" />
   <arg name="highway_environment_topic" default="/perception/camera/highway_environment" />
   <arg name="highway_request_topic" default="/planning/highway_lane_change_request" />
-  <arg name="target_left_lane_changes" default="1" />
 
   <!-- Obstacle BYPASS policy:
        BYPASS never depends on camera lane validity, solid/dashed markings, or
@@ -232,7 +231,6 @@
     <param name="mission_request_bypass_sensor_merge_gate" value="true" />
 
     <param name="cruise_speed_mps" value="$(arg target_speed_mps)" />
-    <param name="target_left_lane_changes" value="$(arg target_left_lane_changes)" />
     <param name="highway_confirm_s" value="0.5" />
     <param name="ready_confirm_s" value="0.5" />
 
@@ -244,6 +242,14 @@
     <param name="inner_center_max_abs_y_m" value="0.90" />
     <param name="inner_lane_invalid_grace_s" value="1.20" />
     <param name="inner_lane_grace_speed_mps" value="1.50" />
+
+    <!-- Event-based repeated left change: after each change, require the ego
+         to settle before the current ego-left dashed boundary can trigger again. -->
+    <param name="left_change_rearm_min_s" value="2.5" />
+    <param name="left_change_rearm_min_m" value="8.0" />
+    <param name="left_change_stable_lateral_m" value="0.35" />
+    <param name="left_change_stable_heading_rad" value="0.1222" />
+    <param name="left_change_stable_confirm_s" value="0.8" />
 
     <param name="change_start_m" value="3.0" />
     <param name="change_min_length_m" value="28.0" />
