@@ -132,14 +132,20 @@ class RRTStarPlanner:
         if not self.obstacles:
             return None
         best: Optional[_Node] = None
-        clearance = max(0.35, 2.0*self.edge_sample_m)
+        # RectObstacle already contains the ego footprint and configured
+        # collision margins. Keep only a numerical longitudinal offset so a
+        # nearby lead vehicle does not force an over-steep entry. A modest
+        # lateral offset also leaves enough distance to flatten the final edge
+        # into the target-lane center.
+        longitudinal_clearance = max(0.02, 0.1*self.edge_sample_m)
+        lateral_clearance = max(0.20, self.edge_sample_m)
         ordered = sorted(self.obstacles, key=lambda obstacle: obstacle.x_m)
         for side in (1.0, -1.0):
             points = [self.start.point]
             for obstacle in ordered:
-                y = obstacle.y_m + side*(obstacle.half_width_m+clearance)
-                left = obstacle.x_m-obstacle.half_length_m-clearance
-                right = obstacle.x_m+obstacle.half_length_m+clearance
+                y = obstacle.y_m + side*(obstacle.half_width_m+lateral_clearance)
+                left = obstacle.x_m-obstacle.half_length_m-longitudinal_clearance
+                right = obstacle.x_m+obstacle.half_length_m+longitudinal_clearance
                 points.extend([(left, y), (right, y)])
             points.append(self.goal.point)
 

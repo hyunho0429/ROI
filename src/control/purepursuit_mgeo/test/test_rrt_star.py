@@ -28,7 +28,9 @@ class RRTStarTest(unittest.TestCase):
         self.assertTrue(planner.path_is_safe(path))
 
     def test_vehicle_box_produces_forward_rrt_detour(self):
-        planner = self.planner([RectObstacle(25.0,0.0,5.1,2.24)])
+        # The inflated box represents a lead vehicle close enough to matter,
+        # while both the adjacent-lane front and rear areas are empty.
+        planner = self.planner([RectObstacle(20.0,0.0,5.1,2.24)])
         path = planner.plan()
         self.assertGreater(len(path),2)
         self.assertTrue(all(b[0] > a[0] for a,b in zip(path,path[1:])))

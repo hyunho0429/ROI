@@ -159,6 +159,52 @@ class HighwaySafetyTest(unittest.TestCase):
         self.assertGreater(len(left),3)
         self.assertAlmostEqual(left[0][1],0.5*n.nominal_lane_width_m)
 
+    def test_forced_rrt_uses_nominal_lane_when_camera_lane_is_stale(self):
+        n = self.node
+        n.force_highway_active = True
+        n.allow_nominal_lane_fallback = True
+        n.rrt_lidar_only_mode = False
+        n.lane_info = None
+        n.lane_info_at = None
+        n._lane_valid = NODE.HighwayLaneStrategyNode._lane_valid.__get__(n)
+        n._centerline_local = NODE.HighwayLaneStrategyNode._centerline_local.__get__(n)
+        n._boundary_local = NODE.HighwayLaneStrategyNode._boundary_local.__get__(n)
+
+        ok, reason = n._lane_valid(Stamp(), require_measured_width=True)
+
+        self.assertTrue(ok)
+        self.assertEqual(reason, "nominal_lane_fallback_lane_info_missing_or_stale")
+        self.assertTrue(n.nominal_lane_fallback_active)
+        self.assertEqual(n._active_lane_width(), n.nominal_lane_width_m)
+        self.assertGreater(len(n._centerline_local()), 3)
+
+    def test_empty_adjacent_lane_generates_rrt_path_around_lead_vehicle(self):
+        n = self.node
+        n.force_highway_active = True
+        n.allow_nominal_lane_fallback = True
+        n.rrt_lidar_only_mode = False
+        n.require_left_dashed = False
+        n.cruise_speed_mps = 4.0
+        n.lane_info = None
+        n.lane_info_at = None
+        n.latest_obstacles.obstacles = [obstacle(20.0)]
+        n._odom_pose.return_value = (0.0, 0.0, 0.0, 4.0)
+        n._lane_valid = NODE.HighwayLaneStrategyNode._lane_valid.__get__(n)
+        n._centerline_local = NODE.HighwayLaneStrategyNode._centerline_local.__get__(n)
+        n._boundary_local = NODE.HighwayLaneStrategyNode._boundary_local.__get__(n)
+
+        path, speed, _, reason, diagnostics = n._choose_lane_change(Stamp())
+
+        self.assertIsNotNone(path)
+        self.assertEqual(speed, 4.0)
+        self.assertEqual(reason, "ok")
+        self.assertEqual(
+            diagnostics["4.0"]["lane_source"],
+            "nominal_lane_fallback_lane_info_missing_or_stale",
+        )
+        self.assertEqual(diagnostics["4.0"]["gap"]["objects"], [])
+        self.assertEqual(diagnostics["4.0"]["rrt"]["reason"], "ok")
+
     def test_forced_test_mode_bypasses_upstream_merge_gate(self):
         n = self.node
         n.force_highway_active = True

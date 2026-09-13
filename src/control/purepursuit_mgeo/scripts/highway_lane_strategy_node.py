@@ -150,6 +150,9 @@ class HighwayLaneStrategyNode:
         self.rrt_lidar_only_mode = bool(
             rospy.get_param("~rrt_lidar_only_mode", False)
         )
+        self.allow_nominal_lane_fallback = bool(
+            rospy.get_param("~allow_nominal_lane_fallback", False)
+        )
         self.cruise_speed_mps = float(rospy.get_param("~cruise_speed_mps", 6.0))
         self.rate_hz = float(rospy.get_param("~rate_hz", 20.0))
         self.min_lane_hold_before_next_change_m = float(rospy.get_param("~min_lane_hold_before_next_change_m", 8.0))
@@ -288,6 +291,7 @@ class HighwayLaneStrategyNode:
         self.obstacles_at: Optional[rospy.Time] = None
         self.lane_info = None
         self.lane_info_at: Optional[rospy.Time] = None
+        self.nominal_lane_fallback_active = False
         self.highway_environment = False
         self.highway_at: Optional[rospy.Time] = None
         self.highway_request = False
@@ -394,17 +398,34 @@ class HighwayLaneStrategyNode:
             or self.highway_request
         )
 
+    def _nominal_lane_fallback_allowed(self) -> bool:
+        return bool(
+            self.rrt_lidar_only_mode
+            or (self.force_highway_active and self.allow_nominal_lane_fallback)
+        )
+
+    def _lane_failure(self, reason: str) -> Tuple[bool, str]:
+        if self._nominal_lane_fallback_allowed():
+            self.nominal_lane_fallback_active = True
+            return True, "nominal_lane_fallback_" + reason
+        self.nominal_lane_fallback_active = False
+        return False, reason
+
     def _lane_valid(self, now: rospy.Time, require_measured_width: bool = False) -> Tuple[bool, str]:
         if self.rrt_lidar_only_mode:
+            self.nominal_lane_fallback_active = True
             return True, "lidar_only_nominal_lane"
+        # Re-evaluate the camera input on every cycle. A prior fallback must not
+        # hide a camera lane that has become valid again.
+        self.nominal_lane_fallback_active = False
         if self.lane_info is None or not self._fresh(self.lane_info_at, self.lane_info_timeout_s, now):
-            return False, "lane_info_missing_or_stale"
+            return self._lane_failure("lane_info_missing_or_stale")
         d = self.lane_info
         if not bool(d.get("lane_valid", False)):
-            return False, "lane_invalid"
+            return self._lane_failure("lane_invalid")
         straddling = d.get("straddling_lane") or {}
         if bool(straddling.get("detected", False)):
-            return False, "lane_straddling"
+            return self._lane_failure("lane_straddling")
         confidence_value = d.get("confidence")
         if confidence_value is None:
             boundary_confidences = [
@@ -414,24 +435,24 @@ class HighwayLaneStrategyNode:
             ]
             confidence_value = min(boundary_confidences) if boundary_confidences else 0.0
         if float(confidence_value or 0.0) < self.min_lane_confidence:
-            return False, "lane_confidence"
+            return self._lane_failure("lane_confidence")
         width = d.get("lane_width_m")
         if require_measured_width and width is None:
-            return False, "lane_width"
+            return self._lane_failure("lane_width")
         if width is not None and not (self.lane_width_min_m <= float(width) <= self.lane_width_max_m):
-            return False, "lane_width"
+            return self._lane_failure("lane_width")
         pts = self._centerline_local()
         if len(pts) < 3:
-            return False, "centerline_short"
+            return self._lane_failure("centerline_short")
         heading = d.get("heading_error_rad")
         if heading is None:
             y_near = interp_y(pts, 5.0)
             y_far = interp_y(pts, 12.0)
             if y_near is None or y_far is None:
-                return False, "lane_heading"
+                return self._lane_failure("lane_heading")
             heading = math.atan2(float(y_far)-float(y_near), 7.0)
         if abs(float(heading)) > self.max_heading_error_rad:
-            return False, "lane_heading"
+            return self._lane_failure("lane_heading")
         return True, "ok"
 
     def _left_dashed_ok(self) -> Tuple[bool, str]:
@@ -449,7 +470,7 @@ class HighwayLaneStrategyNode:
         return False, "left_not_dashed"
 
     def _centerline_local(self) -> List[Tuple[float, float]]:
-        if self.rrt_lidar_only_mode:
+        if self.rrt_lidar_only_mode or self.nominal_lane_fallback_active:
             # The RRT test course is a straight highway. Receding points in the
             # current vehicle frame keep planning independent of camera packets.
             return [(0.5*index, 0.0) for index in range(121)]
@@ -525,7 +546,7 @@ class HighwayLaneStrategyNode:
 
     def _boundary_local(self, key: str) -> List[Tuple[float, float]]:
         """Return a lane boundary in base_link and extrapolate it back to x=0."""
-        if self.rrt_lidar_only_mode:
+        if self.rrt_lidar_only_mode or self.nominal_lane_fallback_active:
             side = 1.0 if key == "left_boundary_points" else -1.0
             y = side*0.5*self.nominal_lane_width_m
             return [(0.5*index, y) for index in range(121)]
@@ -554,6 +575,11 @@ class HighwayLaneStrategyNode:
     def _left_divider_sanity(self, lane_width: float) -> Tuple[bool, str, dict]:
         divider = self._boundary_local("left_boundary_points")
         if len(divider) < 3:
+            if self._nominal_lane_fallback_allowed():
+                self.nominal_lane_fallback_active = True
+                return True, "nominal_lane_fallback_left_divider_short", {
+                    "fallback_from": "left_divider_short", "n": len(divider)
+                }
             return False, "left_divider_short", {"n": len(divider)}
         y5 = interp_y(divider, 5.0)
         if y5 is None:
@@ -566,13 +592,21 @@ class HighwayLaneStrategyNode:
             "divider_error_m": round(err, 3),
         }
         if float(y5) <= 0.0:
+            if self._nominal_lane_fallback_allowed():
+                self.nominal_lane_fallback_active = True
+                diag["fallback_from"] = "left_divider_wrong_side"
+                return True, "nominal_lane_fallback_left_divider_wrong_side", diag
             return False, "left_divider_wrong_side", diag
         if err > self.left_divider_expected_tol_m:
+            if self._nominal_lane_fallback_allowed():
+                self.nominal_lane_fallback_active = True
+                diag["fallback_from"] = "left_divider_not_adjacent"
+                return True, "nominal_lane_fallback_left_divider_not_adjacent", diag
             return False, "left_divider_not_adjacent", diag
         return True, "ok", diag
 
     def _active_lane_width(self) -> float:
-        if self.rrt_lidar_only_mode:
+        if self.rrt_lidar_only_mode or self.nominal_lane_fallback_active:
             return self.nominal_lane_width_m
         return float((self.lane_info or {}).get("lane_width_m"))
 
@@ -1082,9 +1116,9 @@ class HighwayLaneStrategyNode:
         return True, "ok"
 
     def _choose_lane_change(self, now: rospy.Time) -> Tuple[Optional[RosPath], Optional[float], Optional[float], str, dict]:
-        ok, reason = self._lane_valid(now, require_measured_width=True)
+        ok, lane_source = self._lane_valid(now, require_measured_width=True)
         if not ok:
-            return None, None, None, reason, {}
+            return None, None, None, lane_source, {}
         dashed, dreason = self._left_dashed_ok()
         if not dashed:
             return None, None, None, dreason, {}
@@ -1138,6 +1172,8 @@ class HighwayLaneStrategyNode:
                 path, v, self.change_start_m + length + 4.0
             )
             diagnostics[str(v)] = {
+                "lane_source": lane_source,
+                "divider_source": divider_reason,
                 "curvature": round(max_k,5),
                 "gap": gap_diag,
                 "gap_reason": gap_reason,
