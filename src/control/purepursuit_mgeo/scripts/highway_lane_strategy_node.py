@@ -167,6 +167,11 @@ class HighwayLaneStrategyNode:
         self.change_center_error_m = float(rospy.get_param("~change_center_error_m", 0.45))
         self.change_heading_error_rad = float(rospy.get_param("~change_heading_error_rad", math.radians(10.0)))
         self.change_complete_confirm_s = float(rospy.get_param("~change_complete_confirm_s", 0.45))
+        # Never let the finite committed lane-change path reach Pure Pursuit's
+        # ordinary goal-stop condition.  Once the lateral transition is done and
+        # only a few metres of post-hold remain, hand over to the receding-horizon
+        # INNER_HOLD path.
+        self.change_endpoint_guard_m = float(rospy.get_param("~change_endpoint_guard_m", 6.0))
 
         self.front_min_gap_m = float(rospy.get_param("~front_min_gap_m", 6.0))
         self.rear_min_gap_m = float(rospy.get_param("~rear_min_gap_m", 7.0))
@@ -892,16 +897,27 @@ class HighwayLaneStrategyNode:
             settled = self.change_travel_m >= settle_needed
             progressed = settled
             centered = lane_ok and lat is not None and head is not None and abs(float(lat)) <= self.change_center_error_m and abs(float(head)) <= self.change_heading_error_rad
-            # Do not switch from the committed quintic to the camera centerline
-            # immediately after lateral translation.  Keep several metres of the
-            # post-change straight segment so Pure Pursuit can settle first.
-            fallback_complete = (
-                self.change_travel_m >= (self.change_start_m + self.committed_change_length_m + 0.9*self.change_post_hold_m)
-                and lane_ok
-                and head is not None
-                and abs(float(head)) <= math.radians(15.0)
+
+            # The committed lane-change path is finite, while the sensor-team
+            # Pure Pursuit intentionally stops at the end of any finite path.
+            # Do not wait for a camera-centering condition all the way to the
+            # endpoint: after the planned lateral transition plus the settle
+            # distance, the manoeuvre is geometrically complete.  A second
+            # endpoint-distance guard guarantees hand-over before PP enters its
+            # ~1.5 m goal-stop zone even if odometry distance accumulation is a
+            # little noisy.
+            remaining_to_end = None
+            if self.committed_path is not None and self.committed_path.poses:
+                ep = self.committed_path.poses[-1].pose.position
+                remaining_to_end = math.hypot(float(ep.x)-ex, float(ep.y)-ey)
+            endpoint_guard_complete = (
+                transition_done
+                and remaining_to_end is not None
+                and remaining_to_end <= self.change_endpoint_guard_m
             )
-            if (settled and centered) or fallback_complete:
+            geometry_complete = settled or endpoint_guard_complete
+
+            if geometry_complete:
                 if self.complete_since is None:
                     self.complete_since = now
                 elif (now-self.complete_since).to_sec() >= self.change_complete_confirm_s:
@@ -910,12 +926,29 @@ class HighwayLaneStrategyNode:
                     self.inner_hold_travel_m = 0.0
                     self.last_hold_xy = (ex,ey)
                     self.release_since = None
-                    rospy.logwarn("HIGHWAY lane change COMPLETE count=%d", self.lane_changes_done)
+                    why = "settled" if settled else "endpoint_guard"
+                    rospy.logwarn(
+                        "HIGHWAY lane change COMPLETE count=%d reason=%s remaining=%.2fm",
+                        self.lane_changes_done, why,
+                        -1.0 if remaining_to_end is None else remaining_to_end,
+                    )
             else:
                 self.complete_since = None
 
             stop_reason = "lead_emergency" if emergency else ("obstacles_stale" if not obs_fresh else lane_reason)
-            self._publish(self.committed_path, stop, speed, True, {"reason":stop_reason, "travel_m":round(self.change_travel_m,2), "transition_done":transition_done, "settled":settled, "settle_needed_m":round(settle_needed,2), "progressed":progressed, "centered":centered, "fallback_complete":fallback_complete, "follow":follow}, now, dt)
+            self._publish(self.committed_path, stop, speed, True, {
+                "reason":stop_reason,
+                "travel_m":round(self.change_travel_m,2),
+                "transition_done":transition_done,
+                "settled":settled,
+                "settle_needed_m":round(settle_needed,2),
+                "progressed":progressed,
+                "centered":centered,
+                "remaining_to_end_m":None if remaining_to_end is None else round(remaining_to_end,2),
+                "endpoint_guard_complete":endpoint_guard_complete,
+                "geometry_complete":geometry_complete,
+                "follow":follow,
+            }, now, dt)
             return
 
         if self.state == self.INNER_HOLD:
