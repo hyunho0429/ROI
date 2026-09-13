@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Launch the camera team's real_lane_node.py lane pipeline.
+"""Launch the camera team's existing live_lane_info_publisher_v2.py unchanged.
 
 This wrapper belongs to purepursuit_mgeo.  It only locates and executes the
-camera_perception/post_processing/real_lane_node.py publisher so the unified
-stack publishes /perception/camera/lane_info.
+existing camera_perception/lane/live_lane_info_publisher_v2.py so the unified
+stack publishes /perception/camera/lane_info without modifying camera-team
+source files.
 """
 from __future__ import annotations
 
@@ -27,7 +28,7 @@ def main() -> None:
     args, _ = ap.parse_known_args()
 
     pkg_root = Path(rospkg.RosPack().get_path("camera_perception"))
-    target = pkg_root / "post_processing" / "real_lane_node.py"
+    target = pkg_root / "lane" / "live_lane_info_publisher_v2.py"
     if not target.is_file():
         raise SystemExit(f"lane-info publisher not found: {target}")
 

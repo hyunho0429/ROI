@@ -368,10 +368,6 @@ class HighwayLaneStrategyNode:
         left = (self.lane_info or {}).get("left_lane") or {}
         if not bool(left.get("detected", False)):
             return False, "left_not_detected"
-        if bool(left.get("from_guide", False)):
-            return False, "left_from_guide"
-        if bool(left.get("coasted", False)):
-            return False, "left_coasted"
         if left.get("dashed") is True:
             return True, "ok"
         return False, "left_not_dashed"

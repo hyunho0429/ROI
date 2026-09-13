@@ -82,15 +82,8 @@ class LaneInfoSemanticAdapter:
         left = self._lane(info, "left_lane")
         right = self._lane(info, "right_lane")
 
-        # Guide-generated and coasted boundaries are useful for visualization
-        # and continuity, but they are not a fresh paint observation.  Do not
-        # let either one activate a lane-crossing decision.
-        left_detected = (bool(left.get("detected", False))
-                         and not bool(left.get("from_guide", False))
-                         and not bool(left.get("coasted", False)))
-        right_detected = (bool(right.get("detected", False))
-                          and not bool(right.get("from_guide", False))
-                          and not bool(right.get("coasted", False)))
+        left_detected = bool(left.get("detected", False))
+        right_detected = bool(right.get("detected", False))
         left_type = left.get("type")
         right_type = right.get("type")
 

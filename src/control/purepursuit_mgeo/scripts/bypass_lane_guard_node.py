@@ -497,10 +497,6 @@ class BypassLaneGuard:
         lane = info.get(key) or {}
         if not bool(lane.get("detected", False)):
             return False, f"{side}_boundary_missing"
-        if bool(lane.get("from_guide", False)):
-            return False, f"{side}_boundary_from_guide"
-        if bool(lane.get("coasted", False)):
-            return False, f"{side}_boundary_coasted"
         lane_type = str(lane.get("type") or "").lower()
         dashed = lane.get("dashed")
         if lane_type == "yellow" or "solid" in lane_type:

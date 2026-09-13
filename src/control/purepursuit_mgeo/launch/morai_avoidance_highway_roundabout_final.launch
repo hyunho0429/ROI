@@ -73,17 +73,17 @@
   <param name="/purepursuit_mgeo/roundabout_override_intersection_stop"
          value="$(arg roundabout_override_intersection_stop)" />
 
-  <!-- Sensor-team canonical stack. The real-lane process owns the camera UDP port. -->
+  <!-- Sensor-team canonical stack. Camera overlay / lane-info source stay untouched. -->
   <include file="$(find morai_bringup)/launch/morai_udp_ekf_purepursuit_lidar_camera.launch">
     <arg name="path_file" value="$(arg path_file)" />
     <arg name="morai_host_ip" value="$(arg morai_host_ip)" />
     <arg name="target_speed_mps" value="$(arg target_speed_mps)" />
     <arg name="enable_control" value="$(arg enable_control)" />
-    <!-- One UDP consumer only: real_lane_node.py owns MORAI lane port 1101. -->
+    <!-- One UDP consumer only: live_lane_info_publisher_v2.py owns MORAI lane port 1101. -->
     <arg name="enable_lane" value="false" />
   </include>
 
-  <!-- Launch the camera team's post-processing lane pipeline.
+  <!-- Launch the camera team's EXISTING lane-info publisher without modifying it.
        The canonical camera launch above does not publish /perception/camera/lane_info. -->
   <node if="$(arg enable_lane_info_publisher)"
         pkg="purepursuit_mgeo"
