@@ -204,6 +204,13 @@ class AvoidanceFrenetDebugNode:
         self.trigger_lateral_half_cap_m = float(
             rospy.get_param("~trigger_lateral_half_cap_m", 1.25)
         )
+        # BYPASS is for static obstacles only. Dynamic traffic is handled by
+        # scenario-specific yield/highway logic; otherwise crossing vehicles at
+        # a roundabout can incorrectly trigger a free-space bypass and stop-go
+        # oscillation.
+        self.bypass_static_speed_max_mps = float(
+            rospy.get_param("~bypass_static_speed_max_mps", 0.60)
+        )
 
         self.start_distances_m = _parse_float_list(
             rospy.get_param("~lane_change_start_distances_m", [3.0, 7.0, 11.0]),
@@ -889,9 +896,15 @@ class AvoidanceFrenetDebugNode:
             lateral_overlap = abs(projection.d) <= lateral_limit
             ahead_or_overlapping = rel_s + longitudinal_half >= -0.5 * self.vehicle_length_m
             within_range = near_edge <= self.trigger_distance_m
-            threatening = bool(lateral_overlap and ahead_or_overlapping and within_range)
             speed = math.hypot(
                 float(obstacle.velocity_x_map), float(obstacle.velocity_y_map)
+            )
+            static_for_bypass = speed <= self.bypass_static_speed_max_mps
+            threatening = bool(
+                lateral_overlap
+                and ahead_or_overlapping
+                and within_range
+                and static_for_bypass
             )
             infos.append(
                 ObstacleFrenetInfo(
