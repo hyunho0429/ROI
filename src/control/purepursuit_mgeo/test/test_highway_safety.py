@@ -133,6 +133,58 @@ class HighwaySafetyTest(unittest.TestCase):
         self.assertEqual(speed, 2.0)
         self.assertTrue(self.node._dynamic_path_safe(path_at(), 2.0)[0])
 
+    def test_forced_test_mode_activates_without_camera_highway_event(self):
+        n = self.node
+        n.force_highway_active = True
+        n.highway_environment = False
+        n.highway_request = False
+        self.assertTrue(n._activation_present())
+
+    def test_lidar_only_mode_supplies_lane_geometry_without_camera(self):
+        n = self.node
+        n.rrt_lidar_only_mode = True
+        n.lane_info = None
+        n.lane_info_at = None
+        n._lane_valid = NODE.HighwayLaneStrategyNode._lane_valid.__get__(n)
+        n._centerline_local = NODE.HighwayLaneStrategyNode._centerline_local.__get__(n)
+        n._boundary_local = NODE.HighwayLaneStrategyNode._boundary_local.__get__(n)
+
+        self.assertEqual(
+            n._lane_valid(Stamp(),require_measured_width=True),
+            (True,"lidar_only_nominal_lane"),
+        )
+        self.assertEqual(n._active_lane_width(),n.nominal_lane_width_m)
+        self.assertGreater(len(n._centerline_local()),3)
+        left = n._boundary_local("left_boundary_points")
+        self.assertGreater(len(left),3)
+        self.assertAlmostEqual(left[0][1],0.5*n.nominal_lane_width_m)
+
+    def test_forced_test_mode_bypasses_upstream_merge_gate(self):
+        n = self.node
+        n.force_highway_active = True
+        n.rrt_lidar_only_mode = True
+        n.highway_environment = False
+        n.highway_request = False
+        n.lane_info = None
+        n._lane_valid = NODE.HighwayLaneStrategyNode._lane_valid.__get__(n)
+        n.require_left_dashed = False
+        n.merge_at = None
+        n.merge_available = False
+        n.merge_unavailable = True
+        n._left_divider_sanity = Mock(return_value=(True,"ok",{}))
+        n._generate_lane_change_local = Mock(
+            return_value=([(0.0,0.0),(10.0,1.0),(35.0,3.5)],32.0)
+        )
+        n._path_curvature_ok = Mock(return_value=(True,0.01))
+        n._gap_safe_for_speed = Mock(return_value=(True,"ok",{}))
+        n._local_to_map = Mock(return_value=path_at(3.5))
+        n._dynamic_path_safe = Mock(return_value=(True,"ok"))
+
+        path, _, _, reason, _ = n._choose_lane_change(Stamp())
+
+        self.assertIsNotNone(path)
+        self.assertEqual(reason,"ok")
+
     def test_rear_vehicle_does_not_stop_completed_merge(self):
         self.node.latest_obstacles.obstacles = [obstacle(-6.0, vx=12.0)]
         safe, reason = self.node._dynamic_path_safe(path_at(), 2.0)

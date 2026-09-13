@@ -144,6 +144,12 @@ class HighwayLaneStrategyNode:
         self.merge_available_topic = rospy.get_param("~merge_available_topic", "/perception/merge_gap/available")
         self.merge_unavailable_topic = rospy.get_param("~merge_unavailable_topic", "/perception/merge_gap/unavailable")
 
+        self.force_highway_active = bool(
+            rospy.get_param("~force_highway_active", False)
+        )
+        self.rrt_lidar_only_mode = bool(
+            rospy.get_param("~rrt_lidar_only_mode", False)
+        )
         self.cruise_speed_mps = float(rospy.get_param("~cruise_speed_mps", 6.0))
         self.rate_hz = float(rospy.get_param("~rate_hz", 20.0))
         self.min_lane_hold_before_next_change_m = float(rospy.get_param("~min_lane_hold_before_next_change_m", 8.0))
@@ -382,9 +388,15 @@ class HighwayLaneStrategyNode:
         return stamp is not None and (now - stamp).to_sec() <= timeout
 
     def _activation_present(self) -> bool:
-        return bool(self.highway_environment or self.highway_request)
+        return bool(
+            self.force_highway_active
+            or self.highway_environment
+            or self.highway_request
+        )
 
     def _lane_valid(self, now: rospy.Time, require_measured_width: bool = False) -> Tuple[bool, str]:
+        if self.rrt_lidar_only_mode:
+            return True, "lidar_only_nominal_lane"
         if self.lane_info is None or not self._fresh(self.lane_info_at, self.lane_info_timeout_s, now):
             return False, "lane_info_missing_or_stale"
         d = self.lane_info
@@ -437,6 +449,10 @@ class HighwayLaneStrategyNode:
         return False, "left_not_dashed"
 
     def _centerline_local(self) -> List[Tuple[float, float]]:
+        if self.rrt_lidar_only_mode:
+            # The RRT test course is a straight highway. Receding points in the
+            # current vehicle frame keep planning independent of camera packets.
+            return [(0.5*index, 0.0) for index in range(121)]
         straddling = (self.lane_info or {}).get("straddling_lane") or {}
         if bool(straddling.get("detected", False)):
             return [(0.0, 0.0)]
@@ -509,6 +525,10 @@ class HighwayLaneStrategyNode:
 
     def _boundary_local(self, key: str) -> List[Tuple[float, float]]:
         """Return a lane boundary in base_link and extrapolate it back to x=0."""
+        if self.rrt_lidar_only_mode:
+            side = 1.0 if key == "left_boundary_points" else -1.0
+            y = side*0.5*self.nominal_lane_width_m
+            return [(0.5*index, y) for index in range(121)]
         raw = (self.lane_info or {}).get(key) or []
         pts: List[Tuple[float, float]] = []
         for q in raw:
@@ -550,6 +570,11 @@ class HighwayLaneStrategyNode:
         if err > self.left_divider_expected_tol_m:
             return False, "left_divider_not_adjacent", diag
         return True, "ok", diag
+
+    def _active_lane_width(self) -> float:
+        if self.rrt_lidar_only_mode:
+            return self.nominal_lane_width_m
+        return float((self.lane_info or {}).get("lane_width_m"))
 
     def _inner_center_sanity(self) -> Tuple[bool, str, Optional[float]]:
         center = self._centerline_local()
@@ -1069,8 +1094,12 @@ class HighwayLaneStrategyNode:
         # false.  Under an explicit request we may skip only that upstream veto;
         # the lane-change still must pass this node's own LiDAR front/rear gap,
         # TTC, predicted-collision, curvature and dashed-line checks below.
+        explicit_or_forced_request = (
+            self.highway_request or self.force_highway_active
+        )
         use_sensor_merge_gate = not (
-            self.highway_request and self.mission_request_bypass_sensor_merge_gate
+            explicit_or_forced_request
+            and self.mission_request_bypass_sensor_merge_gate
         )
         if use_sensor_merge_gate:
             if not self._fresh(self.merge_at, self.merge_timeout_s, now):
@@ -1080,7 +1109,7 @@ class HighwayLaneStrategyNode:
         if not self._fresh(self.obstacles_at, self.obstacle_timeout_s, now):
             return None, None, None, "obstacles_stale", {}
 
-        width = float(self.lane_info.get("lane_width_m"))
+        width = self._active_lane_width()
         divider_ok, divider_reason, divider_diag = self._left_divider_sanity(width)
         if not divider_ok:
             return None, None, None, divider_reason, {"divider": divider_diag}
@@ -1424,12 +1453,12 @@ class HighwayLaneStrategyNode:
 
         # WAIT_GAP: stay on the existing global/avoidance path, but start adapting speed.
         if self.state == self.WAIT_GAP:
-            adaptive, emergency, follow = self._adaptive_speed(self.cruise_speed_mps) if obs_fresh and self.lane_info is not None else (self.cruise_speed_mps, False, {})
+            adaptive, emergency, follow = self._adaptive_speed(self.cruise_speed_mps) if obs_fresh and (self.lane_info is not None or self.rrt_lidar_only_mode) else (self.cruise_speed_mps, False, {})
             shaping = self.cruise_speed_mps
             shaping_diag = {}
             lane_ok_for_shape, _ = self._lane_valid(now, require_measured_width=True)
             if obs_fresh and lane_ok_for_shape:
-                shaping, shaping_diag = self._gap_shaping_speed(float(self.lane_info.get("lane_width_m")))
+                shaping, shaping_diag = self._gap_shaping_speed(self._active_lane_width())
             wait_speed = min(adaptive, shaping)
             path, cand_speed, length, reason, diag = self._choose_lane_change(now)
             if path is not None:

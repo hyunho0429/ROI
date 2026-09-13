@@ -8,7 +8,9 @@
        + sensor-team Pure Pursuit geometry / longlCmdType=1.
   -->
 
-  <arg name="morai_host_ip" default="192.168.0.161" />
+  <!-- RRT test network: MORAI host/source and this algorithm PC destination. -->
+  <arg name="morai_host_ip" default="192.168.56.1" />
+  <arg name="bind_ip" default="192.168.56.101" />
   <arg name="path_file"
        default="$(find morai_bringup)/../../../data/routes/2026_molit_comp_global_path.txt" />
   <arg name="link_set_file"
@@ -19,9 +21,11 @@
   <arg name="managed_timeout_s" default="1.0" />
 
   <!-- The wrapper launches the camera team's real-lane post-processing pipeline. -->
-  <arg name="enable_lane_info_publisher" default="true" />
+  <!-- LiDAR-only RRT test: no camera UDP receiver or inference process. -->
+  <arg name="enable_lane_info_publisher" default="false" />
+  <arg name="enable_camera_object_detection" default="false" />
   <arg name="lane_info_topic" default="/perception/camera/lane_info" />
-  <arg name="lane_info_ip" default="0.0.0.0" />
+  <arg name="lane_info_ip" default="$(arg bind_ip)" />
   <arg name="lane_info_port" default="1101" />
   <arg name="lane_info_checkpoint" default="$(find camera_perception)/models/best.pt" />
   <arg name="lane_info_cam_set" default="$(find camera_perception)/lane/cam_set.json" />
@@ -74,11 +78,14 @@
   <!-- Sensor-team canonical stack. The real-lane process owns the camera UDP port. -->
   <include file="$(find morai_bringup)/launch/morai_udp_ekf_purepursuit_lidar_camera.launch">
     <arg name="path_file" value="$(arg path_file)" />
+    <arg name="bind_ip" value="$(arg bind_ip)" />
     <arg name="morai_host_ip" value="$(arg morai_host_ip)" />
     <arg name="target_speed_mps" value="$(arg target_speed_mps)" />
     <arg name="enable_control" value="$(arg enable_control)" />
     <!-- One UDP consumer only: real_lane_node.py owns MORAI lane port 1101. -->
     <arg name="enable_lane" value="false" />
+    <!-- RRT test needs lane geometry, not camera vehicle/highway activation. -->
+    <arg name="enable_yolo" value="$(arg enable_camera_object_detection)" />
   </include>
 
   <!-- Launch the camera team's post-processing lane pipeline.
@@ -232,20 +239,23 @@
     <param name="merge_available_topic" value="/perception/merge_gap/available" />
     <param name="merge_unavailable_topic" value="/perception/merge_gap/unavailable" />
     <param name="mission_request_bypass_sensor_merge_gate" value="true" />
+    <!-- Test/rrt mode: arm immediately; LiDAR gap/TTC/collision checks remain. -->
+    <param name="force_highway_active" value="true" />
+    <param name="rrt_lidar_only_mode" value="true" />
 
     <param name="cruise_speed_mps" value="$(arg target_speed_mps)" />
     <!-- Keep merge speed within 12.5% of cruise; wait for a faster gap otherwise. -->
     <param name="lane_change_min_speed_ratio" value="0.875" />
     <param name="lane_change_min_speed_mps" value="2.5" />
     <param name="min_lane_hold_before_next_change_m" value="8.0" />
-    <param name="highway_confirm_s" value="0.5" />
+    <param name="highway_confirm_s" value="0.0" />
     <param name="ready_confirm_s" value="0.5" />
 
     <param name="min_lane_confidence" value="0.45" />
     <param name="lane_width_min_m" value="2.7" />
     <param name="lane_width_max_m" value="4.2" />
     <param name="nominal_lane_width_m" value="3.5" />
-    <param name="require_left_dashed" value="true" />
+    <param name="require_left_dashed" value="false" />
     <param name="left_divider_expected_tol_m" value="0.90" />
     <param name="inner_center_max_abs_y_m" value="0.90" />
     <param name="inner_lane_invalid_grace_s" value="1.20" />
