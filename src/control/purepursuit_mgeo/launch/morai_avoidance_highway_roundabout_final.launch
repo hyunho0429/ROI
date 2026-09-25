@@ -294,13 +294,19 @@
     <param name="inner_fallback_path_length_m" value="60.0" />
     <!-- End repeated LEFT changes at the final lane, but keep following the
          midpoint between its nearest left solid and nearest right dashed line. -->
-    <param name="final_lane_confirm_s" value="0.50" />
+    <param name="final_lane_confirm_s" value="0.25" />
 
     <param name="change_start_m" value="3.0" />
     <param name="change_min_length_m" value="32.0" />
     <param name="change_max_length_m" value="40.0" />
     <param name="change_ramp_ratio" value="0.20" />
     <param name="change_max_heading_deg" value="8.0" />
+    <!-- The first merge stays shallow. Later merges use a shorter, steeper
+         diagonal so the car does not spend too long straddling a divider. -->
+    <param name="repeat_change_min_length_m" value="22.0" />
+    <param name="repeat_change_max_length_m" value="30.0" />
+    <param name="repeat_change_time_s" value="4.5" />
+    <param name="repeat_change_max_heading_deg" value="12.0" />
     <!-- Follow the midpoint of the newly detected left/right boundaries soon
          after hand-over while retaining a smooth steering transition. -->
     <param name="inner_path_blend_time_s" value="0.60" />
@@ -319,6 +325,7 @@
     <param name="rrt_corridor_margin_m" value="0.35" />
     <param name="rrt_smooth_iterations" value="1" />
     <param name="change_settle_m" value="6.0" />
+    <param name="repeat_change_settle_m" value="3.0" />
     <param name="change_endpoint_guard_m" value="6.0" />
     <param name="max_lateral_accel_mps2" value="2.5" />
 

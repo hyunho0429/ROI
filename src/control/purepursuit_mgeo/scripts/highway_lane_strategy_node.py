@@ -202,7 +202,7 @@ class HighwayLaneStrategyNode:
             rospy.get_param("~inner_fallback_path_length_m", 60.0)
         )
         self.final_lane_confirm_s = max(
-            0.0, float(rospy.get_param("~final_lane_confirm_s", 0.50))
+            0.0, float(rospy.get_param("~final_lane_confirm_s", 0.25))
         )
 
         self.vehicle_length_m = float(rospy.get_param("~vehicle_length_m", 4.635))
@@ -214,7 +214,24 @@ class HighwayLaneStrategyNode:
         self.change_max_length_m = float(rospy.get_param("~change_max_length_m", 40.0))
         self.change_ramp_ratio = float(rospy.get_param("~change_ramp_ratio", 0.2))
         self.change_max_heading_rad = math.radians(float(rospy.get_param("~change_max_heading_deg", 8.0)))
-        if not 0.0 < self.change_ramp_ratio < 0.5 or not 0.0 < self.change_max_heading_rad < math.pi/4:
+        self.repeat_change_min_length_m = float(
+            rospy.get_param("~repeat_change_min_length_m", 22.0)
+        )
+        self.repeat_change_max_length_m = float(
+            rospy.get_param("~repeat_change_max_length_m", 30.0)
+        )
+        self.repeat_change_time_s = float(
+            rospy.get_param("~repeat_change_time_s", 4.5)
+        )
+        self.repeat_change_max_heading_rad = math.radians(float(
+            rospy.get_param("~repeat_change_max_heading_deg", 12.0)
+        ))
+        if (
+            not 0.0 < self.change_ramp_ratio < 0.5
+            or not 0.0 < self.change_max_heading_rad < math.pi/4
+            or not 0.0 < self.repeat_change_max_heading_rad < math.pi/4
+            or self.repeat_change_min_length_m > self.repeat_change_max_length_m
+        ):
             raise ValueError("invalid diagonal lane-change ramp or heading limit")
         self.inner_path_blend_time_s = max(0.05, float(rospy.get_param("~inner_path_blend_time_s", 0.60)))
         self.inner_path_max_jump_m = float(rospy.get_param("~inner_path_max_jump_m", 0.45))
@@ -264,6 +281,9 @@ class HighwayLaneStrategyNode:
         self.emergency_gap_m = float(rospy.get_param("~emergency_gap_m", 1.5))
         self.emergency_ttc_s = float(rospy.get_param("~emergency_ttc_s", 1.0))
         self.change_settle_m = float(rospy.get_param("~change_settle_m", 6.0))
+        self.repeat_change_settle_m = float(
+            rospy.get_param("~repeat_change_settle_m", 3.0)
+        )
         self.speed_rise_mps2 = float(rospy.get_param("~speed_rise_mps2", 0.8))
         self.speed_fall_mps2 = float(rospy.get_param("~speed_fall_mps2", 1.8))
         # Reject merge slots that require giving up most of the cruise speed.
@@ -488,7 +508,7 @@ class HighwayLaneStrategyNode:
         return False, "adjacent_left_not_dashed"
 
     def _final_lane_markings_present(self) -> bool:
-        """True for a fresh white-solid left / white-dashed right ego lane."""
+        """True when the fresh nearest-left ego boundary is white solid."""
         info = self.lane_info or {}
         if (
             not bool(info.get("lane_valid", False))
@@ -497,18 +517,13 @@ class HighwayLaneStrategyNode:
             return False
 
         left = info.get("left_lane") or {}
-        right = info.get("right_lane") or {}
-        for lane in (left, right):
-            if (
-                not bool(lane.get("detected", False))
-                or bool(lane.get("from_guide", False))
-                or bool(lane.get("coasted", False))
-            ):
-                return False
-        return (
-            left.get("type") == "white_solid"
-            and right.get("type") == "white_dashed"
-        )
+        if (
+            not bool(left.get("detected", False))
+            or bool(left.get("from_guide", False))
+            or bool(left.get("coasted", False))
+        ):
+            return False
+        return left.get("type") == "white_solid"
 
     def _update_final_lane_lock(self, now: rospy.Time, geometry_ok: bool) -> bool:
         """Latch off further merges while keeping camera lane-centre control."""
@@ -527,8 +542,8 @@ class HighwayLaneStrategyNode:
             self.ready_since = None
             self.release_since = None
             rospy.logwarn(
-                "HIGHWAY further lane changes OFF: nearest left=white_solid "
-                "right=white_dashed; holding measured lane centre"
+                "HIGHWAY further lane changes OFF: nearest left=white_solid; "
+                "holding measured lane centre"
             )
         return True
 
@@ -817,23 +832,43 @@ class HighwayLaneStrategyNode:
 
     def _generate_lane_change_local(self, lane_width: float, speed_mps: float) -> Tuple[List[Tuple[float, float]], float]:
         """Plan one live LEFT lane change with RRT* in the vehicle frame."""
-        self.last_rrt_diag = {"planner":"rrt_star", "source":"live_lidar"}
+        repeated = self.lane_changes_done > 0
+        min_length = (
+            self.repeat_change_min_length_m if repeated
+            else self.change_min_length_m
+        )
+        max_length = (
+            self.repeat_change_max_length_m if repeated
+            else self.change_max_length_m
+        )
+        change_time = (
+            self.repeat_change_time_s if repeated else self.change_time_s
+        )
+        max_heading = (
+            self.repeat_change_max_heading_rad if repeated
+            else self.change_max_heading_rad
+        )
+        self.last_rrt_diag = {
+            "planner":"rrt_star",
+            "source":"live_lidar",
+            "profile":"repeat_fast" if repeated else "first_stable",
+        }
         divider = self._boundary_local("left_boundary_points")
         if len(divider) < 3:
             self.last_rrt_diag["reason"] = "divider_short"
-            return [], self.change_min_length_m
+            return [], min_length
         tx, ty = tangent_at(divider, 0)
         # Include ego's initial offset from the detected source-lane center.
         shift_m = max(lane_width, math.hypot(
             divider[0][0]-0.5*lane_width*ty, divider[0][1]+0.5*lane_width*tx))
-        heading_length = shift_m / ((1.0-self.change_ramp_ratio) * math.tan(self.change_max_heading_rad))
-        if heading_length > self.change_max_length_m:
+        heading_length = shift_m / ((1.0-self.change_ramp_ratio) * math.tan(max_heading))
+        if heading_length > max_length:
             self.last_rrt_diag.update({"reason":"heading_length", "heading_length_m":round(heading_length,2)})
             return [], heading_length
         length = clamp(
-            max(max(speed_mps, 1.0) * self.change_time_s, heading_length),
-            self.change_min_length_m,
-            self.change_max_length_m,
+            max(max(speed_mps, 1.0) * change_time, heading_length),
+            min_length,
+            max_length,
         )
         target_len = self.change_start_m + length + self.change_post_hold_m
         divider = self._extend_local_polyline(divider, target_len)
@@ -1683,7 +1718,11 @@ class HighwayLaneStrategyNode:
             lat = None if self.lane_info is None else self.lane_info.get("lateral_error_m")
             head = None if self.lane_info is None else self.lane_info.get("heading_error_rad")
             transition_done = self.change_travel_m >= (self.change_start_m + self.committed_change_length_m)
-            settle_needed = self.change_start_m + self.committed_change_length_m + min(self.change_settle_m, self.change_post_hold_m)
+            settle_distance = (
+                self.repeat_change_settle_m
+                if self.lane_changes_done > 0 else self.change_settle_m
+            )
+            settle_needed = self.change_start_m + self.committed_change_length_m + min(settle_distance, self.change_post_hold_m)
             settled = self.change_travel_m >= settle_needed
             progressed = settled
             centered = lane_ok and lat is not None and head is not None and abs(float(lat)) <= self.change_center_error_m and abs(float(head)) <= self.change_heading_error_rad

@@ -188,6 +188,7 @@ class HighwaySafetyTest(unittest.TestCase):
 
     def test_yolo_highway_with_empty_adjacent_lane_generates_rrt_path(self):
         n = self.node
+        n.lane_changes_done = 0
         n.force_highway_active = False
         n.highway_environment = True
         n.allow_nominal_lane_fallback = True

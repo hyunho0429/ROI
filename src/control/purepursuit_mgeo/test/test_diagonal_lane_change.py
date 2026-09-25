@@ -12,6 +12,7 @@ def node_fixture():
     fixture = safety.HighwaySafetyTest()
     fixture.setUp()
     n = fixture.node
+    n.lane_changes_done = 0
     n._boundary_local = lambda key: [(float(x), 1.75) for x in (0, 5, 10, 15, 20, 25)]
     return n
 
@@ -46,6 +47,29 @@ class DiagonalLaneChangeTest(unittest.TestCase):
         n.change_max_length_m = 20.0
         points, _ = n._generate_lane_change_local(3.5, 2.0)
         self.assertEqual(points, [])
+
+    def test_second_change_uses_shorter_faster_diagonal(self):
+        n = node_fixture()
+        n.cruise_speed_mps = 4.0
+        n._boundary_local = lambda key: [
+            (float(x), 1.75) for x in (0, 5, 10, 15, 20, 25)
+        ]
+
+        n.lane_changes_done = 0
+        first, first_length = n._generate_lane_change_local(3.5, 4.0)
+        n.lane_changes_done = 1
+        second, second_length = n._generate_lane_change_local(3.5, 4.0)
+
+        self.assertGreater(len(first), 3)
+        self.assertGreater(len(second), 3)
+        self.assertLess(second_length, first_length)
+        self.assertEqual(n.last_rrt_diag['profile'], 'repeat_fast')
+        headings = [
+            abs(math.atan2(b[1]-a[1], b[0]-a[0]))
+            for a, b in zip(second, second[1:])
+        ]
+        self.assertLessEqual(max(headings), math.radians(12.0)+1e-5)
+        self.assertTrue(n._path_curvature_ok(second, 4.0)[0])
 
     def test_ego_offset_does_not_create_sharp_entry(self):
         n = node_fixture()

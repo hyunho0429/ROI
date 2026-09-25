@@ -111,7 +111,7 @@ class RepeatedLaneChangeTest(unittest.TestCase):
         n._choose_lane_change.assert_not_called()
         n._generate_rejoin_path.assert_not_called()
 
-    def test_left_solid_without_right_dashed_does_not_lock_changes(self):
+    def test_left_solid_locks_changes_even_without_right_dashed(self):
         n = self.node
         n.lane_info.update({
             'lane_valid': True,
@@ -120,7 +120,7 @@ class RepeatedLaneChangeTest(unittest.TestCase):
             'right_lane': {'detected': True, 'type': 'white_solid'},
         })
 
-        self.assertFalse(n._final_lane_markings_present())
+        self.assertTrue(n._final_lane_markings_present())
 
     def test_final_lane_stops_after_lane_geometry_grace_expires(self):
         n = self.node
