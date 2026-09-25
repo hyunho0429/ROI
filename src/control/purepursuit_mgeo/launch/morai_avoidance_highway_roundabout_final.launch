@@ -27,13 +27,13 @@
   <arg name="lane_info_topic" default="/perception/camera/lane_info" />
   <arg name="lane_info_ip" default="$(arg bind_ip)" />
   <arg name="lane_info_port" default="1101" />
-  <!-- Use the lane checkpoint from dev/merged_code.  Keep the lane-info
-       publisher so the RRT planner still receives fitted lane geometry. -->
-  <arg name="lane_info_checkpoint" default="$(find camera_perception)/lane/lane_seg_best.pt" />
+  <!-- Use the six-class lane checkpoint while keeping the lane-info publisher
+       that supplies fitted lane geometry to the RRT planner. -->
+  <arg name="lane_info_checkpoint" default="$(find camera_perception)/models/best.pt" />
   <arg name="lane_info_cam_set" default="$(find camera_perception)/lane/cam_set.json" />
   <arg name="lane_info_device" default="auto" />
   <arg name="lane_info_every" default="1" />
-  <!-- Show the merged_code segmentation and fitted lane boundaries in one window. -->
+  <!-- Show the six-class segmentation and fitted lane boundaries in one window. -->
   <arg name="enable_lane_debug_view" default="true" />
   <arg name="lane_debug_scale" default="0.75" />
   <arg name="yolo_port" default="1131" />

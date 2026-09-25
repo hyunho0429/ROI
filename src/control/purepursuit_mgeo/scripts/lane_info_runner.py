@@ -39,6 +39,9 @@ def main() -> None:
         "--every", str(max(1, args.every)),
         "--topic", args.topic,
         "--display-scale", str(max(0.1, args.display_scale)),
+        # The integrated stack already owns the MORAI IMU UDP port.  Opening
+        # it again here makes the lane process contend with localization.
+        "--no-imu",
     ]
     if str(args.display).strip().lower() in ("1", "true", "yes", "on"):
         target_args.append("--display")

@@ -102,7 +102,7 @@ DEFAULT_TOPIC = "/perception/camera/lane_info"
 POINT_STEP_M = 0.5
 POINT_MAX = 80
 
-DEBUG_WINDOW = "6-class lane perception"
+DEBUG_WINDOW = "lane_overlay - 6-class perception"
 DEBUG_CLASS_COLORS = {
     getattr(rl, "CLASS_WHITE_SOLID", 1): (255, 0, 255),    # magenta
     getattr(rl, "CLASS_WHITE_DASHED", 2): (255, 255, 0),   # cyan
