@@ -29,6 +29,7 @@ LaneResult 에서 뽑으므로 "눈으로 본 값"과 "제어가 받은 값"이 
 """
 
 import argparse
+import json
 import os
 import sys
 import time
@@ -87,6 +88,8 @@ def build_arg_parser():
                     help="N 프레임마다 추론 (CPU 처럼 느린 환경에서 화면을 부드럽게)")
     ap.add_argument("--ros-publish", action="store_true",
                     help="점선·양쪽 실선·정지선 결과를 ROS 토픽으로 발행")
+    ap.add_argument("--lane-info-topic", default="",
+                    help="설정하면 같은 추론 결과의 주행용 lane_info JSON을 발행")
     ap.add_argument("--dashed-lane-topic",
                     default="/perception/camera/dashed_lane_detected")
     ap.add_argument("--left-solid-lane-topic",
@@ -112,30 +115,39 @@ def main(argv=None):
     right_solid_publisher = None
     stopline_detected_publisher = None
     stopline_distance_publisher = None
-    if args.ros_publish:
+    lane_info_publisher = None
+    lane_info_stabilizer = None
+    if args.ros_publish or args.lane_info_topic:
         import rospy as rospy_module
-        from std_msgs.msg import Bool, Float64
+        from std_msgs.msg import Bool, Float64, String
 
         rospy = rospy_module
         rospy.init_node("camera_lane_perception", anonymous=False)
-        dashed_publisher = rospy.Publisher(
-            args.dashed_lane_topic, Bool, queue_size=1
-        )
-        left_solid_publisher = rospy.Publisher(
-            args.left_solid_lane_topic, Bool, queue_size=1
-        )
-        left_yellow_solid_publisher = rospy.Publisher(
-            args.left_yellow_solid_lane_topic, Bool, queue_size=1
-        )
-        right_solid_publisher = rospy.Publisher(
-            args.right_solid_lane_topic, Bool, queue_size=1
-        )
-        stopline_detected_publisher = rospy.Publisher(
-            args.stopline_detected_topic, Bool, queue_size=1
-        )
-        stopline_distance_publisher = rospy.Publisher(
-            args.stopline_distance_topic, Float64, queue_size=1
-        )
+        if args.ros_publish:
+            dashed_publisher = rospy.Publisher(
+                args.dashed_lane_topic, Bool, queue_size=1
+            )
+            left_solid_publisher = rospy.Publisher(
+                args.left_solid_lane_topic, Bool, queue_size=1
+            )
+            left_yellow_solid_publisher = rospy.Publisher(
+                args.left_yellow_solid_lane_topic, Bool, queue_size=1
+            )
+            right_solid_publisher = rospy.Publisher(
+                args.right_solid_lane_topic, Bool, queue_size=1
+            )
+            stopline_detected_publisher = rospy.Publisher(
+                args.stopline_detected_topic, Bool, queue_size=1
+            )
+            stopline_distance_publisher = rospy.Publisher(
+                args.stopline_distance_topic, Float64, queue_size=1
+            )
+        if args.lane_info_topic:
+            from live_lane_info_publisher_v2 import LaneOutputStabilizer
+            lane_info_publisher = rospy.Publisher(
+                args.lane_info_topic, String, queue_size=1
+            )
+            lane_info_stabilizer = LaneOutputStabilizer()
 
     pipe = LaneDetector(args.checkpoint, cam_set=args.cam_set,
                         bonnet_mask=False if args.no_bonnet else args.bonnet,
@@ -170,7 +182,7 @@ def main(argv=None):
                         n_since = 0
                         frame = f
                         res = pipe.run(frame)
-                        if rospy is not None:
+                        if args.ros_publish:
                             left_dashed = bool(
                                 res.ego_left is not None
                                 and res.ego_left.is_dashed
@@ -208,6 +220,13 @@ def main(argv=None):
                                     )
                                 )
                             )
+                        if lane_info_publisher is not None:
+                            from std_msgs.msg import String
+                            lane_info_publisher.publish(String(data=json.dumps(
+                                lane_info_stabilizer.update(res),
+                                ensure_ascii=False,
+                                separators=(",", ":"),
+                            )))
                         now = time.time()
                         dt = now - t_prev
                         t_prev = now
@@ -252,7 +271,7 @@ def main(argv=None):
     except KeyboardInterrupt:
         pass
     finally:
-        if rospy is not None:
+        if args.ros_publish:
             try:
                 dashed_publisher.publish(Bool(data=False))
                 left_solid_publisher.publish(Bool(data=False))

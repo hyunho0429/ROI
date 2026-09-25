@@ -109,14 +109,14 @@
     <arg name="highway_latch_once" value="$(arg highway_latch_once)" />
   </include>
 
-  <!-- Launch the camera team's post-processing lane pipeline.
-       The canonical camera launch above does not publish /perception/camera/lane_info. -->
+  <!-- Use the same overlay process that is verified by camera_perception.launch.
+       It publishes lane_info from the same inference result, so UDP 1101 has one owner. -->
   <node if="$(arg enable_lane_info_publisher)"
-        pkg="purepursuit_mgeo"
-        type="lane_info_runner.py"
-        name="lane_info_runner"
+        pkg="camera_perception"
+        type="camera_feature_runner.py"
+        name="lane_camera"
         output="screen"
-        args="--ip $(arg lane_info_ip) --port $(arg lane_info_port) --checkpoint $(arg lane_info_checkpoint) --cam-set $(arg lane_info_cam_set) --device $(arg lane_info_device) --every $(arg lane_info_every) --topic $(arg lane_info_topic) --display $(arg enable_lane_debug_view) --display-scale $(arg lane_debug_scale)" />
+        args="--mode lane --cam-ip $(arg lane_info_ip) --cam-port $(arg lane_info_port) --lane-checkpoint $(arg lane_info_checkpoint) --lane-cam-set $(arg lane_info_cam_set) --lane-device $(arg lane_info_device) --lane-every $(arg lane_info_every) --lane-scale $(arg lane_debug_scale) --lane-info-topic $(arg lane_info_topic)" />
 
   <!-- Republish the camera team's semantic lane topics from lane_info JSON.
        This replaces the second live_overlay inference process without changing camera-team source files. -->

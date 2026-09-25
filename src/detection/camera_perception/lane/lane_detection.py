@@ -112,9 +112,9 @@ from seg_dataset import (IMAGENET_MEAN, IMAGENET_STD, INPUT_H,  # noqa: E402
                          INPUT_W, NUM_CLASSES)
 from seg_model import LaneSegNet                            # noqa: E402
 
-CLASS_BG, CLASS_WHITE_SOLID, CLASS_WHITE_DASHED, CLASS_YELLOW, CLASS_STOPLINE = range(5)
+CLASS_BG, CLASS_WHITE_SOLID, CLASS_WHITE_DASHED, CLASS_YELLOW, CLASS_STOPLINE, CLASS_GUIDE = range(6)
 LANE_CLASSES = (CLASS_WHITE_SOLID, CLASS_WHITE_DASHED, CLASS_YELLOW)
-CLASS_NAMES = ["background", "white_solid", "white_dashed", "yellow", "stopline"]
+CLASS_NAMES = ["background", "white_solid", "white_dashed", "yellow", "stopline", "guide"]
 
 CROP_TOP = 260              # GenerateLabels.CROP_TOP 과 같아야 한다
 DEFAULT_SENSOR_ID = 1       # 전방 카메라
@@ -671,10 +671,22 @@ class LaneDetector:
         checkpoint = checkpoint or default_checkpoint()
         ck = torch.load(checkpoint, map_location=self.device)
         backbone = ck.get("args", {}).get("backbone", "resnet34")
-        self.model = LaneSegNet(backbone, pretrained=False).to(self.device)
+        checkpoint_names = list(ck.get("class_names", CLASS_NAMES))
+        self.num_classes = int(ck.get("num_classes", len(checkpoint_names)))
+        self.input_w, self.input_h = (
+            int(v) for v in ck.get("input_size", (INPUT_W, INPUT_H))
+        )
+        self.model = LaneSegNet(
+            backbone, pretrained=False, num_classes=self.num_classes
+        ).to(self.device)
         self.model.load_state_dict(ck["model"])
         self.model.eval()
-        self.ckpt_info = {"epoch": ck.get("epoch"), "backbone": backbone}
+        self.ckpt_info = {
+            "epoch": ck.get("epoch"),
+            "backbone": backbone,
+            "num_classes": self.num_classes,
+            "class_names": checkpoint_names,
+        }
         self.crop_top = crop_top
         self.rng = np.random.default_rng(seed)
         self.tracker = LaneTracker() if track else None
@@ -719,7 +731,9 @@ class LaneDetector:
     @torch.no_grad()
     def infer_mask(self, frame_bgr):
         img = frame_bgr[self.crop_top:] if frame_bgr.shape[0] > self.src_h else frame_bgr
-        img = cv2.resize(img, (INPUT_W, INPUT_H), interpolation=cv2.INTER_LINEAR)
+        img = cv2.resize(
+            img, (self.input_w, self.input_h), interpolation=cv2.INTER_LINEAR
+        )
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
         img = (img - IMAGENET_MEAN) / IMAGENET_STD
         x = torch.from_numpy(img.transpose(2, 0, 1).copy()).unsqueeze(0).to(self.device)

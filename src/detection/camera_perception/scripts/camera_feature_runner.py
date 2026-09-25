@@ -34,6 +34,7 @@ def main():
     parser.add_argument("--lane-scale", type=float, default=1.0)
     parser.add_argument("--lane-bev", action="store_true")
     parser.add_argument("--lane-ros-publish", action="store_true")
+    parser.add_argument("--lane-info-topic", default="")
     parser.add_argument(
         "--dashed-lane-topic",
         default="/perception/camera/dashed_lane_detected",
@@ -89,6 +90,8 @@ def main():
             target_args.extend(("--device", args.lane_device))
         if args.lane_bev:
             target_args.append("--bev")
+        if args.lane_info_topic:
+            target_args.extend(("--lane-info-topic", args.lane_info_topic))
         if args.lane_ros_publish:
             target_args.extend(
                 (

@@ -23,7 +23,7 @@
   <arg name="camera_ip" default="$(arg bind_ip)" />
   <arg name="enable_lane" default="true" />
   <arg name="lane_port" default="1101" />
-  <arg name="lane_checkpoint" default="$(find camera_perception)/lane/lane_seg_best.pt" />
+  <arg name="lane_checkpoint" default="$(find camera_perception)/models/best.pt" />
   <arg name="lane_cam_set" default="$(find camera_perception)/lane/cam_set.json" />
   <arg name="lane_device" default="auto" />
   <arg name="lane_every" default="1" />

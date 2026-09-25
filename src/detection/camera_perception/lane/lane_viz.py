@@ -22,7 +22,7 @@ import cv2
 import numpy as np
 
 from lane_detection import (BEV_H, BEV_W, BEV_X_MAX, CLASS_NAMES, CLASS_STOPLINE,
-                            CLASS_WHITE_DASHED, CLASS_WHITE_SOLID, CLASS_YELLOW,
+                            CLASS_GUIDE, CLASS_WHITE_DASHED, CLASS_WHITE_SOLID, CLASS_YELLOW,
                             NUM_CLASSES, ROAD_Z_EGO, ego_to_bev)
 
 ID_COLORS = {-1: (0, 255, 0), 1: (255, 200, 0), -2: (0, 165, 255), 2: (255, 0, 255),
@@ -30,8 +30,9 @@ ID_COLORS = {-1: (0, 255, 0), 1: (255, 200, 0), -2: (0, 165, 255), 2: (255, 0, 2
 # **도색과 같은 색을 쓰면 안 된다.** 백색 실선을 흰색으로 칠하면 원래 흰 도색
 # 위에서 구분이 안 된다 (실제로 정지선만 보였다).
 MASK_VIEW_COLORS = {CLASS_WHITE_SOLID: (255, 0, 255), CLASS_WHITE_DASHED: (255, 255, 0),
-                    CLASS_YELLOW: (0, 255, 0), CLASS_STOPLINE: (0, 0, 255)}
-MASK_VIEW_LABEL = "solid=magenta  dashed=cyan  yellow=green  stop=red"
+                    CLASS_YELLOW: (0, 255, 0), CLASS_STOPLINE: (0, 0, 255),
+                    CLASS_GUIDE: (0, 165, 255)}
+MASK_VIEW_LABEL = "solid=magenta  dashed=cyan  yellow=green  stop=red  guide=orange"
 
 
 def _lane_color(l):
@@ -113,10 +114,10 @@ def draw_mask_only(det, frame_bgr, crop_top, alpha=0.8, dilate=1):
         color[m] = bgr; hit |= m
     vis[hit] = (vis[hit] * (1 - alpha) + color[hit] * alpha).astype(np.uint8)
 
-    n = np.bincount(det.mask.ravel(), minlength=NUM_CLASSES)
+    n = np.bincount(det.mask.ravel(), minlength=len(CLASS_NAMES))
     cv2.rectangle(vis, (0, 0), (vis.shape[1], 46), (0, 0, 0), -1)
     cv2.putText(vis, "  ".join(f"{CLASS_NAMES[c][:9]} {n[c]}px"
-                               for c in range(1, NUM_CLASSES)),
+                               for c in range(1, len(CLASS_NAMES))),
                 (8, 17), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
     cv2.putText(vis, MASK_VIEW_LABEL, (8, 38), cv2.FONT_HERSHEY_SIMPLEX, 0.45,
                 (180, 180, 180), 1)
