@@ -210,9 +210,9 @@ class HighwayLaneStrategyNode:
         self.change_max_heading_rad = math.radians(float(rospy.get_param("~change_max_heading_deg", 8.0)))
         if not 0.0 < self.change_ramp_ratio < 0.5 or not 0.0 < self.change_max_heading_rad < math.pi/4:
             raise ValueError("invalid diagonal lane-change ramp or heading limit")
-        self.inner_path_blend_time_s = max(0.05, float(rospy.get_param("~inner_path_blend_time_s", 0.35)))
+        self.inner_path_blend_time_s = max(0.05, float(rospy.get_param("~inner_path_blend_time_s", 0.25)))
         self.inner_path_max_jump_m = float(rospy.get_param("~inner_path_max_jump_m", 0.75))
-        self.inner_path_join_length_m = float(rospy.get_param("~inner_path_join_length_m", 8.0))
+        self.inner_path_join_length_m = float(rospy.get_param("~inner_path_join_length_m", 6.0))
         self.change_time_s = float(rospy.get_param("~change_time_s", 5.5))
         self.change_post_hold_m = float(rospy.get_param("~change_post_hold_m", 10.0))
         self.rrt_step_size_m = float(rospy.get_param("~rrt_step_size_m", 2.0))
@@ -489,9 +489,10 @@ class HighwayLaneStrategyNode:
                 reported.append((x, y))
         reported.sort(key=lambda q: q[0])
 
-        # Use the real-lane pipeline center as the primary lane-hold path after
-        # checking it against the two physical boundaries.  If the reported
-        # center is inconsistent, fall back to a direct boundary midpoint.
+        # When both physical boundaries are available, always drive their
+        # geometric midpoint.  A separately reported centerline may have been
+        # filtered from an earlier lane and can retain a lateral bias just after
+        # a lane change.
         left = self._boundary_local("left_boundary_points")
         right = self._boundary_local("right_boundary_points")
         midpoint: List[Tuple[float, float]] = [(0.0, 0.0)]
@@ -512,13 +513,6 @@ class HighwayLaneStrategyNode:
                         midpoint.append((float(x), 0.5*(float(ly)+float(ry))))
                 x += 1.0
             if len(midpoint) >= 4:
-                center_errors = []
-                for x, y in reported[1:]:
-                    midpoint_y = interp_y(midpoint, x)
-                    if midpoint_y is not None:
-                        center_errors.append(abs(y-midpoint_y))
-                if len(reported) >= 4 and len(center_errors) >= 3 and max(center_errors) <= 0.35:
-                    return reported
                 return midpoint
 
         if len(reported) >= 4:
@@ -610,7 +604,35 @@ class HighwayLaneStrategyNode:
             return self.nominal_lane_width_m
         return float((self.lane_info or {}).get("lane_width_m"))
 
-    def _inner_center_sanity(self) -> Tuple[bool, str, Optional[float]]:
+    def _inner_center_sanity(
+        self, require_two_boundaries: bool = False
+    ) -> Tuple[bool, str, Optional[float]]:
+        # The post-change hold must be based on the newly observed lane, not a
+        # held pre-change result, a nominal fallback, or a one-sided width
+        # estimate.  Until both boundaries settle, the caller keeps rolling the
+        # already committed RRT path forward.
+        info = self.lane_info or {}
+        if require_two_boundaries:
+            if self.nominal_lane_fallback_active:
+                return False, "inner_center_nominal_fallback", None
+            if str(info.get("output_status", "FRESH")).upper() != "FRESH":
+                return False, "inner_center_not_fresh", None
+            left_meta = info.get("left_lane") or {}
+            right_meta = info.get("right_lane") or {}
+            if not bool(left_meta.get("detected", False)):
+                return False, "inner_left_boundary_missing", None
+            if not bool(right_meta.get("detected", False)):
+                return False, "inner_right_boundary_missing", None
+            if bool(left_meta.get("coasted", False)) or bool(right_meta.get("coasted", False)):
+                return False, "inner_boundary_coasted", None
+            if bool(left_meta.get("from_guide", False)) or bool(right_meta.get("from_guide", False)):
+                return False, "inner_boundary_from_guide", None
+            if info.get("lane_width_m") is None:
+                return False, "inner_lane_width_unmeasured", None
+            left = self._boundary_local("left_boundary_points")
+            right = self._boundary_local("right_boundary_points")
+            if len(left) < 3 or len(right) < 3:
+                return False, "inner_boundary_short", None
         center = self._centerline_local()
         if len(center) < 3:
             return False, "inner_center_short", None
@@ -1620,7 +1642,9 @@ class HighwayLaneStrategyNode:
             center_y = None
             if self.inner_handover_pending:
                 if lane_ok:
-                    center_ok, center_reason, center_y = self._inner_center_sanity()
+                    center_ok, center_reason, center_y = self._inner_center_sanity(
+                        require_two_boundaries=True
+                    )
                     if not center_ok:
                         self.inner_lane_candidate_since = None
                         lane_ok = False

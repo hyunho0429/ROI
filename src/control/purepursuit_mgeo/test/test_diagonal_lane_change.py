@@ -105,7 +105,9 @@ class DiagonalLaneChangeTest(unittest.TestCase):
         n._centerline_local.return_value = [(0.0, 0.0)] + [(float(x), -0.6) for x in range(5, 26)]
         path, reason = n._filtered_inner_path(Stamp(), .05)
         self.assertEqual(reason, 'ok')
-        self.assertLess(abs(path.poses[1].pose.position.y), .08)
+        # The first update may correct faster than the former 0.35 s filter,
+        # but must still apply less than a quarter of the observed jump.
+        self.assertLess(abs(path.poses[1].pose.position.y), .15)
 
     def test_inner_path_converges_at_controller_lookahead(self):
         n = node_fixture()
@@ -131,19 +133,53 @@ class DiagonalLaneChangeTest(unittest.TestCase):
         self.assertAlmostEqual(center[1][1], 0.05)
         self.assertTrue(all(abs(y-0.05) < 1e-6 for _, y in center[1:]))
 
-    def test_valid_reported_centerline_is_primary_hold_path(self):
+    def test_physical_boundary_midpoint_is_primary_hold_path(self):
         n = node_fixture()
         n._boundary_local = safety.NODE.HighwayLaneStrategyNode._boundary_local.__get__(n)
         n._centerline_local = safety.NODE.HighwayLaneStrategyNode._centerline_local.__get__(n)
         n.lane_info = {
             'lane_width_m': 3.5,
-            'centerline_points': [[float(x), 0.05] for x in range(5, 26)],
-            'left_boundary_points': [[float(x), 1.75] for x in range(5, 26)],
-            'right_boundary_points': [[float(x), -1.75] for x in range(5, 26)],
+            # Even a plausible but biased reported center must not move the
+            # vehicle away from the two physical boundaries' midpoint.
+            'centerline_points': [[float(x), 0.25] for x in range(5, 26)],
+            'left_boundary_points': [[float(x), 1.8] for x in range(5, 26)],
+            'right_boundary_points': [[float(x), -1.7] for x in range(5, 26)],
             'straddling_lane': None,
         }
         center = n._centerline_local()
         self.assertAlmostEqual(center[1][1], 0.05)
+
+    def test_post_change_center_requires_fresh_two_boundary_measurement(self):
+        n = node_fixture()
+        n._boundary_local = safety.NODE.HighwayLaneStrategyNode._boundary_local.__get__(n)
+        n._centerline_local = safety.NODE.HighwayLaneStrategyNode._centerline_local.__get__(n)
+        n._inner_center_sanity = safety.NODE.HighwayLaneStrategyNode._inner_center_sanity.__get__(n)
+        n.lane_info = {
+            'output_status': 'FRESH',
+            'lane_width_m': 3.5,
+            'left_lane': {'detected': True, 'coasted': False, 'from_guide': False},
+            'right_lane': {'detected': True, 'coasted': False, 'from_guide': False},
+            'left_boundary_points': [[float(x), 1.8] for x in range(5, 26)],
+            'right_boundary_points': [[float(x), -1.7] for x in range(5, 26)],
+            'centerline_points': [[float(x), 0.4] for x in range(5, 26)],
+        }
+        valid, reason, center_y = n._inner_center_sanity(require_two_boundaries=True)
+        self.assertTrue(valid)
+        self.assertEqual(reason, 'ok')
+        self.assertAlmostEqual(center_y, 0.05)
+
+        n.lane_info['output_status'] = 'HELD'
+        self.assertEqual(
+            n._inner_center_sanity(require_two_boundaries=True),
+            (False, 'inner_center_not_fresh', None),
+        )
+
+        n.lane_info['output_status'] = 'FRESH'
+        n.lane_info['right_lane']['detected'] = False
+        self.assertEqual(
+            n._inner_center_sanity(require_two_boundaries=True),
+            (False, 'inner_right_boundary_missing', None),
+        )
 
     def test_straddling_line_is_not_used_as_lane_center(self):
         n = node_fixture()
@@ -162,7 +198,7 @@ class DiagonalLaneChangeTest(unittest.TestCase):
         path, stop, _, _, status, *_ = n._publish.call_args.args
         self.assertFalse(stop)
         self.assertEqual(status['reason'], 'ok')
-        self.assertLess(abs(path.poses[1].pose.position.y), .08)
+        self.assertLess(abs(path.poses[1].pose.position.y), .20)
         n.lane_invalid_since = Stamp(98.0)
         n._tick(None)
         self.assertFalse(n._publish.call_args.args[1])

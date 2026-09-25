@@ -293,9 +293,11 @@
     <param name="change_max_length_m" value="40.0" />
     <param name="change_ramp_ratio" value="0.20" />
     <param name="change_max_heading_deg" value="8.0" />
-    <param name="inner_path_blend_time_s" value="0.35" />
+    <!-- Follow the midpoint of the newly detected left/right boundaries soon
+         after hand-over while retaining a smooth steering transition. -->
+    <param name="inner_path_blend_time_s" value="0.25" />
     <param name="inner_path_max_jump_m" value="0.75" />
-    <param name="inner_path_join_length_m" value="8.0" />
+    <param name="inner_path_join_length_m" value="6.0" />
     <param name="change_time_s" value="7.0" />
     <param name="change_post_hold_m" value="10.0" />
     <!-- Live vehicle-frame RRT*: consumes current lane/odom/LiDAR in memory. -->
