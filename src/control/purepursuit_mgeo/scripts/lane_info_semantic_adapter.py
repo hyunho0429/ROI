@@ -18,6 +18,8 @@ import threading
 import rospy
 from std_msgs.msg import Bool, Float64, String
 
+from camera_perception.highway_environment import adjacent_left_lane_semantics
+
 
 class LaneInfoSemanticAdapter:
     def __init__(self):
@@ -29,6 +31,9 @@ class LaneInfoSemanticAdapter:
         self.stopline_detected_topic = rospy.get_param("~stopline_detected_topic", "/perception/camera/stopline_detected")
         self.stopline_distance_topic = rospy.get_param("~stopline_distance_topic", "/perception/camera/stopline_distance_m")
         self.stale_timeout_s = float(rospy.get_param("~stale_timeout_s", 0.75))
+        self.adjacent_left_eval_x_m = float(rospy.get_param("~adjacent_left_eval_x_m", 7.0))
+        self.adjacent_left_max_y_m = float(rospy.get_param("~adjacent_left_max_y_m", 2.6))
+        self.adjacent_left_min_track_age = int(rospy.get_param("~adjacent_left_min_track_age", 2))
 
         self.pub_dashed = rospy.Publisher(self.dashed_topic, Bool, queue_size=1)
         self.pub_left_solid = rospy.Publisher(self.left_solid_topic, Bool, queue_size=1)
@@ -45,13 +50,17 @@ class LaneInfoSemanticAdapter:
         rospy.Timer(rospy.Duration(0.1), self._stale_timer)
 
         rospy.logwarn(
-            "Lane-info semantic adapter: input=%s -> dashed=%s left_solid=%s left_yellow=%s right_solid=%s stopline=%s",
+            "Lane-info semantic adapter: input=%s -> dashed=%s left_solid=%s left_yellow=%s right_solid=%s stopline=%s "
+            "adjacent_left=(x=%.1fm,max_y=%.1fm,min_age=%d)",
             self.input_topic,
             self.dashed_topic,
             self.left_solid_topic,
             self.left_yellow_topic,
             self.right_solid_topic,
             self.stopline_detected_topic,
+            self.adjacent_left_eval_x_m,
+            self.adjacent_left_max_y_m,
+            self.adjacent_left_min_track_age,
         )
 
     @staticmethod
@@ -79,24 +88,28 @@ class LaneInfoSemanticAdapter:
             rospy.logwarn_throttle(2.0, "lane_info semantic adapter JSON parse failed: %s", exc)
             return
 
-        left = self._lane(info, "left_lane")
         right = self._lane(info, "right_lane")
+
+        # All left-boundary semantics come from the same fresh, measured,
+        # nearest-left boundary.  A farther dashed/solid marking must not start
+        # a merge or terminate repeated left changes.
+        adjacent_left = adjacent_left_lane_semantics(
+            info,
+            eval_x_m=self.adjacent_left_eval_x_m,
+            max_y_m=self.adjacent_left_max_y_m,
+            min_track_age=self.adjacent_left_min_track_age,
+        )
 
         # Guide-generated and coasted boundaries help path continuity, but they
         # are not fresh paint observations and must not authorize crossing.
-        left_detected = (bool(left.get("detected", False))
-                         and not bool(left.get("from_guide", False))
-                         and not bool(left.get("coasted", False)))
         right_detected = (bool(right.get("detected", False))
                           and not bool(right.get("from_guide", False))
                           and not bool(right.get("coasted", False)))
-        left_type = left.get("type")
         right_type = right.get("type")
 
-        # Match live_overlay.py exactly.
-        dashed = left_detected and bool(left.get("dashed", False))
-        left_solid = left_detected and left_type in ("white_solid", "yellow")
-        left_yellow = left_detected and left_type == "yellow"
+        dashed = adjacent_left["dashed"]
+        left_solid = adjacent_left["solid"]
+        left_yellow = adjacent_left["yellow_solid"]
         right_solid = right_detected and right_type in ("white_solid", "yellow")
 
         stopline_detected = bool(info.get("stopline_detected", False))

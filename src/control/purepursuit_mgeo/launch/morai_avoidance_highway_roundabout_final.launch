@@ -132,6 +132,9 @@
     <param name="stopline_detected_topic" value="/perception/camera/stopline_detected" />
     <param name="stopline_distance_topic" value="/perception/camera/stopline_distance_m" />
     <param name="stale_timeout_s" value="0.75" />
+    <param name="adjacent_left_eval_x_m" value="7.0" />
+    <param name="adjacent_left_max_y_m" value="2.6" />
+    <param name="adjacent_left_min_track_age" value="2" />
   </node>
 
   <!-- Base F6.3 obstacle planner: no MGeo lane-change candidates. -->

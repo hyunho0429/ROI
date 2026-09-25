@@ -465,16 +465,19 @@ class HighwayLaneStrategyNode:
     def _left_dashed_ok(self) -> Tuple[bool, str]:
         if not self.require_left_dashed:
             return True, "disabled"
-        left = (self.lane_info or {}).get("left_lane") or {}
-        if not bool(left.get("detected", False)):
-            return False, "left_not_detected"
-        if bool(left.get("from_guide", False)):
-            return False, "left_from_guide"
-        if bool(left.get("coasted", False)):
-            return False, "left_coasted"
-        if left.get("dashed") is True:
+        from camera_perception.highway_environment import adjacent_left_lane_type
+
+        left_type = adjacent_left_lane_type(
+            self.lane_info or {},
+            eval_x_m=7.0,
+            max_y_m=2.6,
+            min_track_age=2,
+        )
+        if left_type == "white_dashed":
             return True, "ok"
-        return False, "left_not_dashed"
+        if left_type in ("white_solid", "yellow"):
+            return False, "adjacent_left_solid"
+        return False, "adjacent_left_not_dashed"
 
     def _centerline_local(self) -> List[Tuple[float, float]]:
         if self.rrt_lidar_only_mode or self.nominal_lane_fallback_active:

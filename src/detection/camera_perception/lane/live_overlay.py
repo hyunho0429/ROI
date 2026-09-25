@@ -184,18 +184,29 @@ def main(argv=None):
                         frame = f
                         res = pipe.run(frame)
                         if args.ros_publish:
+                            adjacent_left = res.ego_left
+                            adjacent_left_y = (
+                                adjacent_left.y_at(7.0)
+                                if adjacent_left is not None else None
+                            )
+                            adjacent_left_ok = bool(
+                                adjacent_left is not None
+                                and adjacent_left_y is not None
+                                and 0.15 <= adjacent_left_y <= 2.6
+                                and adjacent_left.age >= 2
+                            )
                             left_dashed = bool(
-                                res.ego_left is not None
-                                and res.ego_left.is_dashed
+                                adjacent_left_ok
+                                and adjacent_left.is_dashed
                             )
                             left_solid = bool(
-                                res.ego_left is not None
-                                and res.ego_left.name
+                                adjacent_left_ok
+                                and adjacent_left.name
                                 in ("white_solid", "yellow")
                             )
                             left_yellow_solid = bool(
-                                res.ego_left is not None
-                                and res.ego_left.name == "yellow"
+                                adjacent_left_ok
+                                and adjacent_left.name == "yellow"
                             )
                             right_solid = bool(
                                 res.ego_right is not None

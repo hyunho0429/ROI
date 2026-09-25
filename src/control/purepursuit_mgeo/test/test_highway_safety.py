@@ -426,30 +426,48 @@ class HighwaySafetyTest(unittest.TestCase):
     def test_guide_lane_cannot_authorize_left_change(self):
         self.node.require_left_dashed = True
         self.node.lane_info = {
-            "left_lane": {"detected": True, "dashed": True, "from_guide": True}
+            "lane_valid": True,
+            "output_status": "FRESH",
+            "left_lane": {
+                "detected": True, "type": "white_dashed", "dashed": True,
+                "from_guide": True, "age": 3,
+                "coef": [0.0, 0.0, 1.75], "x_range_m": [5.0, 25.0],
+            },
         }
-        self.assertEqual(self.node._left_dashed_ok(), (False, "left_from_guide"))
+        self.assertEqual(self.node._left_dashed_ok(), (False, "adjacent_left_not_dashed"))
 
     def test_coasted_lane_cannot_authorize_left_change(self):
         self.node.require_left_dashed = True
         self.node.lane_info = {
-            "left_lane": {"detected": True, "dashed": True, "coasted": True}
+            "lane_valid": True,
+            "output_status": "FRESH",
+            "left_lane": {
+                "detected": True, "type": "white_dashed", "dashed": True,
+                "coasted": True, "age": 3,
+                "coef": [0.0, 0.0, 1.75], "x_range_m": [5.0, 25.0],
+            },
         }
-        self.assertEqual(self.node._left_dashed_ok(), (False, "left_coasted"))
+        self.assertEqual(self.node._left_dashed_ok(), (False, "adjacent_left_not_dashed"))
 
     def test_solid_left_boundary_cannot_authorize_another_change(self):
         self.node.require_left_dashed = True
         self.node.lane_info = {
+            "lane_valid": True,
+            "output_status": "FRESH",
             "left_lane": {
                 "detected": True,
+                "type": "white_solid",
                 "dashed": False,
                 "from_guide": False,
                 "coasted": False,
+                "age": 3,
+                "coef": [0.0, 0.0, 1.75],
+                "x_range_m": [5.0, 25.0],
             }
         }
         self.assertEqual(
             self.node._left_dashed_ok(),
-            (False, "left_not_dashed"),
+            (False, "adjacent_left_solid"),
         )
 
     def test_two_dashed_boundaries_are_valid_for_lane_center_hold(self):
@@ -460,10 +478,15 @@ class HighwaySafetyTest(unittest.TestCase):
         n.lane_info_at = Stamp()
         n.lane_info = {
             "lane_valid": True,
+            "output_status": "FRESH",
             "confidence": 0.8,
             "lane_width_m": 3.5,
             "straddling_lane": None,
-            "left_lane": {"detected": True,"type": "white_dashed","dashed": True},
+            "left_lane": {
+                "detected": True, "type": "white_dashed", "dashed": True,
+                "age": 3, "coef": [0.0, 0.0, 1.75],
+                "x_range_m": [5.0, 25.0],
+            },
             "right_lane": {"detected": True,"type": "white_dashed","dashed": True},
             "left_boundary_points": [[float(x),1.75] for x in range(5,26)],
             "right_boundary_points": [[float(x),-1.75] for x in range(5,26)],

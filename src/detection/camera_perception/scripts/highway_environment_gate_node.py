@@ -116,6 +116,11 @@ class HighwayEnvironmentGateNode:
     def _dashed_lane_callback(self, message):
         if message.data:
             self.last_dashed_lane_detected_at = time.monotonic()
+        else:
+            # A fresh solid/missing adjacent-left boundary revokes the dashed
+            # condition immediately.  The hold only bridges missing packets;
+            # it must not combine an old, distant dashed line with a later car.
+            self.last_dashed_lane_detected_at = None
 
     def _left_parallel_dynamic_callback(self, message):
         if message.data:
