@@ -39,6 +39,19 @@ def _lane_color(l):
     return ID_COLORS.get(l.lane_id, (150, 150, 150))
 
 
+def _draw_fitted_lane(vis, uv, color, dashed):
+    """Draw geometry using a style that preserves the classified lane type."""
+    if not dashed:
+        cv2.polylines(vis, [uv], False, color, 3)
+        return
+    # The fitted polynomial is continuous even when its source paint is dashed.
+    # Break only the visualization so it cannot be mistaken for a solid class.
+    for start in range(0, max(0, len(uv) - 1), 6):
+        part = uv[start:min(start + 4, len(uv))]
+        if len(part) >= 2:
+            cv2.polylines(vis, [part], False, color, 3)
+
+
 def draw(det, frame_bgr, detector, alpha=0.35,
          show_mask=True, show_lanes=True):
     """오버레이 한 장. show_mask / show_lanes 는 live_overlay.py 의
@@ -63,19 +76,21 @@ def draw(det, frame_bgr, detector, alpha=0.35,
         uv = uv[inb].astype(np.int32)
         if len(uv) < 2:
             continue
-        cv2.polylines(vis, [uv], False, _lane_color(l), 3)
+        _draw_fitted_lane(vis, uv, _lane_color(l), l.is_dashed)
         u, v = uv[len(uv) // 2]
-        tag = f"{l.lane_id:+d} {l.name[:6]}"
+        tag = f"{l.lane_id:+d} {l.name} [{'DASHED' if l.is_dashed else 'SOLID'}]"
         cv2.putText(vis, tag, (int(u) + 6, int(v)), cv2.FONT_HERSHEY_SIMPLEX,
                     0.5, (0, 0, 0), 3)
         cv2.putText(vis, tag, (int(u) + 6, int(v)), cv2.FONT_HERSHEY_SIMPLEX,
                     0.5, _lane_color(l), 1)
 
-    txt = "  ".join(f"{l.lane_id:+d}:{l.name[:6]}({l.n_points})" for l in det.lanes) \
+    txt = "  ".join(f"{l.lane_id:+d}:{l.name}({l.n_points})" for l in det.lanes) \
         or "(검출 없음)"
     cv2.rectangle(vis, (0, 0), (vis.shape[1], 46), (0, 0, 0), -1)
     cv2.putText(vis, txt, (8, 18), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1)
-    cv2.putText(vis, MASK_VIEW_LABEL + f"    {det.infer_ms:.0f}+{det.post_ms:.0f}ms",
+    model_classes = detector.ckpt_info.get("num_classes", "?")
+    cv2.putText(vis, MASK_VIEW_LABEL +
+                f"    model={model_classes}cls  {det.infer_ms:.0f}+{det.post_ms:.0f}ms",
                 (8, 38), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (180, 180, 180), 1)
     return vis
 

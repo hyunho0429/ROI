@@ -59,8 +59,8 @@ def draw_values(vis, res, y=46):
         "lat " + ("--" if le is None else f"{le:+.2f}m"),
         "head " + ("--" if he is None else f"{np.degrees(he):+.1f}deg"),
         "stop " + ("--" if sd is None else f"{sd:.1f}m"),
-        "L " + (l.name[:6] if l else "--"),
-        "R " + (r.name[:6] if r else "--"),
+        "L " + (l.name if l else "--"),
+        "R " + (r.name if r else "--"),
     ))
     cv2.rectangle(vis, (0, y), (vis.shape[1], y + 20), (0, 0, 0), -1)
     # 차로 중심을 못 잡은 프레임은 회색으로 - 값이 없다는 걸 한눈에 본다.
@@ -153,6 +153,7 @@ def main(argv=None):
                         bonnet_mask=False if args.no_bonnet else args.bonnet,
                         device=args.device, track=not args.no_track)
     print(f"[live] epoch {pipe.ckpt_info['epoch']} ({pipe.ckpt_info['backbone']}) "
+          f"{pipe.ckpt_info['num_classes']} classes "
           f"device={pipe.device} 보닛 {pipe.bonnet_source} "
           f"추적 {'끔' if args.no_track else '켬'}")
 

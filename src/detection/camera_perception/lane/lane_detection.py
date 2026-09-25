@@ -666,8 +666,14 @@ class LaneDetector:
     def __init__(self, checkpoint=None, cam_set=None, bonnet_mask=None,
                  device=None, sensor_id=DEFAULT_SENSOR_ID, crop_top=CROP_TOP,
                  seed=0, track=True):
+        requested_device = None if device in (None, "", "auto") else str(device)
+        if requested_device and requested_device.startswith("cuda") \
+                and not torch.cuda.is_available():
+            print("[lane] CUDA를 사용할 수 없어 CPU로 전환합니다. "
+                  "Docker GPU 연결과 CUDA PyTorch 설치를 확인하세요.")
+            requested_device = "cpu"
         self.device = torch.device(
-            device or ("cuda" if torch.cuda.is_available() else "cpu"))
+            requested_device or ("cuda" if torch.cuda.is_available() else "cpu"))
         checkpoint = checkpoint or default_checkpoint()
         ck = torch.load(checkpoint, map_location=self.device)
         backbone = ck.get("args", {}).get("backbone", "resnet34")
