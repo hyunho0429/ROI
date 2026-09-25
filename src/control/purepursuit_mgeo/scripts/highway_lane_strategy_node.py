@@ -215,16 +215,16 @@ class HighwayLaneStrategyNode:
         self.change_ramp_ratio = float(rospy.get_param("~change_ramp_ratio", 0.2))
         self.change_max_heading_rad = math.radians(float(rospy.get_param("~change_max_heading_deg", 8.0)))
         self.repeat_change_min_length_m = float(
-            rospy.get_param("~repeat_change_min_length_m", 22.0)
+            rospy.get_param("~repeat_change_min_length_m", 12.0)
         )
         self.repeat_change_max_length_m = float(
-            rospy.get_param("~repeat_change_max_length_m", 30.0)
+            rospy.get_param("~repeat_change_max_length_m", 18.0)
         )
         self.repeat_change_time_s = float(
-            rospy.get_param("~repeat_change_time_s", 4.5)
+            rospy.get_param("~repeat_change_time_s", 3.0)
         )
         self.repeat_change_max_heading_rad = math.radians(float(
-            rospy.get_param("~repeat_change_max_heading_deg", 12.0)
+            rospy.get_param("~repeat_change_max_heading_deg", 20.0)
         ))
         if (
             not 0.0 < self.change_ramp_ratio < 0.5
@@ -247,7 +247,7 @@ class HighwayLaneStrategyNode:
         self.rrt_search_radius_m = float(rospy.get_param("~rrt_search_radius_m", 6.0))
         self.rrt_goal_tolerance_m = float(rospy.get_param("~rrt_goal_tolerance_m", 2.5))
         self.rrt_max_heading_rad = math.radians(
-            float(rospy.get_param("~rrt_max_heading_deg", 12.0))
+            float(rospy.get_param("~rrt_max_heading_deg", 20.0))
         )
         self.rrt_corridor_margin_m = float(rospy.get_param("~rrt_corridor_margin_m", 0.35))
         self.rrt_smooth_iterations = int(rospy.get_param("~rrt_smooth_iterations", 1))
@@ -365,6 +365,9 @@ class HighwayLaneStrategyNode:
         self.stop_pub = rospy.Publisher("~stop_required", Bool, queue_size=1)
         self.speed_pub = rospy.Publisher("~target_speed_mps", Float64, queue_size=1)
         self.active_pub = rospy.Publisher("~active", Bool, queue_size=1)
+        self.fast_change_pub = rospy.Publisher(
+            "~fast_change_active", Bool, queue_size=1
+        )
         self.state_pub = rospy.Publisher("~state", String, queue_size=1)
 
         rospy.Subscriber(self.base_path_topic, RosPath, self._base_path_cb, queue_size=1)
@@ -508,7 +511,7 @@ class HighwayLaneStrategyNode:
         return False, "adjacent_left_not_dashed"
 
     def _final_lane_markings_present(self) -> bool:
-        """True when the fresh nearest-left ego boundary is white solid."""
+        """True only in the intended solid-left/dashed-right final lane."""
         info = self.lane_info or {}
         if (
             not bool(info.get("lane_valid", False))
@@ -516,14 +519,22 @@ class HighwayLaneStrategyNode:
         ):
             return False
 
-        left = info.get("left_lane") or {}
+        from camera_perception.highway_environment import adjacent_left_lane_type
+
+        left_type = adjacent_left_lane_type(
+            info,
+            eval_x_m=7.0,
+            max_y_m=2.6,
+            min_track_age=2,
+        )
+        right = info.get("right_lane") or {}
         if (
-            not bool(left.get("detected", False))
-            or bool(left.get("from_guide", False))
-            or bool(left.get("coasted", False))
+            not bool(right.get("detected", False))
+            or bool(right.get("from_guide", False))
+            or bool(right.get("coasted", False))
         ):
             return False
-        return left.get("type") == "white_solid"
+        return left_type == "white_solid" and right.get("type") == "white_dashed"
 
     def _update_final_lane_lock(self, now: rospy.Time, geometry_ok: bool) -> bool:
         """Latch off further merges while keeping camera lane-centre control."""
@@ -1576,6 +1587,11 @@ class HighwayLaneStrategyNode:
         self.stop_pub.publish(Bool(data=bool(stop)))
         self.speed_pub.publish(Float64(data=float(speed_out)))
         self.active_pub.publish(Bool(data=bool(active)))
+        fast_change = bool(
+            active and self.state == self.LANE_CHANGE
+            and self.lane_changes_done > 0
+        )
+        self.fast_change_pub.publish(Bool(data=fast_change))
         status.update({"state": self.state, "active": bool(active), "stop": bool(stop), "target_speed_mps": round(speed_out,2), "lane_changes_done": self.lane_changes_done})
         self.state_pub.publish(String(data=json.dumps(status, separators=(",", ":"))))
         if stop:

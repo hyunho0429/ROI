@@ -97,11 +97,19 @@ class MgeoPurePursuit:
         y: float,
         yaw_rad: float,
         speed_mps: float,
+        lookahead_override_m: float = None,
     ) -> Tuple[float, bool, PathPoint, int, float]:
-        lookahead = max(
-            self.lookahead_min_m,
-            self.lookahead_min_m + self.lookahead_gain * max(0.0, speed_mps),
-        )
+        if (
+            lookahead_override_m is not None
+            and math.isfinite(float(lookahead_override_m))
+            and float(lookahead_override_m) > 0.0
+        ):
+            lookahead = float(lookahead_override_m)
+        else:
+            lookahead = max(
+                self.lookahead_min_m,
+                self.lookahead_min_m + self.lookahead_gain * max(0.0, speed_mps),
+            )
         nearest = nearest_path_index(self.points, x, y)
         distance_to_goal = math.hypot(self.points[-1].x - x, self.points[-1].y - y)
         if nearest >= len(self.points) - 2 and distance_to_goal <= self.goal_tolerance_m:

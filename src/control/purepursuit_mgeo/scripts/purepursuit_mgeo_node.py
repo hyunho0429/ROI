@@ -53,6 +53,21 @@ class PurePursuitNode:
         self.steering_rate_active = not bool(steering_rate_active_topic)
         if steering_rate_active_topic:
             rospy.Subscriber(steering_rate_active_topic, Bool, self.steering_rate_active_callback, queue_size=1)
+        self.fast_change_active = False
+        self.fast_change_lookahead_m = float(
+            rospy.get_param("~fast_change_lookahead_m", 3.5)
+        )
+        self.fast_change_steering_rate_rad_s = float(
+            rospy.get_param("~fast_change_steering_rate_rad_s", 0.50)
+        )
+        fast_change_topic = rospy.get_param("~fast_change_active_topic", "")
+        if fast_change_topic:
+            rospy.Subscriber(
+                fast_change_topic,
+                Bool,
+                self.fast_change_active_callback,
+                queue_size=1,
+            )
         self.enable_control = bool(rospy.get_param("~enable_control", False))
         self.longl_cmd_type = int(rospy.get_param("~longl_cmd_type", 1))
         self.steering_sign = float(rospy.get_param("~steering_sign", 1.0))
@@ -238,6 +253,9 @@ class PurePursuitNode:
     def steering_rate_active_callback(self, msg: Bool) -> None:
         self.steering_rate_active = bool(msg.data)
 
+    def fast_change_active_callback(self, msg: Bool) -> None:
+        self.fast_change_active = bool(msg.data)
+
     def merge_stop_callback(self, msg: Bool) -> None:
         self.merge_stop_required = bool(msg.data)
         self.merge_gate_at = rospy.Time.now()
@@ -313,6 +331,7 @@ class PurePursuitNode:
                 pose.position.y,
                 yaw,
                 speed,
+                self.fast_change_lookahead_m if self.fast_change_active else None,
             )
             active_count = len(self.controller.points)
         steering = max(-self.max_steering, min(self.max_steering, steering))
@@ -345,8 +364,17 @@ class PurePursuitNode:
         )
         # Stop commands still apply immediately. Match the limiter state to the
         # zero steering actually sent by make_command, so restart is also smooth.
-        steering = (self.steering_limiter.reset(now.to_sec()) if stop else
-                    self.steering_limiter.update(steering, now.to_sec(), self.steering_rate_active))
+        steering = (
+            self.steering_limiter.reset(now.to_sec())
+            if stop
+            else self.steering_limiter.update(
+                steering,
+                now.to_sec(),
+                self.steering_rate_active,
+                self.fast_change_steering_rate_rad_s
+                if self.fast_change_active else None,
+            )
+        )
 
         target_msg = PointStamped()
         target_msg.header.stamp = now
@@ -372,7 +400,7 @@ class PurePursuitNode:
         rospy.loginfo_throttle(
             1.0,
             "PP idx=%d lookahead=%.2f steer=%.4f stop=%s path=%s ped=%s tl=%s int=%s->%s "
-            "avoid=%s merge(request=%s stop=%s allowed=%s) source=%s points=%d target_v=%.2f",
+            "avoid=%s merge(request=%s stop=%s allowed=%s) source=%s points=%d target_v=%.2f fast_change=%s",
             target_index,
             lookahead,
             steering,
@@ -389,6 +417,7 @@ class PurePursuitNode:
             "active_path" if self.use_active_path else "path_file",
             active_count,
             effective_target_speed,
+            self.fast_change_active,
         )
 
     def make_command(

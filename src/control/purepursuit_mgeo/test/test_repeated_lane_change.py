@@ -71,6 +71,9 @@ class RepeatedLaneChangeTest(unittest.TestCase):
                 'type': 'white_solid',
                 'from_guide': False,
                 'coasted': False,
+                'age': 3,
+                'coef': [0.0, 1.75],
+                'x_range_m': [0.0, 30.0],
             },
             'right_lane': {
                 'detected': True,
@@ -111,16 +114,41 @@ class RepeatedLaneChangeTest(unittest.TestCase):
         n._choose_lane_change.assert_not_called()
         n._generate_rejoin_path.assert_not_called()
 
-    def test_left_solid_locks_changes_even_without_right_dashed(self):
+    def test_left_solid_without_right_dashed_does_not_lock_final_lane(self):
         n = self.node
         n.lane_info.update({
             'lane_valid': True,
             'output_status': 'FRESH',
-            'left_lane': {'detected': True, 'type': 'white_solid'},
+            'left_lane': {
+                'detected': True,
+                'type': 'white_solid',
+                'age': 3,
+                'coef': [0.0, 1.75],
+                'x_range_m': [0.0, 30.0],
+            },
             'right_lane': {'detected': True, 'type': 'white_solid'},
         })
 
-        self.assertTrue(n._final_lane_markings_present())
+        self.assertFalse(n._final_lane_markings_present())
+
+    def test_far_left_solid_does_not_block_change_across_adjacent_dashed(self):
+        n = self.node
+        n.lane_info.update({
+            'lane_valid': True,
+            'output_status': 'FRESH',
+            'left_lane': {
+                'detected': True,
+                'type': 'white_solid',
+                'age': 3,
+                # A solid line beyond the adjacent divider must not mark the
+                # current lane as the final solid-left/dashed-right lane.
+                'coef': [0.0, 5.25],
+                'x_range_m': [0.0, 30.0],
+            },
+            'right_lane': {'detected': True, 'type': 'white_dashed'},
+        })
+
+        self.assertFalse(n._final_lane_markings_present())
 
     def test_final_lane_stops_after_lane_geometry_grace_expires(self):
         n = self.node

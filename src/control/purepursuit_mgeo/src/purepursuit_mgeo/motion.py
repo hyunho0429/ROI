@@ -32,11 +32,18 @@ class SteeringRateLimiter:
         self.last_time = now
         return self.angle
 
-    def update(self, target: float, now: float, enabled: bool = True) -> float:
+    def update(
+        self,
+        target: float,
+        now: float,
+        enabled: bool = True,
+        rate_rad_s: float = None,
+    ) -> float:
         dt = self.nominal_dt if self.last_time is None else max(0.0, min(0.1, now-self.last_time))
         self.last_time = now
         if not math.isfinite(target):
             return self.reset(now)
-        step = self.rate*dt
-        self.angle = target if self.rate == 0.0 or not enabled else self.angle + max(-step, min(step, target-self.angle))
+        rate = self.rate if rate_rad_s is None else max(0.0, float(rate_rad_s))
+        step = rate*dt
+        self.angle = target if rate == 0.0 or not enabled else self.angle + max(-step, min(step, target-self.angle))
         return self.angle

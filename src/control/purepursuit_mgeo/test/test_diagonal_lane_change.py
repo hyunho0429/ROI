@@ -68,8 +68,49 @@ class DiagonalLaneChangeTest(unittest.TestCase):
             abs(math.atan2(b[1]-a[1], b[0]-a[0]))
             for a, b in zip(second, second[1:])
         ]
-        self.assertLessEqual(max(headings), math.radians(12.0)+1e-5)
+        self.assertLessEqual(max(headings), math.radians(20.0)+1e-5)
         self.assertTrue(n._path_curvature_ok(second, 4.0)[0])
+
+    def test_repeat_profile_commands_decisive_but_safe_steering_at_four_mps(self):
+        n = node_fixture()
+        n.cruise_speed_mps = 4.0
+        n.lane_changes_done = 1
+        points, _ = n._generate_lane_change_local(3.5, 4.0)
+        self.assertGreater(len(points), 3)
+
+        controller = MgeoPurePursuit(
+            [PathPoint(x, y, 0.0) for x, y in points],
+            wheelbase_m=3.0,
+            lookahead_min_m=4.0,
+            lookahead_gain=0.35,
+            goal_tolerance_m=1.5,
+        )
+        limiter = SteeringRateLimiter(0.20, 0.05)
+        x = y = yaw = 0.0
+        peak = 0.0
+        for step in range(160):
+            raw, stop, _, _, lookahead = controller.compute(
+                x, y, yaw, 4.0, lookahead_override_m=3.5
+            )
+            if step == 0:
+                # The controller reports Euclidean distance to the
+                # interpolated target, slightly shorter than curved arc.
+                self.assertGreater(lookahead, 3.40)
+                self.assertLessEqual(lookahead, 3.5)
+            steering = limiter.update(
+                raw, step*0.05, enabled=True, rate_rad_s=0.50
+            )
+            peak = max(peak, abs(steering))
+            yaw += 4.0/3.0*math.tan(steering)*0.05
+            x += 4.0*math.cos(yaw)*0.05
+            y += 4.0*math.sin(yaw)*0.05
+            if stop:
+                break
+
+        self.assertGreater(peak, 0.17)
+        self.assertLess(peak, 0.25)
+        self.assertGreater(y, 3.35)
+        self.assertLess(abs(yaw), math.radians(3.0))
 
     def test_ego_offset_does_not_create_sharp_entry(self):
         n = node_fixture()
