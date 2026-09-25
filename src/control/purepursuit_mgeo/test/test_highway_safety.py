@@ -309,6 +309,16 @@ class HighwaySafetyTest(unittest.TestCase):
         n.committed_path = path_at(3.5)
         n.latest_obstacles.obstacles = [obstacle(16.0, 3.5)]
         n._adaptive_speed = Mock(return_value=(2.0, False, {}))
+        _, stop, _, _, status, *_ = self.tick()
+        self.assertFalse(stop)
+        self.assertEqual(status["reason"], "future_collision_monitored")
+        self.assertIn("predicted_collision", status["future_collision"])
+
+    def test_lane_change_still_stops_for_imminent_collision(self):
+        n = self.node
+        n.state = n.LANE_CHANGE
+        n.committed_path = path_at(0.0)
+        n.latest_obstacles.obstacles = [obstacle(5.0, 0.0)]
         self.assertTrue(self.tick()[1])
 
     def test_lane_change_does_not_commit_slow_candidate(self):
@@ -426,6 +436,21 @@ class HighwaySafetyTest(unittest.TestCase):
             "left_lane": {"detected": True, "dashed": True, "coasted": True}
         }
         self.assertEqual(self.node._left_dashed_ok(), (False, "left_coasted"))
+
+    def test_solid_left_boundary_cannot_authorize_another_change(self):
+        self.node.require_left_dashed = True
+        self.node.lane_info = {
+            "left_lane": {
+                "detected": True,
+                "dashed": False,
+                "from_guide": False,
+                "coasted": False,
+            }
+        }
+        self.assertEqual(
+            self.node._left_dashed_ok(),
+            (False, "left_not_dashed"),
+        )
 
     def test_two_dashed_boundaries_are_valid_for_lane_center_hold(self):
         n = self.node

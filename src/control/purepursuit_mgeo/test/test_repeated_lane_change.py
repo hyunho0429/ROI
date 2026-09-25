@@ -13,6 +13,8 @@ class RepeatedLaneChangeTest(unittest.TestCase):
         self.node = fixture.node
         n = self.node
         n.min_lane_hold_before_next_change_m = 8.0
+        n.min_lane_hold_before_next_change_s = 5.0
+        n.inner_hold_started_at = safety.Stamp(90.0)
         n._global_signed_d.return_value = 3.5
         n._choose_lane_change = Mock(return_value=(safety.path_at(3.5), 2.0, 32.0, 'ok', {}))
 
@@ -28,6 +30,15 @@ class RepeatedLaneChangeTest(unittest.TestCase):
         n.inner_hold_travel_m = 7.9
         n.ready_since = safety.Stamp(95.0)
         self.tick()
+        self.assertEqual(n.state, n.INNER_HOLD)
+        self.assertIsNone(n.ready_since)
+        n._choose_lane_change.assert_not_called()
+
+    def test_no_second_change_before_five_seconds(self):
+        n = self.node
+        n.inner_hold_started_at = safety.Stamp(98.0)
+        n.ready_since = safety.Stamp(95.0)
+        self.tick(100.0)
         self.assertEqual(n.state, n.INNER_HOLD)
         self.assertIsNone(n.ready_since)
         n._choose_lane_change.assert_not_called()

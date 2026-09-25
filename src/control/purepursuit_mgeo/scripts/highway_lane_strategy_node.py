@@ -156,6 +156,9 @@ class HighwayLaneStrategyNode:
         self.cruise_speed_mps = float(rospy.get_param("~cruise_speed_mps", 6.0))
         self.rate_hz = float(rospy.get_param("~rate_hz", 20.0))
         self.min_lane_hold_before_next_change_m = float(rospy.get_param("~min_lane_hold_before_next_change_m", 8.0))
+        self.min_lane_hold_before_next_change_s = float(
+            rospy.get_param("~min_lane_hold_before_next_change_s", 5.0)
+        )
         self.highway_confirm_s = float(rospy.get_param("~highway_confirm_s", 0.5))
         self.ready_confirm_s = float(rospy.get_param("~ready_confirm_s", 0.5))
         self.lane_info_timeout_s = float(rospy.get_param("~lane_info_timeout_s", 0.6))
@@ -272,6 +275,9 @@ class HighwayLaneStrategyNode:
         self.dynamic_prediction_horizon_s = float(
             rospy.get_param("~dynamic_prediction_horizon_s", 5.0)
         )
+        self.committed_stop_horizon_s = float(
+            rospy.get_param("~committed_stop_horizon_s", 1.0)
+        )
         self.max_lateral_accel_mps2 = float(rospy.get_param("~max_lateral_accel_mps2", 2.5))
 
         self.release_global_d_m = float(rospy.get_param("~release_global_d_m", 0.55))
@@ -317,6 +323,7 @@ class HighwayLaneStrategyNode:
         self.last_change_xy: Optional[Tuple[float, float]] = None
         self.inner_hold_travel_m = 0.0
         self.last_hold_xy: Optional[Tuple[float, float]] = None
+        self.inner_hold_started_at: Optional[rospy.Time] = None
 
         self.last_output_speed = self.cruise_speed_mps
         self.last_timer_time: Optional[rospy.Time] = None
@@ -1574,6 +1581,7 @@ class HighwayLaneStrategyNode:
             # checking actual predicted collisions along the remaining trajectory
             # even if the camera changes lane identity or drops out.
             path_safe, path_reason = self._dynamic_path_safe(self.committed_path, speed) if obs_fresh else (False, "obstacles_stale")
+            future_collision_reason = None
             floor_blocked = False
             # Suppress a conservative following slowdown only while the faster
             # trajectory is collision-free. New traffic after commitment can
@@ -1587,6 +1595,26 @@ class HighwayLaneStrategyNode:
                 path_safe, path_reason = self._dynamic_path_safe(
                     self.committed_path, speed
                 )
+            # The long prediction horizon is useful before commitment, but a
+            # transient crossing of a moving object's predicted box must not
+            # park the vehicle halfway across a divider. After commitment only
+            # an emergency lead or a collision inside the next second commands
+            # a stop; farther conflicts remain visible in diagnostics and are
+            # re-evaluated every control tick.
+            if obs_fresh and not path_safe and not emergency:
+                immediate_arc_m = (
+                    self.vehicle_length_m
+                    + max(speed, 0.5)*max(self.committed_stop_horizon_s, 0.25)
+                )
+                immediate_safe, immediate_reason = self._dynamic_path_safe(
+                    self.committed_path, speed, immediate_arc_m
+                )
+                if immediate_safe:
+                    future_collision_reason = path_reason
+                    path_safe = True
+                    path_reason = "future_collision_monitored"
+                else:
+                    path_reason = immediate_reason
             stop = emergency or not path_safe
 
             lat = None if self.lane_info is None else self.lane_info.get("lateral_error_m")
@@ -1625,6 +1653,7 @@ class HighwayLaneStrategyNode:
                     self.state = self.INNER_HOLD
                     self.inner_hold_travel_m = 0.0
                     self.last_hold_xy = (ex,ey)
+                    self.inner_hold_started_at = now
                     self.release_since = None
                     self.lane_invalid_since = None
                     self.ready_since = None
@@ -1640,7 +1669,11 @@ class HighwayLaneStrategyNode:
             else:
                 self.complete_since = None
 
-            stop_reason = "lead_emergency" if emergency else (path_reason if not path_safe else lane_reason)
+            stop_reason = (
+                "lead_emergency" if emergency
+                else path_reason if (not path_safe or future_collision_reason)
+                else lane_reason
+            )
             self._publish(self.committed_path, stop, speed, True, {
                 "reason":stop_reason,
                 "travel_m":round(self.change_travel_m,2),
@@ -1657,6 +1690,7 @@ class HighwayLaneStrategyNode:
                 "follow":follow,
                 "lane_change_speed_floor_mps":round(speed_floor,2),
                 "speed_floor_blocked":floor_blocked,
+                "future_collision":future_collision_reason,
             }, now, dt)
             return
 
@@ -1766,9 +1800,14 @@ class HighwayLaneStrategyNode:
             # change.
             control_center_y = center_y
             control_heading = self._inner_center_heading() if lane_ok else None
+            hold_time_s = (
+                0.0 if self.inner_hold_started_at is None
+                else max(0.0, (now-self.inner_hold_started_at).to_sec())
+            )
             settled_for_next = (
                 lane_ok and not self.inner_handover_pending and not stop
                 and self.inner_hold_travel_m >= self.min_lane_hold_before_next_change_m
+                and hold_time_s >= self.min_lane_hold_before_next_change_s
                 and control_center_y is not None
                 and abs(float(control_center_y)) <= self.change_center_error_m
                 and control_heading is not None
@@ -1870,6 +1909,7 @@ class HighwayLaneStrategyNode:
                 "reason": inner_reason,
                 "global_d": None if global_d is None else round(global_d,2),
                 "inner_hold_travel_m": round(self.inner_hold_travel_m,2),
+                "inner_hold_time_s": round(hold_time_s,2),
                 "center_y8_m": None if center_y is None else round(center_y,3),
                 "lane_center_source": (self.lane_info or {}).get("center_source"),
                 "lane_straddling": bool(((self.lane_info or {}).get("straddling_lane") or {}).get("detected", False)),

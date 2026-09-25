@@ -99,6 +99,7 @@ class DiagonalLaneChangeTest(unittest.TestCase):
         n._odom_pose.return_value = (42.0, 3.5, 0.0, 2.0)
         n._tick(None)
         self.assertEqual(n.state, n.INNER_HOLD)
+        self.assertEqual(n.inner_hold_started_at.seconds, 100.0)
 
     def test_first_camera_correction_is_blended(self):
         n = node_fixture()
