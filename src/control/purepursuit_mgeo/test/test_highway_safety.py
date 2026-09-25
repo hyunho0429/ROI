@@ -541,6 +541,12 @@ class HighwaySafetyTest(unittest.TestCase):
 
         with patch.object(NODE.rospy.Time,"now",return_value=Stamp(100.31)):
             n._tick(None)
+        self.assertTrue(n.inner_handover_pending)
+
+        fresh = Stamp(100.70)
+        n.base_path_at = n.base_stop_at = n.odom_at = n.obstacles_at = fresh
+        with patch.object(NODE.rospy.Time,"now",return_value=Stamp(100.70)):
+            n._tick(None)
         self.assertFalse(n.inner_handover_pending)
 
     def test_invalid_center_restarts_handover_confirmation(self):

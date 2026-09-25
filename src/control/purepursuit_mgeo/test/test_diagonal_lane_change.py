@@ -105,7 +105,7 @@ class DiagonalLaneChangeTest(unittest.TestCase):
         n = node_fixture()
         n._centerline_local.return_value = [(0.0, 0.0)] + [(float(x), -0.6) for x in range(5, 26)]
         path, reason = n._filtered_inner_path(Stamp(), .05)
-        self.assertEqual(reason, 'ok')
+        self.assertEqual(reason, 'limited')
         # The first update may correct faster than the former 0.35 s filter,
         # but must still apply less than a quarter of the observed jump.
         self.assertLess(abs(path.poses[1].pose.position.y), .15)
@@ -114,10 +114,25 @@ class DiagonalLaneChangeTest(unittest.TestCase):
         n = node_fixture()
         n.last_inner_path = path_at()
         n._centerline_local.return_value = [(0.0, 0.0)] + [(float(x), -0.8) for x in range(5, 26)]
-        for _ in range(20):
+        for _ in range(60):
             path, _ = n._filtered_inner_path(Stamp(), .05)
             n.last_inner_path = path
         self.assertLess(path.poses[1].pose.position.y, -0.5)
+
+    def test_small_camera_center_jitter_keeps_committed_lane_reference(self):
+        n = node_fixture()
+        n._odom_pose.return_value = (0.0, 3.5, 0.0, 2.0)
+        n.last_inner_path = path_at(3.5)
+        n._centerline_local.return_value = [
+            (float(x), 0.08) for x in range(41)
+        ]
+
+        path, reason = n._filtered_inner_path(Stamp(), 0.05)
+
+        self.assertEqual(reason, "ok")
+        self.assertTrue(
+            all(abs(p.pose.position.y-3.5) < 1e-6 for p in path.poses)
+        )
 
     def test_control_center_is_midpoint_of_physical_boundaries(self):
         n = node_fixture()

@@ -193,10 +193,10 @@ class HighwayLaneStrategyNode:
             rospy.get_param("~inner_lane_invalid_grace_s", 1.20)
         )
         self.inner_handover_confirm_s = float(
-            rospy.get_param("~inner_handover_confirm_s", 0.30)
+            rospy.get_param("~inner_handover_confirm_s", 0.60)
         )
         self.inner_center_switch_max_delta_m = float(
-            rospy.get_param("~inner_center_switch_max_delta_m", 0.65)
+            rospy.get_param("~inner_center_switch_max_delta_m", 0.45)
         )
         self.inner_fallback_path_length_m = float(
             rospy.get_param("~inner_fallback_path_length_m", 60.0)
@@ -213,9 +213,12 @@ class HighwayLaneStrategyNode:
         self.change_max_heading_rad = math.radians(float(rospy.get_param("~change_max_heading_deg", 8.0)))
         if not 0.0 < self.change_ramp_ratio < 0.5 or not 0.0 < self.change_max_heading_rad < math.pi/4:
             raise ValueError("invalid diagonal lane-change ramp or heading limit")
-        self.inner_path_blend_time_s = max(0.05, float(rospy.get_param("~inner_path_blend_time_s", 0.25)))
-        self.inner_path_max_jump_m = float(rospy.get_param("~inner_path_max_jump_m", 0.75))
-        self.inner_path_join_length_m = float(rospy.get_param("~inner_path_join_length_m", 6.0))
+        self.inner_path_blend_time_s = max(0.05, float(rospy.get_param("~inner_path_blend_time_s", 0.60)))
+        self.inner_path_max_jump_m = float(rospy.get_param("~inner_path_max_jump_m", 0.45))
+        self.inner_path_join_length_m = float(rospy.get_param("~inner_path_join_length_m", 10.0))
+        self.inner_path_deadband_m = max(
+            0.0, float(rospy.get_param("~inner_path_deadband_m", 0.10))
+        )
         self.change_time_s = float(rospy.get_param("~change_time_s", 5.5))
         self.change_post_hold_m = float(rospy.get_param("~change_post_hold_m", 10.0))
         self.rrt_step_size_m = float(rospy.get_param("~rrt_step_size_m", 2.0))
@@ -980,6 +983,12 @@ class HighwayLaneStrategyNode:
         for x, camera_y in camera:
             previous_y = interp_y(previous, x)
             delta = camera_y-previous_y
+            # Keep the already committed map-frame lane reference when the
+            # camera merely jitters by a few centimetres.  This mirrors the
+            # stable fixed-path behavior of the devcourse stack while still
+            # allowing a sustained, meaningful lane-center correction.
+            if abs(delta) <= self.inner_path_deadband_m:
+                delta = 0.0
             bounded_delta = clamp(delta, -self.inner_path_max_jump_m, self.inner_path_max_jump_m)
             limited = limited or abs(delta) > self.inner_path_max_jump_m
             # Start the correction just ahead of the bumper and complete it in

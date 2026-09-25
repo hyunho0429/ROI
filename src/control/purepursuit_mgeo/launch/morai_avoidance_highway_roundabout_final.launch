@@ -288,9 +288,9 @@
     <param name="left_divider_expected_tol_m" value="0.90" />
     <param name="inner_center_max_abs_y_m" value="0.90" />
     <param name="inner_lane_invalid_grace_s" value="1.20" />
-    <param name="inner_handover_confirm_s" value="0.30" />
+    <param name="inner_handover_confirm_s" value="0.60" />
     <!-- Reject a camera center that jumps back toward the lane just left. -->
-    <param name="inner_center_switch_max_delta_m" value="0.65" />
+    <param name="inner_center_switch_max_delta_m" value="0.45" />
     <param name="inner_fallback_path_length_m" value="60.0" />
 
     <param name="change_start_m" value="3.0" />
@@ -300,9 +300,10 @@
     <param name="change_max_heading_deg" value="8.0" />
     <!-- Follow the midpoint of the newly detected left/right boundaries soon
          after hand-over while retaining a smooth steering transition. -->
-    <param name="inner_path_blend_time_s" value="0.25" />
-    <param name="inner_path_max_jump_m" value="0.75" />
-    <param name="inner_path_join_length_m" value="6.0" />
+    <param name="inner_path_blend_time_s" value="0.60" />
+    <param name="inner_path_max_jump_m" value="0.45" />
+    <param name="inner_path_join_length_m" value="10.0" />
+    <param name="inner_path_deadband_m" value="0.10" />
     <param name="change_time_s" value="7.0" />
     <param name="change_post_hold_m" value="10.0" />
     <!-- Live vehicle-frame RRT*: consumes current lane/odom/LiDAR in memory. -->
