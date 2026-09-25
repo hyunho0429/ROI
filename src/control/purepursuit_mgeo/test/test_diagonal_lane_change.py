@@ -181,6 +181,30 @@ class DiagonalLaneChangeTest(unittest.TestCase):
             (False, 'inner_right_boundary_missing', None),
         )
 
+    def test_post_change_center_cannot_jump_back_toward_previous_lane(self):
+        n = node_fixture()
+        n._boundary_local = safety.NODE.HighwayLaneStrategyNode._boundary_local.__get__(n)
+        n._centerline_local = safety.NODE.HighwayLaneStrategyNode._centerline_local.__get__(n)
+        n._inner_center_sanity = safety.NODE.HighwayLaneStrategyNode._inner_center_sanity.__get__(n)
+        n._path_map_to_local = safety.NODE.HighwayLaneStrategyNode._path_map_to_local.__get__(n)
+        n._odom_pose.return_value = (10.0, 3.5, 0.0, 2.0)
+        n.last_inner_path = path_at(3.5)
+        n.lane_info = {
+            'output_status': 'FRESH',
+            'lane_width_m': 3.5,
+            'left_lane': {'detected': True},
+            'right_lane': {'detected': True},
+            # A plausible-width pair centered 0.8 m to the right is still the
+            # wrong hand-over target relative to the committed RRT lane.
+            'left_boundary_points': [[float(x), 0.95] for x in range(5, 26)],
+            'right_boundary_points': [[float(x), -2.55] for x in range(5, 26)],
+            'centerline_points': [[float(x), -0.8] for x in range(5, 26)],
+        }
+        valid, reason, center_y = n._inner_center_sanity(require_two_boundaries=True)
+        self.assertFalse(valid)
+        self.assertEqual(reason, 'inner_center_wrong_lane')
+        self.assertAlmostEqual(center_y, -0.8)
+
     def test_straddling_line_is_not_used_as_lane_center(self):
         n = node_fixture()
         n._centerline_local = safety.NODE.HighwayLaneStrategyNode._centerline_local.__get__(n)

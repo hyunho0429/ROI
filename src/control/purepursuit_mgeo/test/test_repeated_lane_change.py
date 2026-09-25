@@ -50,16 +50,38 @@ class RepeatedLaneChangeTest(unittest.TestCase):
         self.assertEqual(n.state, n.LANE_CHANGE)
         self.assertEqual(n._publish.call_args.args[4]['reason'], 'next_left_lane_change')
 
-    def test_heading_or_lateral_error_delays_second_change(self):
+    def test_control_center_or_heading_error_delays_second_change(self):
         n = self.node
-        for lat, heading in ((0.6, 0), (0, math.radians(15))):
-            with self.subTest(lat=lat, heading=heading):
-                n.lane_info.update(lateral_error_m=lat, heading_error_rad=heading)
+        for center_y, heading in ((0.6, 0), (0, math.radians(15))):
+            with self.subTest(center_y=center_y, heading=heading):
+                n.state = n.INNER_HOLD
+                n._inner_center_sanity.return_value = (True, 'ok', center_y)
+                slope = math.tan(heading)
+                n._centerline_local.return_value = [
+                    (float(x), slope*float(x)) for x in range(51)
+                ]
                 n.ready_since = safety.Stamp(95.0)
+                n._choose_lane_change.reset_mock()
                 self.tick()
                 self.assertEqual(n.state, n.INNER_HOLD)
                 self.assertIsNone(n.ready_since)
                 n._choose_lane_change.assert_not_called()
+
+    def test_stale_reported_errors_do_not_reverse_next_change(self):
+        n = self.node
+        n.lane_info.update(
+            lateral_error_m=0.8,
+            heading_error_rad=math.radians(15),
+        )
+        # The actual midpoint path is centered and straight. The next command
+        # must therefore remain the planned LEFT change.
+        self.tick(100.0)
+        self.tick(100.6)
+        self.assertEqual(n.state, n.LANE_CHANGE)
+        self.assertEqual(
+            n._publish.call_args.args[4]['reason'],
+            'next_left_lane_change',
+        )
 
     def test_emergency_resets_gap_confirmation(self):
         n = self.node

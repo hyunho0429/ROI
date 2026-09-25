@@ -192,8 +192,8 @@ class HighwayLaneStrategyNode:
         self.inner_handover_confirm_s = float(
             rospy.get_param("~inner_handover_confirm_s", 0.30)
         )
-        self.inner_lane_grace_speed_mps = float(
-            rospy.get_param("~inner_lane_grace_speed_mps", 1.50)
+        self.inner_center_switch_max_delta_m = float(
+            rospy.get_param("~inner_center_switch_max_delta_m", 0.65)
         )
         self.inner_fallback_path_length_m = float(
             rospy.get_param("~inner_fallback_path_length_m", 60.0)
@@ -643,7 +643,28 @@ class HighwayLaneStrategyNode:
             return False, "inner_center_missing", None
         if abs(float(y)) > self.inner_center_max_abs_y_m:
             return False, "inner_center_not_ego_lane", float(y)
+        if require_two_boundaries:
+            reference = self._path_map_to_local(
+                self.last_inner_path or self.committed_path
+            )
+            reference_y = interp_y(reference, 8.0)
+            if reference_y is None:
+                reference_y = interp_y(reference, 5.0)
+            if (
+                reference_y is not None
+                and abs(float(y)-float(reference_y))
+                > self.inner_center_switch_max_delta_m
+            ):
+                return False, "inner_center_wrong_lane", float(y)
         return True, "ok", float(y)
+
+    def _inner_center_heading(self) -> Optional[float]:
+        center = self._centerline_local()
+        y_near = interp_y(center, 5.0)
+        y_far = interp_y(center, 12.0)
+        if y_near is None or y_far is None:
+            return None
+        return math.atan2(float(y_far)-float(y_near), 7.0)
 
     def _odom_pose(self) -> Tuple[float, float, float, float]:
         odom = self.latest_odom
@@ -1102,15 +1123,18 @@ class HighwayLaneStrategyNode:
             horizon_arc_m if max_arc_m is None else min(max_arc_m, horizon_arc_m)
         )
 
-        # A vehicle wholly behind the ego cannot be avoided by braking.  Rear
-        # traffic is checked before lane-change commitment by the dedicated gap
-        # and TTC rules; it must not stop INNER_HOLD after the merge succeeds.
+        # A rear vehicle cannot be avoided by braking. Rear traffic is checked
+        # before commitment by the dedicated gap/TTC gate. Once a path is
+        # committed, ignore objects whose centers remain behind the current
+        # base_link even if an oversized tracked box reaches the rear bumper.
         ego_rear_x = self.vehicle_center_from_base_m - 0.5*self.vehicle_length_m
         obs = []
         for o in self.latest_obstacles.obstacles:
             dx0 = float(o.center_x_map) - ex
             dy0 = float(o.center_y_map) - ey
             lon0 = math.cos(ego_yaw)*dx0 + math.sin(ego_yaw)*dy0
+            if self.state in (self.LANE_CHANGE, self.INNER_HOLD, self.REJOIN) and lon0 < 0.0:
+                continue
             obstacle_front_x = lon0 + 0.5*max(0.5, float(o.length))
             if obstacle_front_x <= ego_rear_x:
                 continue
@@ -1697,12 +1721,12 @@ class HighwayLaneStrategyNode:
                     self.last_inner_path = fallback
                     lane_fallback = True
 
-            if obs_fresh and lane_ok:
-                adaptive, emergency, follow = self._adaptive_speed(self.cruise_speed_mps)
-            elif obs_fresh and handover_wait:
-                adaptive, emergency, follow = min(self.cruise_speed_mps, self.committed_speed_mps), False, {}
-            elif obs_fresh:
-                adaptive, emergency, follow = self.inner_lane_grace_speed_mps, False, {}
+            if obs_fresh and path is not None:
+                # Camera hand-over failure alone is not a braking condition.
+                # Continue on the rolling committed path and react only to a
+                # true lead vehicle or a predicted forward collision.
+                hold_speed = min(self.cruise_speed_mps, self.committed_speed_mps)
+                adaptive, emergency, follow = self._adaptive_speed(hold_speed)
             else:
                 adaptive, emergency, follow = 0.0, False, {}
 
@@ -1721,7 +1745,6 @@ class HighwayLaneStrategyNode:
                                 else "lane_handover_" + lane_reason)
             elif lane_grace or lane_fallback:
                 stop = False
-                adaptive = min(adaptive, self.inner_lane_grace_speed_mps)
                 inner_reason = (
                     "lane_grace_" if lane_grace else "lane_fallback_"
                 ) + lane_reason
@@ -1737,13 +1760,19 @@ class HighwayLaneStrategyNode:
             # Follow and settle in each lane before starting a new uninterrupted
             # gap confirmation. There is no count limit; road geometry, a dashed
             # left divider and a safe adjacent-lane gap gate every attempt.
-            lat = (self.lane_info or {}).get("lateral_error_m")
-            heading = (self.lane_info or {}).get("heading_error_rad")
+            # Use the center actually supplied to control. The publisher's EMA
+            # lateral/heading fields can still describe the previous lane just
+            # after hand-over and can otherwise block or reverse the next LEFT
+            # change.
+            control_center_y = center_y
+            control_heading = self._inner_center_heading() if lane_ok else None
             settled_for_next = (
-                lane_ok and not stop
+                lane_ok and not self.inner_handover_pending and not stop
                 and self.inner_hold_travel_m >= self.min_lane_hold_before_next_change_m
-                and lat is not None and abs(float(lat)) <= self.change_center_error_m
-                and heading is not None and abs(float(heading)) <= self.change_heading_error_rad
+                and control_center_y is not None
+                and abs(float(control_center_y)) <= self.change_center_error_m
+                and control_heading is not None
+                and abs(float(control_heading)) <= self.change_heading_error_rad
                 and (self.lane_info or {}).get("output_status", "FRESH") == "FRESH"
             )
             next_change_pending = False

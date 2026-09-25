@@ -249,6 +249,34 @@ class HighwaySafetyTest(unittest.TestCase):
         self.assertTrue(safe)
         self.assertEqual(reason, "ok")
 
+    def test_close_rear_vehicle_does_not_brake_after_commitment(self):
+        self.node.state = self.node.INNER_HOLD
+        self.node.latest_obstacles.obstacles = [obstacle(-1.0, vx=12.0)]
+        self.assertEqual(
+            self.node._dynamic_path_safe(path_at(), 2.0),
+            (True, "ok"),
+        )
+        lead, _, _ = self.node._current_lane_lead()
+        self.assertIsNone(lead)
+
+    def test_current_lane_rear_does_not_block_next_left_gap(self):
+        self.node.latest_obstacles.obstacles = [obstacle(-4.0, y=0.0, vx=8.0)]
+        safe, reason, diagnostics = self.node._gap_safe_for_speed(
+            4.0, 3.5, 32.0
+        )
+        self.assertTrue(safe)
+        self.assertEqual(reason, "ok")
+        self.assertEqual(diagnostics["objects"], [])
+
+    def test_target_lane_rear_still_blocks_next_left_gap(self):
+        self.node.latest_obstacles.obstacles = [obstacle(-4.0, y=3.5, vx=8.0)]
+        safe, reason, diagnostics = self.node._gap_safe_for_speed(
+            4.0, 3.5, 32.0
+        )
+        self.assertFalse(safe)
+        self.assertEqual(reason, "rear_gap")
+        self.assertEqual(diagnostics["rear"]["id"], 1)
+
     def test_dynamic_guard_uses_bounded_replanning_horizon(self):
         self.node.latest_obstacles.obstacles = [obstacle(30.0)]
         self.assertTrue(self.node._dynamic_path_safe(path_at(), 2.0)[0])
@@ -534,7 +562,7 @@ class HighwaySafetyTest(unittest.TestCase):
         path, stop, speed, _, status, *_ = self.tick()
 
         self.assertFalse(stop)
-        self.assertEqual(speed, n.inner_lane_grace_speed_mps)
+        self.assertEqual(speed, min(n.cruise_speed_mps, n.committed_speed_mps))
         self.assertTrue(status["lane_fallback"])
         self.assertEqual(status["reason"], "lane_fallback_lane_info_missing_or_stale")
         self.assertGreater(len(path.poses), len(n.committed_path.poses))
