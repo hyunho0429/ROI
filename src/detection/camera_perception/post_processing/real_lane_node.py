@@ -102,6 +102,15 @@ DEFAULT_TOPIC = "/perception/camera/lane_info"
 POINT_STEP_M = 0.5
 POINT_MAX = 80
 
+DEBUG_WINDOW = "6-class lane perception"
+DEBUG_CLASS_COLORS = {
+    getattr(rl, "CLASS_WHITE_SOLID", 1): (255, 0, 255),    # magenta
+    getattr(rl, "CLASS_WHITE_DASHED", 2): (255, 255, 0),   # cyan
+    getattr(rl, "CLASS_YELLOW", 3): (0, 255, 0),           # green
+    getattr(rl, "CLASS_STOPLINE", 4): (0, 0, 255),         # red
+    getattr(rl, "CLASS_GUIDE", 5): (0, 165, 255),          # orange
+}
+
 
 # --------------------------------------------------------------------------
 # JSON 조립
@@ -311,6 +320,100 @@ def build_diag(res, timing, tracker):
     return d
 
 
+def draw_debug_view(res, payload, segmenter, scale=0.75):
+    """Overlay the raw six-class mask and fitted lane curves on one frame."""
+    import cv2
+
+    if res.crop is None or res.mask is None:
+        return None
+
+    vis = res.crop.copy()
+    mask = res.mask
+    if mask.shape[:2] != vis.shape[:2]:
+        mask = cv2.resize(mask, (vis.shape[1], vis.shape[0]),
+                          interpolation=cv2.INTER_NEAREST)
+
+    # Dilate for display only. The detector continues to use the untouched mask.
+    color = np.zeros_like(vis)
+    hit = np.zeros(vis.shape[:2], dtype=bool)
+    kernel = np.ones((3, 3), np.uint8)
+    for cls, bgr in DEBUG_CLASS_COLORS.items():
+        selected = mask == cls
+        if selected.any():
+            selected = cv2.dilate(selected.astype(np.uint8), kernel) > 0
+            color[selected] = bgr
+            hit |= selected
+    vis[hit] = (0.48 * vis[hit] + 0.52 * color[hit]).astype(np.uint8)
+
+    # Curves are drawn over the raw mask so failed lane-ID assignment is visible.
+    for curve in res.curves or []:
+        lo, hi = (float(curve.x_range[0]), float(curve.x_range[1]))
+        if hi <= lo:
+            continue
+        xs = np.linspace(lo, hi, 50)
+        ys = np.polyval(curve.coef, xs)
+        xyz = np.column_stack((xs, ys, np.full(xs.shape, rl.ROAD_Z_EGO)))
+        uv, valid = segmenter.cam.project(xyz)
+        uv = uv[valid]
+        if uv.shape[0] < 2:
+            continue
+        inside = ((uv[:, 0] >= -100) & (uv[:, 0] < vis.shape[1] + 100) &
+                  (uv[:, 1] >= -100) & (uv[:, 1] < vis.shape[0] + 100))
+        uv = uv[inside].astype(np.int32)
+        if uv.shape[0] < 2:
+            continue
+        bgr = DEBUG_CLASS_COLORS.get(curve.cls, (180, 180, 180))
+        cv2.polylines(vis, [uv], False, bgr, 3)
+        u, v = uv[len(uv) // 2]
+        name = rl.CLASS_NAMES[curve.cls] if curve.cls < len(rl.CLASS_NAMES) else str(curve.cls)
+        tag = f"id={curve.lane_id:+d} {name}"
+        if curve.coasted:
+            tag += " coast"
+        cv2.putText(vis, tag, (int(u) + 5, int(v)), cv2.FONT_HERSHEY_SIMPLEX,
+                    0.45, (0, 0, 0), 3, cv2.LINE_AA)
+        cv2.putText(vis, tag, (int(u) + 5, int(v)), cv2.FONT_HERSHEY_SIMPLEX,
+                    0.45, bgr, 1, cv2.LINE_AA)
+
+    counts = np.bincount(mask.ravel(), minlength=len(rl.CLASS_NAMES))
+    left = payload.get("left_lane") or {}
+    dashed_out = bool(left.get("detected") and left.get("dashed")
+                      and not left.get("from_guide") and not left.get("coasted"))
+    cv2.rectangle(vis, (0, 0), (vis.shape[1], 68), (0, 0, 0), -1)
+    cv2.putText(
+        vis,
+        "RAW px  solid={}  dashed={}  yellow={}  stop={}  guide={}".format(
+            int(counts[rl.CLASS_WHITE_SOLID]),
+            int(counts[rl.CLASS_WHITE_DASHED]),
+            int(counts[rl.CLASS_YELLOW]),
+            int(counts[rl.CLASS_STOPLINE]),
+            int(counts[rl.CLASS_GUIDE]),
+        ),
+        (8, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (255, 255, 255), 1,
+        cv2.LINE_AA,
+    )
+    cv2.putText(
+        vis,
+        "solid=magenta dashed=cyan yellow=green stop=red guide=orange",
+        (8, 41), cv2.FONT_HERSHEY_SIMPLEX, 0.46, (190, 190, 190), 1,
+        cv2.LINE_AA,
+    )
+    cv2.putText(
+        vis,
+        "left={} detected={} coast={} guide={}  DASHED_OUT={}".format(
+            left.get("type"), bool(left.get("detected")), bool(left.get("coasted")),
+            bool(left.get("from_guide")), dashed_out,
+        ),
+        (8, 62), cv2.FONT_HERSHEY_SIMPLEX, 0.50,
+        (0, 255, 255) if dashed_out else (120, 180, 255), 1, cv2.LINE_AA,
+    )
+
+    scale = max(0.1, float(scale))
+    if abs(scale - 1.0) > 1e-6:
+        vis = cv2.resize(vis, None, fx=scale, fy=scale,
+                         interpolation=cv2.INTER_AREA)
+    return vis
+
+
 # --------------------------------------------------------------------------
 # 실행
 # --------------------------------------------------------------------------
@@ -441,6 +544,9 @@ def main(argv=None):
     ap.add_argument("--publish-boundaries", action="store_true")
     ap.add_argument("--publish-lane-pixels", action="store_true")
     ap.add_argument("--publish-diag", action="store_true", default=True)
+    ap.add_argument("--display", action="store_true",
+                    help="6-class mask and fitted lane debug window")
+    ap.add_argument("--display-scale", type=float, default=0.75)
     args = ap.parse_args(argv)
 
     pub = pub_diag = None
@@ -461,7 +567,9 @@ def main(argv=None):
                                  ("~publish_curves", "publish_curves", bool),
                                  ("~publish_boundaries", "publish_boundaries", bool),
                                  ("~publish_lane_pixels", "publish_lane_pixels", bool),
-                                 ("~publish_diag", "publish_diag", bool)):
+                                 ("~publish_diag", "publish_diag", bool),
+                                 ("~display", "display", bool),
+                                 ("~display_scale", "display_scale", float)):
             if rospy.has_param(name):
                 setattr(args, attr, cast(rospy.get_param(name)))
         pub = rospy.Publisher(args.topic, String, queue_size=1)
@@ -485,7 +593,7 @@ def main(argv=None):
               f"자세 {'사용' if args.imu_attitude else '미사용'})")
     print(f"[real_lane] 단계 {args.stage}  추적 {'끔' if args.no_track else '켬'}  "
           f"선택출력 curves={args.publish_curves} boundaries={args.publish_boundaries} "
-          f"lane_pixels={args.publish_lane_pixels}")
+          f"lane_pixels={args.publish_lane_pixels} display={args.display}")
 
     cam = CameraStream(args.ip, args.port).start()
     print(f"[real_lane] {args.ip}:{args.port} 대기 중...")
@@ -495,6 +603,14 @@ def main(argv=None):
 
     last_seq, n_since, n = -1, 0, 0
     t_log = time.time()
+    display_active = bool(args.display)
+    cv2_display = None
+    if display_active:
+        try:
+            import cv2 as cv2_display
+        except ImportError as exc:
+            print(f"[real_lane] debug window disabled: {exc}")
+            display_active = False
     try:
         while True:
             if use_ros:
@@ -531,6 +647,20 @@ def main(argv=None):
                     from std_msgs.msg import String
                     pub_diag.publish(String(data=diag))
 
+            if display_active:
+                try:
+                    debug_view = draw_debug_view(res, payload, runner.seg,
+                                                 args.display_scale)
+                    if debug_view is not None:
+                        cv2_display.imshow(DEBUG_WINDOW, debug_view)
+                        key = cv2_display.waitKey(1) & 0xFF
+                        if key in (ord("q"), 27):
+                            cv2_display.destroyWindow(DEBUG_WINDOW)
+                            display_active = False
+                except cv2_display.error as exc:
+                    print(f"[real_lane] debug window disabled: {exc}")
+                    display_active = False
+
             if time.time() - t_log > 2.0:
                 t_log = time.time()
                 ll = payload["left_lane"]["detected"]
@@ -545,6 +675,11 @@ def main(argv=None):
         cam.stop()
         if runner.imu is not None:
             runner.imu.stop()
+        if cv2_display is not None:
+            try:
+                cv2_display.destroyAllWindows()
+            except cv2_display.error:
+                pass
         print("[real_lane] 종료")
 
 

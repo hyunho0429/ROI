@@ -24,6 +24,8 @@ def main() -> None:
     ap.add_argument("--device", default="auto")
     ap.add_argument("--every", type=int, default=1)
     ap.add_argument("--topic", default="/perception/camera/lane_info")
+    ap.add_argument("--display", default="false")
+    ap.add_argument("--display-scale", type=float, default=0.75)
     args, _ = ap.parse_known_args()
 
     pkg_root = Path(rospkg.RosPack().get_path("camera_perception"))
@@ -36,7 +38,10 @@ def main() -> None:
         "--port", str(args.port),
         "--every", str(max(1, args.every)),
         "--topic", args.topic,
+        "--display-scale", str(max(0.1, args.display_scale)),
     ]
+    if str(args.display).strip().lower() in ("1", "true", "yes", "on"):
+        target_args.append("--display")
     if args.checkpoint:
         target_args += ["--checkpoint", args.checkpoint]
     if args.cam_set:
