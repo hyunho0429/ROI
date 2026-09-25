@@ -292,6 +292,9 @@
     <!-- Reject a camera center that jumps back toward the lane just left. -->
     <param name="inner_center_switch_max_delta_m" value="0.45" />
     <param name="inner_fallback_path_length_m" value="60.0" />
+    <!-- End repeated LEFT changes at the final lane, but keep following the
+         midpoint between its nearest left solid and nearest right dashed line. -->
+    <param name="final_lane_confirm_s" value="0.50" />
 
     <param name="change_start_m" value="3.0" />
     <param name="change_min_length_m" value="32.0" />

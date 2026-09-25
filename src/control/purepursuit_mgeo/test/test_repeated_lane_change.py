@@ -61,6 +61,81 @@ class RepeatedLaneChangeTest(unittest.TestCase):
         self.assertEqual(n.state, n.LANE_CHANGE)
         self.assertEqual(n._publish.call_args.args[4]['reason'], 'next_left_lane_change')
 
+    def test_left_solid_right_dashed_locks_further_changes_and_holds_lane(self):
+        n = self.node
+        n.lane_info.update({
+            'lane_valid': True,
+            'output_status': 'FRESH',
+            'left_lane': {
+                'detected': True,
+                'type': 'white_solid',
+                'from_guide': False,
+                'coasted': False,
+            },
+            'right_lane': {
+                'detected': True,
+                'type': 'white_dashed',
+                'from_guide': False,
+                'coasted': False,
+            },
+        })
+        n._global_signed_d.return_value = 0.2
+        n._choose_lane_change = Mock(return_value=(
+            safety.path_at(3.5), 2.0, 32.0, 'ok', {}
+        ))
+
+        self.tick(100.0)
+        self.assertFalse(n.lane_change_locked_by_left_solid)
+        n._choose_lane_change.assert_not_called()
+        n._generate_rejoin_path.assert_not_called()
+        self.assertEqual(
+            n._publish.call_args.args[4]['reason'],
+            'final_lane_confirming',
+        )
+
+        fresh = safety.Stamp(100.6)
+        n.base_path_at = n.base_stop_at = n.odom_at = n.obstacles_at = fresh
+        self.tick(100.6)
+
+        self.assertTrue(n.lane_change_locked_by_left_solid)
+        self.assertEqual(n.state, n.INNER_HOLD)
+        self.assertFalse(n._publish.call_args.args[1])
+        self.assertTrue(n._publish.call_args.args[3])
+        self.assertEqual(
+            n._publish.call_args.args[4]['reason'],
+            'final_lane_center_hold',
+        )
+        self.assertFalse(
+            n._publish.call_args.args[4]['lane_change_enabled']
+        )
+        n._choose_lane_change.assert_not_called()
+        n._generate_rejoin_path.assert_not_called()
+
+    def test_left_solid_without_right_dashed_does_not_lock_changes(self):
+        n = self.node
+        n.lane_info.update({
+            'lane_valid': True,
+            'output_status': 'FRESH',
+            'left_lane': {'detected': True, 'type': 'white_solid'},
+            'right_lane': {'detected': True, 'type': 'white_solid'},
+        })
+
+        self.assertFalse(n._final_lane_markings_present())
+
+    def test_final_lane_stops_after_lane_geometry_grace_expires(self):
+        n = self.node
+        n.lane_change_locked_by_left_solid = True
+        n._lane_valid.return_value = (False, 'lane_invalid')
+        n.lane_invalid_since = safety.Stamp(98.0)
+
+        self.tick(100.0)
+
+        self.assertTrue(n._publish.call_args.args[1])
+        self.assertEqual(
+            n._publish.call_args.args[4]['reason'],
+            'final_lane_geometry_lost',
+        )
+
     def test_control_center_or_heading_error_delays_second_change(self):
         n = self.node
         for center_y, heading in ((0.6, 0), (0, math.radians(15))):

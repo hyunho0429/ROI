@@ -201,6 +201,9 @@ class HighwayLaneStrategyNode:
         self.inner_fallback_path_length_m = float(
             rospy.get_param("~inner_fallback_path_length_m", 60.0)
         )
+        self.final_lane_confirm_s = max(
+            0.0, float(rospy.get_param("~final_lane_confirm_s", 0.50))
+        )
 
         self.vehicle_length_m = float(rospy.get_param("~vehicle_length_m", 4.635))
         self.vehicle_width_m = float(rospy.get_param("~vehicle_width_m", 1.892))
@@ -335,6 +338,8 @@ class HighwayLaneStrategyNode:
         self.inner_handover_pending = False
         self.last_rrt_diag = {}
         self.inner_lane_candidate_since: Optional[rospy.Time] = None
+        self.final_lane_candidate_since: Optional[rospy.Time] = None
+        self.lane_change_locked_by_left_solid = False
 
         self.path_pub = rospy.Publisher("~active_path", RosPath, queue_size=1)
         self.stop_pub = rospy.Publisher("~stop_required", Bool, queue_size=1)
@@ -481,6 +486,51 @@ class HighwayLaneStrategyNode:
         if left_type in ("white_solid", "yellow"):
             return False, "adjacent_left_solid"
         return False, "adjacent_left_not_dashed"
+
+    def _final_lane_markings_present(self) -> bool:
+        """True for a fresh white-solid left / white-dashed right ego lane."""
+        info = self.lane_info or {}
+        if (
+            not bool(info.get("lane_valid", False))
+            or str(info.get("output_status", "")).upper() != "FRESH"
+        ):
+            return False
+
+        left = info.get("left_lane") or {}
+        right = info.get("right_lane") or {}
+        for lane in (left, right):
+            if (
+                not bool(lane.get("detected", False))
+                or bool(lane.get("from_guide", False))
+                or bool(lane.get("coasted", False))
+            ):
+                return False
+        return (
+            left.get("type") == "white_solid"
+            and right.get("type") == "white_dashed"
+        )
+
+    def _update_final_lane_lock(self, now: rospy.Time, geometry_ok: bool) -> bool:
+        """Latch off further merges while keeping camera lane-centre control."""
+        present = bool(geometry_ok) and self._final_lane_markings_present()
+        if self.lane_change_locked_by_left_solid:
+            return present
+        if not present:
+            self.final_lane_candidate_since = None
+            return False
+        if self.final_lane_candidate_since is None:
+            self.final_lane_candidate_since = now
+        elif (
+            now-self.final_lane_candidate_since
+        ).to_sec() >= self.final_lane_confirm_s:
+            self.lane_change_locked_by_left_solid = True
+            self.ready_since = None
+            self.release_since = None
+            rospy.logwarn(
+                "HIGHWAY further lane changes OFF: nearest left=white_solid "
+                "right=white_dashed; holding measured lane centre"
+            )
+        return True
 
     def _centerline_local(self) -> List[Tuple[float, float]]:
         if self.rrt_lidar_only_mode or self.nominal_lane_fallback_active:
@@ -1569,6 +1619,7 @@ class HighwayLaneStrategyNode:
                     self.committed_path = path
                     self.committed_speed_mps = float(cand_speed)
                     self.committed_change_length_m = float(length)
+                    self.final_lane_candidate_since = None
                     self.change_travel_m = 0.0
                     self.last_change_xy = (ex,ey)
                     self.complete_since = None
@@ -1708,6 +1759,7 @@ class HighwayLaneStrategyNode:
 
         if self.state == self.INNER_HOLD:
             lane_ok, lane_reason = self._lane_valid(now)
+            final_lane_candidate = self._update_final_lane_lock(now, lane_ok)
             center_ok = False
             center_y = None
             if self.inner_handover_pending:
@@ -1784,11 +1836,24 @@ class HighwayLaneStrategyNode:
                 inner_reason = "obstacles_stale"
             elif lane_ok:
                 stop = path is None
-                inner_reason = "ok" if path is not None else "inner_path_missing"
+                if path is None:
+                    inner_reason = "inner_path_missing"
+                elif self.lane_change_locked_by_left_solid:
+                    inner_reason = "final_lane_center_hold"
+                elif final_lane_candidate:
+                    inner_reason = "final_lane_confirming"
+                else:
+                    inner_reason = "ok"
             elif handover_wait:
                 stop = False
                 inner_reason = (lane_reason if lane_reason.startswith("lane_handover_")
                                 else "lane_handover_" + lane_reason)
+            elif self.lane_change_locked_by_left_solid and not lane_grace:
+                # In the final lane there is no further merge path that can
+                # safely recover a prolonged camera loss. Stop instead of
+                # extending the last tangent until the vehicle leaves the lane.
+                stop = True
+                inner_reason = "final_lane_geometry_lost"
             elif lane_grace or lane_fallback:
                 stop = False
                 inner_reason = (
@@ -1817,7 +1882,9 @@ class HighwayLaneStrategyNode:
                 else max(0.0, (now-self.inner_hold_started_at).to_sec())
             )
             settled_for_next = (
-                lane_ok and not self.inner_handover_pending and not stop
+                not final_lane_candidate
+                and not self.lane_change_locked_by_left_solid
+                and lane_ok and not self.inner_handover_pending and not stop
                 and self.inner_hold_travel_m >= self.min_lane_hold_before_next_change_m
                 and hold_time_s >= self.min_lane_hold_before_next_change_s
                 and control_center_y is not None
@@ -1837,6 +1904,7 @@ class HighwayLaneStrategyNode:
                         self.committed_path = p
                         self.committed_speed_mps = float(v)
                         self.committed_change_length_m = float(length)
+                        self.final_lane_candidate_since = None
                         self.change_travel_m = 0.0
                         self.last_change_xy = (ex,ey)
                         self.complete_since = None
@@ -1852,6 +1920,8 @@ class HighwayLaneStrategyNode:
             global_d = self._global_signed_d()
             can_start_rejoin = (
                 self.lane_changes_done > 0
+                and not final_lane_candidate
+                and not self.lane_change_locked_by_left_solid
                 and not next_change_pending
                 and self.inner_hold_travel_m >= self.min_inner_hold_after_change_m
                 and global_d is not None
@@ -1886,6 +1956,8 @@ class HighwayLaneStrategyNode:
             # merge from stopping the car forever.
             can_direct_release = (
                 self.lane_changes_done > 0
+                and not final_lane_candidate
+                and not self.lane_change_locked_by_left_solid
                 and not next_change_pending
                 and self.inner_hold_travel_m >= self.min_inner_hold_after_change_m
                 and global_d is not None
@@ -1928,6 +2000,8 @@ class HighwayLaneStrategyNode:
                 "lane_grace": lane_grace,
                 "lane_fallback": lane_fallback,
                 "lane_handover_pending": self.inner_handover_pending,
+                "final_lane_markings": final_lane_candidate,
+                "lane_change_enabled": not self.lane_change_locked_by_left_solid,
                 "follow": follow,
             }, now, dt)
             return
