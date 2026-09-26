@@ -372,7 +372,7 @@ def main(ip=IP, port=PORT, base_model_path=BASE_MODEL_PATH,
                         fps=smoothed_fps,
                     )
 
-                # One shared unified-car state feeds both the highway and
+                # One shared road-vehicle state feeds both the highway and
                 # intersection situation gates.
                 car_detected = highway_vehicle_detected(detected_labels)
                 person_detected = "person" in detected_labels
@@ -385,7 +385,7 @@ def main(ip=IP, port=PORT, base_model_path=BASE_MODEL_PATH,
                 if car_detected:
                     rospy.loginfo_throttle(
                         1.0,
-                        "YOLO unified Car detected (%s); camera condition is true",
+                        "YOLO road vehicle detected (%s); camera condition is true",
                         ",".join(
                             sorted(detected_labels.intersection(HIGHWAY_VEHICLE_CLASSES))
                         ),

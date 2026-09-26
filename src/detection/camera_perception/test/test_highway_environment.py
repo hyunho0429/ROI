@@ -24,9 +24,12 @@ from camera_perception.highway_vehicle import highway_vehicle_detected
 
 
 class HighwayVehicleDetectionTest(unittest.TestCase):
-    def test_only_unified_car_activates_vehicle_condition(self):
-        self.assertTrue(highway_vehicle_detected({"car"}))
-        for label in ("bus", "train", "truck", "motorcycle", "bicycle"):
+    def test_car_bus_and_truck_activate_vehicle_condition(self):
+        for label in ("car", "bus", "truck"):
+            with self.subTest(label=label):
+                self.assertTrue(highway_vehicle_detected({label}))
+
+        for label in ("train", "motorcycle", "bicycle"):
             with self.subTest(label=label):
                 self.assertFalse(highway_vehicle_detected({label}))
 
