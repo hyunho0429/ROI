@@ -53,7 +53,7 @@ class DiagonalLaneChangeTest(unittest.TestCase):
         points, _ = n._generate_lane_change_local(3.5, 2.0)
         self.assertEqual(points, [])
 
-    def test_second_change_uses_shorter_faster_diagonal(self):
+    def test_second_change_is_not_shorter_than_stable_first_profile(self):
         n = node_fixture()
         n.cruise_speed_mps = 4.0
         n._boundary_local = lambda key: [
@@ -67,13 +67,13 @@ class DiagonalLaneChangeTest(unittest.TestCase):
 
         self.assertGreater(len(first), 3)
         self.assertGreater(len(second), 3)
-        self.assertLess(second_length, first_length)
+        self.assertGreaterEqual(second_length, first_length)
         self.assertEqual(n.last_rrt_diag['profile'], 'repeat_fast')
         headings = [
             abs(math.atan2(b[1]-a[1], b[0]-a[0]))
             for a, b in zip(second, second[1:])
         ]
-        self.assertLessEqual(max(headings), math.radians(20.0)+1e-5)
+        self.assertLessEqual(max(headings), math.radians(15.0)+1e-5)
         self.assertTrue(n._path_curvature_ok(second, 4.0)[0])
 
     def test_repeat_profile_commands_decisive_but_safe_steering_at_four_mps(self):
@@ -209,6 +209,42 @@ class DiagonalLaneChangeTest(unittest.TestCase):
         n._tick(None)
         self.assertEqual(n.state, n.INNER_HOLD)
         self.assertEqual(n.inner_hold_started_at.seconds, 100.0)
+
+    def test_target_lane_capture_prevents_crossing_a_second_divider(self):
+        n = node_fixture()
+        n.lane_changes_done = 1
+        n.state = n.LANE_CHANGE
+        n.committed_path = path_at(3.5, end=50)
+        n.committed_speed_mps = 4.0
+        n.committed_change_length_m = 30.0
+        n._odom_pose.return_value = (
+            28.0, 3.7, math.radians(8.0), 8.0
+        )
+
+        n._tick(None)
+
+        self.assertEqual(n.state, n.INNER_HOLD)
+        self.assertEqual(n.lane_changes_done, 2)
+        self.assertEqual(n._publish.call_args.args[4]['reason'], 'target_lane_capture')
+        self.assertLessEqual(
+            abs(n._publish.call_args.args[4]['alignment']['target_lateral_error_m']),
+            n.change_target_capture_m,
+        )
+
+    def test_target_capture_guard_does_not_change_first_maneuver(self):
+        n = node_fixture()
+        n.state = n.LANE_CHANGE
+        n.committed_path = path_at(3.5, end=50)
+        n.committed_speed_mps = 4.0
+        n.committed_change_length_m = 30.0
+        n._odom_pose.return_value = (
+            28.0, 3.7, math.radians(8.0), 8.0
+        )
+
+        n._tick(None)
+
+        self.assertEqual(n.state, n.LANE_CHANGE)
+        self.assertFalse(n._publish.call_args.args[4]['target_lane_captured'])
 
     def test_endpoint_handover_accepts_recoverable_lateral_offset(self):
         n = node_fixture()

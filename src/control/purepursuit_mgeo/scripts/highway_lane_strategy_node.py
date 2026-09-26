@@ -221,13 +221,13 @@ class HighwayLaneStrategyNode:
         self.change_ramp_ratio = float(rospy.get_param("~change_ramp_ratio", 0.2))
         self.change_max_heading_rad = math.radians(float(rospy.get_param("~change_max_heading_deg", 15.0)))
         self.repeat_change_min_length_m = float(
-            rospy.get_param("~repeat_change_min_length_m", 16.0)
+            rospy.get_param("~repeat_change_min_length_m", 18.0)
         )
         self.repeat_change_max_length_m = float(
-            rospy.get_param("~repeat_change_max_length_m", 22.0)
+            rospy.get_param("~repeat_change_max_length_m", 30.0)
         )
         self.repeat_change_time_s = float(
-            rospy.get_param("~repeat_change_time_s", 3.5)
+            rospy.get_param("~repeat_change_time_s", 3.0)
         )
         self.repeat_change_max_heading_rad = math.radians(float(
             rospy.get_param("~repeat_change_max_heading_deg", 15.0)
@@ -274,6 +274,14 @@ class HighwayLaneStrategyNode:
         self.change_center_error_m = float(rospy.get_param("~change_center_error_m", 0.45))
         self.change_heading_error_rad = float(rospy.get_param("~change_heading_error_rad", math.radians(10.0)))
         self.change_complete_confirm_s = float(rospy.get_param("~change_complete_confirm_s", 0.45))
+        self.change_target_capture_m = max(
+            0.05, float(rospy.get_param("~change_target_capture_m", 0.30))
+        )
+        self.change_target_capture_min_ratio = clamp(
+            float(rospy.get_param("~change_target_capture_min_ratio", 0.70)),
+            0.5,
+            1.0,
+        )
         self.endpoint_handover_max_error_m = float(
             rospy.get_param("~endpoint_handover_max_error_m", 1.60)
         )
@@ -1132,10 +1140,53 @@ class HighwayLaneStrategyNode:
         if best is None:
             return False, {"reason": "committed_path_degenerate"}
         error, heading, progress = best
+        a = points[-2]
+        b = points[-1]
+        dx, dy = b[0]-a[0], b[1]-a[1]
+        target_length = max(math.hypot(dx, dy), 1e-6)
+        tx, ty = dx/target_length, dy/target_length
+        target_lateral_error = tx*(ey-a[1])-ty*(ex-a[0])
+        target_heading_error = math.atan2(
+            math.sin(yaw-math.atan2(dy, dx)),
+            math.cos(yaw-math.atan2(dy, dx)),
+        )
         aligned = (error <= self.change_center_error_m
                    and heading <= self.change_heading_error_rad
                    and progress >= self.change_start_m+self.committed_change_length_m)
-        return aligned, {"path_error_m": round(error, 3), "heading_error_rad": round(heading, 4), "path_progress_m": round(progress, 2)}
+        return aligned, {
+            "path_error_m": round(error, 3),
+            "heading_error_rad": round(heading, 4),
+            "path_progress_m": round(progress, 2),
+            "target_lateral_error_m": round(target_lateral_error, 3),
+            "target_heading_error_rad": round(target_heading_error, 4),
+        }
+
+    def _enter_inner_hold(
+        self,
+        now: rospy.Time,
+        ex: float,
+        ey: float,
+        reason: str,
+        remaining_to_end: Optional[float],
+    ) -> None:
+        """Finish exactly one LEFT change and start the protected lane hold."""
+        self.lane_changes_done += 1
+        self.state = self.INNER_HOLD
+        self.inner_hold_travel_m = 0.0
+        self.last_hold_xy = (ex, ey)
+        self.inner_hold_started_at = now
+        self.release_since = None
+        self.lane_invalid_since = None
+        self.ready_since = None
+        self.last_inner_path = self.committed_path
+        self.inner_handover_pending = True
+        self.inner_lane_candidate_since = None
+        rospy.logwarn(
+            "HIGHWAY lane change COMPLETE count=%d reason=%s remaining=%.2fm",
+            self.lane_changes_done,
+            reason,
+            -1.0 if remaining_to_end is None else remaining_to_end,
+        )
 
     def _filtered_inner_path(self, now: rospy.Time, dt: float) -> Tuple[Optional[RosPath], str]:
         """Blend camera updates with the previous path in a common map frame.
@@ -1232,7 +1283,17 @@ class HighwayLaneStrategyNode:
                     line_intercept = a_local_y-slope*a_local_x
             length = max(20.0, self.inner_fallback_path_length_m)
             slope = math.tan(heading_error)
-            join_length = clamp(self.inner_path_join_length_m, 2.5, 6.0)
+            _, _, _, ego_speed = self._odom_pose()
+            heading_join = (
+                abs(line_intercept)/math.tan(self.inner_path_max_heading_rad)
+                if self.inner_path_max_heading_rad > 1e-3 else 0.0
+            )
+            join_length = max(
+                self.inner_path_join_length_m,
+                ego_speed*self.inner_path_join_time_s,
+                heading_join,
+                2.5,
+            )
             previous = []
             for index in range(int(2.0*length)+1):
                 x = 0.5*float(index)
@@ -1922,27 +1983,58 @@ class HighwayLaneStrategyNode:
             )
             handover_aligned = aligned or recoverable_endpoint_alignment
 
+            target_lateral_error = alignment_diag.get("target_lateral_error_m")
+            target_capture_progress = (
+                self.change_start_m
+                + self.change_target_capture_min_ratio*self.committed_change_length_m
+            )
+            target_lane_captured = bool(
+                self.lane_changes_done > 0
+                and target_lateral_error is not None
+                and abs(float(target_lateral_error)) <= self.change_target_capture_m
+                and float(alignment_diag.get("path_progress_m", 0.0))
+                >= target_capture_progress
+                and abs(float(alignment_diag.get(
+                    "target_heading_error_rad", float("inf")
+                )))
+                <= self.endpoint_handover_max_heading_rad
+            )
+
+            # At high entry speed the car can reach the new lane centre before
+            # the distance-based completion timer expires. Continuing the RRT
+            # state then preserves left yaw long enough to cross another
+            # divider. Capture the authorised target centre immediately and
+            # roll that same target line forward. INNER_HOLD still blocks a
+            # subsequent lane-change request for the configured five seconds.
+            if target_lane_captured and not stop:
+                self._enter_inner_hold(
+                    now, ex, ey, "target_lane_capture", remaining_to_end
+                )
+                recovery = self._rolling_inner_fallback(now)
+                if recovery is not None:
+                    self.last_inner_path = recovery
+                self._publish(
+                    self.last_inner_path,
+                    False,
+                    speed,
+                    True,
+                    {
+                        "reason": "target_lane_capture",
+                        "alignment": alignment_diag,
+                        "target_capture_progress_m": round(target_capture_progress, 2),
+                        "follow": follow,
+                    },
+                    now,
+                    dt,
+                )
+                return
+
             if geometry_complete and handover_aligned and not stop:
                 if self.complete_since is None:
                     self.complete_since = now
                 elif (now-self.complete_since).to_sec() >= self.change_complete_confirm_s:
-                    self.lane_changes_done += 1
-                    self.state = self.INNER_HOLD
-                    self.inner_hold_travel_m = 0.0
-                    self.last_hold_xy = (ex,ey)
-                    self.inner_hold_started_at = now
-                    self.release_since = None
-                    self.lane_invalid_since = None
-                    self.ready_since = None
-                    self.last_inner_path = self.committed_path
-                    self.inner_handover_pending = True
-                    self.inner_lane_candidate_since = None
                     why = "settled" if settled else "endpoint_guard"
-                    rospy.logwarn(
-                        "HIGHWAY lane change COMPLETE count=%d reason=%s remaining=%.2fm",
-                        self.lane_changes_done, why,
-                        -1.0 if remaining_to_end is None else remaining_to_end,
-                    )
+                    self._enter_inner_hold(now, ex, ey, why, remaining_to_end)
             else:
                 self.complete_since = None
 
@@ -1965,6 +2057,8 @@ class HighwayLaneStrategyNode:
                 "aligned":aligned,
                 "recoverable_endpoint_alignment":recoverable_endpoint_alignment,
                 "handover_aligned":handover_aligned,
+                "target_lane_captured":target_lane_captured,
+                "target_capture_progress_m":round(target_capture_progress,2),
                 "alignment":alignment_diag,
                 "follow":follow,
                 "lane_change_speed_floor_mps":round(speed_floor,2),

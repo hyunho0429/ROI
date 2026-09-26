@@ -321,9 +321,9 @@
     <param name="change_max_heading_deg" value="15.0" />
     <!-- Both the first and later merges use a decisive diagonal so the car
          does not spend too long straddling a divider. -->
-    <param name="repeat_change_min_length_m" value="16.0" />
-    <param name="repeat_change_max_length_m" value="22.0" />
-    <param name="repeat_change_time_s" value="3.5" />
+    <param name="repeat_change_min_length_m" value="18.0" />
+    <param name="repeat_change_max_length_m" value="30.0" />
+    <param name="repeat_change_time_s" value="3.0" />
     <param name="repeat_change_max_heading_deg" value="15.0" />
     <!-- Follow the midpoint of the newly detected left/right boundaries soon
          after hand-over while retaining a smooth steering transition. -->
@@ -349,6 +349,8 @@
     <param name="change_settle_m" value="3.0" />
     <param name="repeat_change_settle_m" value="3.0" />
     <param name="change_endpoint_guard_m" value="6.0" />
+    <param name="change_target_capture_m" value="0.30" />
+    <param name="change_target_capture_min_ratio" value="0.70" />
     <param name="endpoint_handover_max_error_m" value="1.60" />
     <param name="endpoint_handover_max_heading_deg" value="15.0" />
     <param name="max_lateral_accel_mps2" value="2.5" />
