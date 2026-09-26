@@ -108,6 +108,27 @@ class RealLaneContractTest(unittest.TestCase):
         self.assertIsNone(payload["centerline_points"])
         self.assertIn("STRADDLING", payload["reasons"])
 
+    def test_payload_exposes_second_left_boundary_for_solid_edge(self):
+        result = NS(
+            lanes=[
+                Candidate(2, 5.25, 0.8, cls=1),
+                Candidate(1, 1.75, 0.9, cls=1),
+                Candidate(-1, -1.75, 0.9),
+            ],
+            stopline=None, curves=[], boundaries=[], ground={},
+        )
+
+        payload = NODE.build_payload(
+            result,
+            {"curves": False, "boundaries": False, "lane_pixels": False},
+            {},
+        )
+
+        self.assertEqual(payload["left_lane"]["lane_id"], 1)
+        self.assertEqual(payload["left_outer_lane"]["lane_id"], 2)
+        self.assertEqual(payload["left_outer_lane"]["type"], "white_solid")
+        self.assertEqual(len(payload["left_lanes"]), 2)
+
 
 if __name__ == "__main__":
     unittest.main()

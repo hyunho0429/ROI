@@ -184,7 +184,13 @@ class HighwayLaneStrategyNode:
         # jump. Highway lane-change geometry therefore uses the LEFT divider
         # itself and rejects a divider that is not adjacent to the ego lane.
         self.left_divider_expected_tol_m = float(
-            rospy.get_param("~left_divider_expected_tol_m", 0.90)
+            rospy.get_param("~left_divider_expected_tol_m", 0.55)
+        )
+        self.outer_left_min_separation_m = float(
+            rospy.get_param("~outer_left_min_separation_m", 2.0)
+        )
+        self.outer_left_max_separation_m = float(
+            rospy.get_param("~outer_left_max_separation_m", 4.8)
         )
         self.inner_center_max_abs_y_m = float(
             rospy.get_param("~inner_center_max_abs_y_m", 1.60)
@@ -236,6 +242,12 @@ class HighwayLaneStrategyNode:
         self.inner_path_blend_time_s = max(0.05, float(rospy.get_param("~inner_path_blend_time_s", 0.40)))
         self.inner_path_max_jump_m = float(rospy.get_param("~inner_path_max_jump_m", 1.00))
         self.inner_path_join_length_m = float(rospy.get_param("~inner_path_join_length_m", 6.0))
+        self.inner_path_right_recenter_gain = max(
+            1.0, float(rospy.get_param("~inner_path_right_recenter_gain", 1.8))
+        )
+        self.inner_boundary_bracket_margin_m = max(
+            0.0, float(rospy.get_param("~inner_boundary_bracket_margin_m", 0.10))
+        )
         self.inner_path_deadband_m = max(
             0.0, float(rospy.get_param("~inner_path_deadband_m", 0.10))
         )
@@ -533,6 +545,8 @@ class HighwayLaneStrategyNode:
             max_y_m=2.6,
             min_track_age=2,
         )
+        if self._double_left_solid_present():
+            return True
         right = info.get("right_lane") or {}
         if (
             not bool(right.get("detected", False))
@@ -540,7 +554,52 @@ class HighwayLaneStrategyNode:
             or bool(right.get("coasted", False))
         ):
             return False
-        return left_type == "white_solid" and right.get("type") == "white_dashed"
+        intended_final_lane = (
+            left_type == "white_solid"
+            and right.get("type") == "white_dashed"
+        )
+        return intended_final_lane
+
+    @staticmethod
+    def _lane_meta_y(lane: dict, x_m: float) -> Optional[float]:
+        coefficients = lane.get("coef") or []
+        try:
+            value = 0.0
+            for coefficient in coefficients:
+                value = value*float(x_m) + float(coefficient)
+        except (TypeError, ValueError):
+            return None
+        return value if math.isfinite(value) else None
+
+    def _double_left_solid_present(self) -> bool:
+        """Detect two distinct fresh solid boundaries on the ego's left."""
+        info = self.lane_info or {}
+        if (
+            not bool(info.get("lane_valid", False))
+            or str(info.get("output_status", "")).upper() != "FRESH"
+        ):
+            return False
+        adjacent = info.get("left_lane") or {}
+        outer = info.get("left_outer_lane") or {}
+        solid_types = ("white_solid", "yellow")
+        for lane in (adjacent, outer):
+            if (
+                not bool(lane.get("detected", False))
+                or bool(lane.get("from_guide", False))
+                or bool(lane.get("coasted", False))
+                or lane.get("type") not in solid_types
+            ):
+                return False
+        adjacent_y = self._lane_meta_y(adjacent, 7.0)
+        outer_y = self._lane_meta_y(outer, 7.0)
+        if adjacent_y is None or outer_y is None:
+            return False
+        separation = outer_y-adjacent_y
+        return (
+            0.15 <= adjacent_y <= 2.6
+            and self.outer_left_min_separation_m
+            <= separation <= self.outer_left_max_separation_m
+        )
 
     def _update_final_lane_lock(self, now: rospy.Time, geometry_ok: bool) -> bool:
         """Latch off further merges while keeping camera lane-centre control."""
@@ -707,6 +766,8 @@ class HighwayLaneStrategyNode:
         # estimate.  Until both boundaries settle, the caller keeps rolling the
         # already committed RRT path forward.
         info = self.lane_info or {}
+        left = self._boundary_local("left_boundary_points")
+        right = self._boundary_local("right_boundary_points")
         if require_two_boundaries:
             if self.nominal_lane_fallback_active:
                 return False, "inner_center_nominal_fallback", None
@@ -724,10 +785,17 @@ class HighwayLaneStrategyNode:
                 return False, "inner_boundary_from_guide", None
             if info.get("lane_width_m") is None:
                 return False, "inner_lane_width_unmeasured", None
-            left = self._boundary_local("left_boundary_points")
-            right = self._boundary_local("right_boundary_points")
             if len(left) < 3 or len(right) < 3:
                 return False, "inner_boundary_short", None
+        if len(left) >= 3 and len(right) >= 3:
+            left_y = interp_y(left, 5.0)
+            right_y = interp_y(right, 5.0)
+            if (
+                left_y is None or right_y is None
+                or float(left_y) <= self.inner_boundary_bracket_margin_m
+                or float(right_y) >= -self.inner_boundary_bracket_margin_m
+            ):
+                return False, "inner_boundaries_do_not_bracket_ego", None
         center = self._centerline_local()
         if len(center) < 3:
             return False, "inner_center_short", None
@@ -1098,7 +1166,12 @@ class HighwayLaneStrategyNode:
             # the effective time constant around x=5 m tens of seconds, so an
             # offset at lane-change completion was effectively preserved.
             spatial = smoothstep5((x-0.5)/max(self.inner_path_join_length_m, 1.0))
-            blended.append((x, previous_y+alpha*spatial*bounded_delta))
+            recenter_gain = (
+                self.inner_path_right_recenter_gain
+                if bounded_delta < -self.inner_path_deadband_m else 1.0
+            )
+            effective_alpha = min(1.0, alpha*recenter_gain)
+            blended.append((x, previous_y+effective_alpha*spatial*bounded_delta))
         return self._local_to_map(blended, now), "limited" if limited else "ok"
 
     def _rolling_inner_fallback(self, now: rospy.Time) -> Optional[RosPath]:
@@ -1593,10 +1666,10 @@ class HighwayLaneStrategyNode:
         self.stop_pub.publish(Bool(data=bool(stop)))
         self.speed_pub.publish(Float64(data=float(speed_out)))
         self.active_pub.publish(Bool(data=bool(active)))
-        fast_change = bool(
-            active and self.state == self.LANE_CHANGE
-            and self.lane_changes_done > 0
-        )
+        fast_change = bool(active and (
+            (self.state == self.LANE_CHANGE and self.lane_changes_done > 0)
+            or bool(status.get("fast_recenter", False))
+        ))
         self.fast_change_pub.publish(Bool(data=fast_change))
         status.update({"state": self.state, "active": bool(active), "stop": bool(stop), "target_speed_mps": round(speed_out,2), "lane_changes_done": self.lane_changes_done, "fast_change_active": fast_change})
         self.state_pub.publish(String(data=json.dumps(status, separators=(",", ":"))))
@@ -2090,6 +2163,14 @@ class HighwayLaneStrategyNode:
                 "lane_handover_pending": self.inner_handover_pending,
                 "final_lane_markings": final_lane_candidate,
                 "lane_change_enabled": not self.lane_change_locked_by_left_solid,
+                "double_left_solid": self._double_left_solid_present(),
+                "fast_recenter": bool(
+                    self.inner_handover_pending
+                    or (
+                        center_y is not None
+                        and float(center_y) < -self.change_center_error_m
+                    )
+                ),
                 "follow": follow,
             }, now, dt)
             return

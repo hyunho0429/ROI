@@ -84,7 +84,7 @@
        active only while the second-or-later lane change is committed. -->
   <param name="/purepursuit_mgeo/fast_change_active_topic" value="/highway_lane_strategy/fast_change_active" />
   <param name="/purepursuit_mgeo/fast_change_lookahead_m" value="3.5" />
-  <param name="/purepursuit_mgeo/fast_change_steering_rate_rad_s" value="0.50" />
+  <param name="/purepursuit_mgeo/fast_change_steering_rate_rad_s" value="0.65" />
 
   <param name="/purepursuit_mgeo/enable_merge_gate" value="$(arg enable_roundabout_merge_gate)" />
   <param name="/purepursuit_mgeo/merge_stop_topic" value="/roundabout_merge_gate/stop_required" />
@@ -109,6 +109,9 @@
     <arg name="yolo_confidence" value="$(arg yolo_confidence)" />
     <arg name="yolo_inference_size" value="$(arg yolo_inference_size)" />
     <arg name="enable_highway_gate" value="$(arg enable_camera_object_detection)" />
+    <!-- Keep LiDAR gap perception alive after highway activation. The strategy
+         itself still requires fresh dashed/solid semantics for every merge. -->
+    <arg name="merge_highway_gate_required" value="false" />
     <arg name="highway_environment_topic" value="$(arg highway_environment_topic)" />
     <arg name="require_dashed_lane" value="$(arg highway_require_dashed_lane)" />
     <arg name="highway_latch_once" value="$(arg highway_latch_once)" />
@@ -290,7 +293,9 @@
     <param name="lane_width_max_m" value="4.2" />
     <param name="nominal_lane_width_m" value="3.5" />
     <param name="require_left_dashed" value="true" />
-    <param name="left_divider_expected_tol_m" value="0.90" />
+    <param name="left_divider_expected_tol_m" value="0.55" />
+    <param name="outer_left_min_separation_m" value="2.0" />
+    <param name="outer_left_max_separation_m" value="4.8" />
     <!-- Accept a valid midpoint even when the car finishes close to a lane
          boundary; an adjacent-lane centre is still rejected at about 3.5 m. -->
     <param name="inner_center_max_abs_y_m" value="1.60" />
@@ -319,6 +324,8 @@
     <param name="inner_path_blend_time_s" value="0.40" />
     <param name="inner_path_max_jump_m" value="1.00" />
     <param name="inner_path_join_length_m" value="6.0" />
+    <param name="inner_path_right_recenter_gain" value="1.8" />
+    <param name="inner_boundary_bracket_margin_m" value="0.10" />
     <param name="inner_path_deadband_m" value="0.10" />
     <param name="change_time_s" value="7.0" />
     <param name="change_post_hold_m" value="10.0" />

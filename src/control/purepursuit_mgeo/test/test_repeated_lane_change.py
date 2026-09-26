@@ -126,7 +126,8 @@ class RepeatedLaneChangeTest(unittest.TestCase):
                 'coef': [0.0, 1.75],
                 'x_range_m': [0.0, 30.0],
             },
-            'right_lane': {'detected': True, 'type': 'white_solid'},
+            # The double-solid lock is independent of right-lane visibility.
+            'right_lane': {'detected': False, 'type': None},
         })
 
         self.assertFalse(n._final_lane_markings_present())
@@ -149,6 +150,25 @@ class RepeatedLaneChangeTest(unittest.TestCase):
         })
 
         self.assertFalse(n._final_lane_markings_present())
+
+    def test_two_fresh_left_solids_lock_further_lane_changes(self):
+        n = self.node
+        n.lane_info.update({
+            'lane_valid': True,
+            'output_status': 'FRESH',
+            'left_lane': {
+                'detected': True, 'type': 'white_solid', 'age': 3,
+                'coef': [0.0, 1.75], 'x_range_m': [0.0, 30.0],
+            },
+            'left_outer_lane': {
+                'detected': True, 'type': 'white_solid', 'age': 3,
+                'coef': [0.0, 5.25], 'x_range_m': [0.0, 30.0],
+            },
+            'right_lane': {'detected': False, 'type': None},
+        })
+
+        self.assertTrue(n._double_left_solid_present())
+        self.assertTrue(n._final_lane_markings_present())
 
     def test_final_lane_continues_last_verified_center_after_camera_dropout(self):
         n = self.node

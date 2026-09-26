@@ -308,6 +308,10 @@ class DiagonalLaneChangeTest(unittest.TestCase):
     def test_lane_boundary_offset_remains_a_valid_recentering_target(self):
         n = node_fixture()
         n._inner_center_sanity = safety.NODE.HighwayLaneStrategyNode._inner_center_sanity.__get__(n)
+        n._boundary_local = lambda key: [
+            (float(x), 0.65 if key == "left_boundary_points" else -2.85)
+            for x in range(5, 26)
+        ]
         n._centerline_local.return_value = [
             (float(x), -1.1) for x in range(41)
         ]
@@ -317,6 +321,42 @@ class DiagonalLaneChangeTest(unittest.TestCase):
         self.assertTrue(valid)
         self.assertEqual(reason, "ok")
         self.assertAlmostEqual(center_y, -1.1)
+
+    def test_handover_rejects_boundary_pair_on_same_side_of_vehicle(self):
+        n = node_fixture()
+        n._boundary_local = safety.NODE.HighwayLaneStrategyNode._boundary_local.__get__(n)
+        n._centerline_local = safety.NODE.HighwayLaneStrategyNode._centerline_local.__get__(n)
+        n._inner_center_sanity = safety.NODE.HighwayLaneStrategyNode._inner_center_sanity.__get__(n)
+        n.lane_info = {
+            'output_status': 'FRESH',
+            'lane_width_m': 3.5,
+            'left_lane': {'detected': True},
+            'right_lane': {'detected': True},
+            # A 3.5 m pair entirely on the left is not the ego lane.
+            'left_boundary_points': [[float(x), 3.8] for x in range(5, 26)],
+            'right_boundary_points': [[float(x), 0.3] for x in range(5, 26)],
+            'centerline_points': [[float(x), 2.05] for x in range(5, 26)],
+        }
+
+        valid, reason, _ = n._inner_center_sanity(require_two_boundaries=True)
+
+        self.assertFalse(valid)
+        self.assertEqual(reason, 'inner_boundaries_do_not_bracket_ego')
+
+    def test_rightward_recentering_is_accelerated_after_left_edge_finish(self):
+        n = node_fixture()
+        n.last_inner_path = path_at()
+        n._centerline_local.return_value = [
+            (float(x), -1.0) for x in range(41)
+        ]
+        fast_path, _ = n._filtered_inner_path(Stamp(), 0.05)
+        fast_y = fast_path.poses[5].pose.position.y
+
+        n.inner_path_right_recenter_gain = 1.0
+        normal_path, _ = n._filtered_inner_path(Stamp(), 0.05)
+        normal_y = normal_path.poses[5].pose.position.y
+
+        self.assertLess(fast_y, normal_y)
 
     def test_straddling_line_is_not_used_as_lane_center(self):
         n = node_fixture()

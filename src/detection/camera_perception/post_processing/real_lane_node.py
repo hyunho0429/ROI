@@ -119,11 +119,13 @@ def _lane_meta(c):
     """차선 하나를 계약 형식으로. 없으면 detected=False."""
     if c is None:
         return {"detected": False, "type": None, "dashed": None,
+                "lane_id": None,
                 "track_id": None, "age": 0, "coef": None,
                 "x_range_m": None, "n_points": 0, "confidence": 0.0,
                 "from_guide": False, "coasted": False}
     return {
         "detected": True,
+        "lane_id": int(c.lane_id),
         "type": rl.CLASS_NAMES[c.cls],
         "dashed": bool(c.cls == rl.CLASS_WHITE_DASHED),
         "track_id": int(c.track_id),
@@ -173,6 +175,13 @@ def build_payload(res, opt, timing):
     lanes = res.lanes or []
     left = next((c for c in lanes if c.lane_id == 1), None)
     right = next((c for c in lanes if c.lane_id == -1), None)
+    left_lanes = sorted(
+        (c for c in lanes if c.lane_id > 0), key=lambda c: c.lane_id
+    )
+    right_lanes = sorted(
+        (c for c in lanes if c.lane_id < 0), key=lambda c: abs(c.lane_id)
+    )
+    left_outer = next((c for c in left_lanes if c.lane_id == 2), None)
     straddle = next((c for c in lanes if c.lane_id == 0), None)
     sl = res.stopline
 
@@ -225,6 +234,12 @@ def build_payload(res, opt, timing):
 
         "left_lane": _lane_meta(left),
         "right_lane": _lane_meta(right),
+        # Farther boundaries remain perception metadata only. Highway control
+        # uses lane_id=2 to recognize a solid-solid edge, never as its steering
+        # centre or the adjacent boundary that authorizes a merge.
+        "left_outer_lane": _lane_meta(left_outer),
+        "left_lanes": [_lane_meta(c) for c in left_lanes],
+        "right_lanes": [_lane_meta(c) for c in right_lanes],
         # 계약에 없는 추가 값. 차선 변경 중 밟고 있는 선이다.
         "straddling_lane": _lane_meta(straddle) if straddle is not None else None,
 
