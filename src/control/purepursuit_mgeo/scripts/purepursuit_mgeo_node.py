@@ -24,7 +24,11 @@ from path_planning.longitudinal_controller import PedalSpeedController
 from std_msgs.msg import Bool, Float64
 
 from purepursuit_mgeo.path import MgeoPurePursuit, PathPoint, load_mgeo_path
-from purepursuit_mgeo.motion import SteeringRateLimiter
+from purepursuit_mgeo.motion import (
+    lateral_acceleration_steering_limit,
+    SteeringRateLimiter,
+    speed_adaptive_steering_profile,
+)
 
 
 def quaternion_to_yaw(x: float, y: float, z: float, w: float) -> float:
@@ -57,8 +61,14 @@ class PurePursuitNode:
         self.fast_change_lookahead_m = float(
             rospy.get_param("~fast_change_lookahead_m", 3.5)
         )
+        self.fast_change_lookahead_speed_gain = float(
+            rospy.get_param("~fast_change_lookahead_speed_gain", 0.75)
+        )
         self.fast_change_steering_rate_rad_s = float(
             rospy.get_param("~fast_change_steering_rate_rad_s", 0.50)
+        )
+        self.fast_change_reference_speed_mps = float(
+            rospy.get_param("~fast_change_reference_speed_mps", 4.0)
         )
         fast_change_topic = rospy.get_param("~fast_change_active_topic", "")
         if fast_change_topic:
@@ -83,13 +93,16 @@ class PurePursuitNode:
             max_brake=float(rospy.get_param("~max_brake_pedal", 1.0)),
         )
 
-        wheelbase = float(rospy.get_param("~wheelbase_m", 3.0))
+        self.wheelbase_m = float(rospy.get_param("~wheelbase_m", 3.0))
+        self.highway_max_lateral_accel_mps2 = float(
+            rospy.get_param("~highway_max_lateral_accel_mps2", 2.5)
+        )
         lookahead_min = float(rospy.get_param("~lookahead_min_m", 4.0))
         lookahead_gain = float(rospy.get_param("~lookahead_gain", 0.35))
         goal_tolerance = float(rospy.get_param("~goal_tolerance_m", 1.5))
         self.controller = MgeoPurePursuit(
             self.points,
-            wheelbase,
+            self.wheelbase_m,
             lookahead_min,
             lookahead_gain,
             goal_tolerance,
@@ -325,16 +338,35 @@ class PurePursuitNode:
             self.latest_odom.twist.twist.linear.x,
             self.latest_odom.twist.twist.linear.y,
         )
+        fast_lookahead = None
+        fast_steering_rate = None
+        if self.fast_change_active:
+            fast_lookahead, fast_steering_rate = speed_adaptive_steering_profile(
+                speed,
+                self.fast_change_lookahead_m,
+                self.fast_change_lookahead_speed_gain,
+                self.fast_change_steering_rate_rad_s,
+                self.fast_change_reference_speed_mps,
+                self.steering_limiter.rate,
+            )
         with self.controller_lock:
             steering, path_stop, target, target_index, lookahead = self.controller.compute(
                 pose.position.x,
                 pose.position.y,
                 yaw,
                 speed,
-                self.fast_change_lookahead_m if self.fast_change_active else None,
+                fast_lookahead,
             )
             active_count = len(self.controller.points)
-        steering = max(-self.max_steering, min(self.max_steering, steering))
+        steering_limit = self.max_steering
+        if self.steering_rate_active:
+            steering_limit = lateral_acceleration_steering_limit(
+                speed,
+                self.wheelbase_m,
+                self.highway_max_lateral_accel_mps2,
+                self.max_steering,
+            )
+        steering = max(-steering_limit, min(steering_limit, steering))
 
         avoidance_stop = self.path_manager_stop if self.require_path_manager_status else False
         merge_stop = self.merge_stop_required if (self.enable_merge_gate and self.merge_requested) else False
@@ -371,10 +403,13 @@ class PurePursuitNode:
                 steering,
                 now.to_sec(),
                 self.steering_rate_active,
-                self.fast_change_steering_rate_rad_s
-                if self.fast_change_active else None,
+                fast_steering_rate,
             )
         )
+        # The limiter remembers its previous command. Clamp again so a large
+        # command from the preceding mode cannot leak into the high-speed
+        # highway limit while that remembered value ramps down.
+        steering = max(-steering_limit, min(steering_limit, steering))
 
         target_msg = PointStamped()
         target_msg.header.stamp = now

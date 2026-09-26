@@ -2,7 +2,12 @@
 import math
 import unittest
 
-from purepursuit_mgeo.motion import diagonal_progress, SteeringRateLimiter
+from purepursuit_mgeo.motion import (
+    diagonal_progress,
+    lateral_acceleration_steering_limit,
+    SteeringRateLimiter,
+    speed_adaptive_steering_profile,
+)
 from purepursuit_mgeo.path import MgeoPurePursuit, PathPoint
 import test_highway_safety as safety
 from test_highway_safety import Stamp, path_at
@@ -469,6 +474,32 @@ class DiagonalLaneChangeTest(unittest.TestCase):
 
 
 class SteeringLimitTest(unittest.TestCase):
+    def test_highway_steering_limit_tightens_with_speed(self):
+        low = lateral_acceleration_steering_limit(
+            4.0, 3.0, 2.5, math.radians(40)
+        )
+        high = lateral_acceleration_steering_limit(
+            9.0, 3.0, 2.5, math.radians(40)
+        )
+
+        self.assertGreater(low, math.radians(20))
+        self.assertAlmostEqual(high, math.atan(7.5/81.0))
+        self.assertLess(high, math.radians(5.5))
+
+    def test_fast_profile_increases_preview_and_damps_high_speed_steering(self):
+        low = speed_adaptive_steering_profile(4.0,3.5,0.75,0.50,4.0,0.20)
+        high = speed_adaptive_steering_profile(9.0,3.5,0.75,0.50,4.0,0.20)
+
+        self.assertEqual(low,(3.5,0.50))
+        self.assertAlmostEqual(high[0],6.75)
+        self.assertAlmostEqual(high[1],0.50*4.0/9.0)
+
+    def test_fast_profile_never_drops_below_normal_steering_rate(self):
+        _, rate = speed_adaptive_steering_profile(
+            20.0,3.5,0.75,0.50,4.0,0.20
+        )
+        self.assertEqual(rate,0.20)
+
     def test_rate_is_independent_of_control_frequency(self):
         for hz in (10, 20, 40):
             limiter = SteeringRateLimiter(.2, 1/hz)

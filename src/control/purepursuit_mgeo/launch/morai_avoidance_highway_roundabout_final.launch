@@ -80,11 +80,16 @@
   <!-- Road-wheel command slew limit; braking/stop flags remain immediate. -->
   <param name="/purepursuit_mgeo/steering_rate_limit_rad_s" value="0.20" />
   <param name="/purepursuit_mgeo/steering_rate_limit_active_topic" value="/highway_lane_strategy/active" />
-  <!-- Repeated LEFT changes need decisive steering at 4 m/s.  This profile is
-       active only while the second-or-later lane change is committed. -->
+  <!-- At 9 m/s this limits road-wheel steering to about 5.3 degrees, while
+       leaving the intended 4 m/s lane-change command effectively untouched. -->
+  <param name="/purepursuit_mgeo/highway_max_lateral_accel_mps2" value="2.5" />
+  <!-- Use a short preview at the intended 4 m/s, but grow it with actual speed
+       and reduce steering slew so an overspeed entry cannot oscillate. -->
   <param name="/purepursuit_mgeo/fast_change_active_topic" value="/highway_lane_strategy/fast_change_active" />
   <param name="/purepursuit_mgeo/fast_change_lookahead_m" value="3.5" />
-  <param name="/purepursuit_mgeo/fast_change_steering_rate_rad_s" value="0.65" />
+  <param name="/purepursuit_mgeo/fast_change_lookahead_speed_gain" value="0.75" />
+  <param name="/purepursuit_mgeo/fast_change_steering_rate_rad_s" value="0.50" />
+  <param name="/purepursuit_mgeo/fast_change_reference_speed_mps" value="4.0" />
 
   <param name="/purepursuit_mgeo/enable_merge_gate" value="$(arg enable_roundabout_merge_gate)" />
   <param name="/purepursuit_mgeo/merge_stop_topic" value="/roundabout_merge_gate/stop_required" />
