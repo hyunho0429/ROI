@@ -51,10 +51,9 @@ INFERENCE_SIZE = int(os.environ.get("MORAI_YOLO_INFERENCE_SIZE", "416"))
 DISPLAY_FPS = float(os.environ.get("MORAI_YOLO_DISPLAY_FPS", "0.0"))
 CPU_THREADS = int(os.environ.get("MORAI_YOLO_CPU_THREADS", "0"))
 
-# person, unified car, stop sign.  The competition dataset labels every
-# relevant vehicle (including bus/train) as ``car``, so raw COCO bus/truck
-# classes must not independently activate the situation gates.
-BASE_TARGET_CLASSES = [0, 2, 11]
+# COCO person, car, bus, truck and stop-sign classes.  Keeping bus/truck in
+# the base result also makes those road vehicles available to obstacle output.
+BASE_TARGET_CLASSES = [0, 2, 5, 7, 11]
 TRAFFIC_KEYWORDS = (
     "red", "green", "yellow", "left", "right", "arrow", "amber", "traffic"
 )
