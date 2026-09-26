@@ -299,6 +299,9 @@
     <param name="lane_width_min_m" value="2.7" />
     <param name="lane_width_max_m" value="4.2" />
     <param name="nominal_lane_width_m" value="3.5" />
+    <!-- Hold 25 cm to the right of geometric centre after each LEFT merge.
+         Runtime clamping preserves the configured vehicle/line clearance. -->
+    <param name="lane_center_right_offset_m" value="0.25" />
     <param name="require_left_dashed" value="true" />
     <param name="left_divider_expected_tol_m" value="0.55" />
     <param name="outer_left_min_separation_m" value="2.0" />
@@ -345,7 +348,7 @@
     <param name="inner_boundary_safety_margin_m" value="0.20" />
     <param name="inner_path_deadband_m" value="0.15" />
     <!-- A repeat change starts only after both the measured midpoint and the
-         filtered path are within 25 cm of the current lane centre. -->
+         filtered path are within 25 cm of the right-biased hold target. -->
     <param name="next_change_center_error_m" value="0.25" />
     <!-- Preserve the centred-lane timer across one or two missed camera
          frames, but never commit a new change on a stale frame. -->

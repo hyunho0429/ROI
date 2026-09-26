@@ -174,6 +174,9 @@ class HighwayLaneStrategyNode:
         self.lane_width_min_m = float(rospy.get_param("~lane_width_min_m", 2.7))
         self.lane_width_max_m = float(rospy.get_param("~lane_width_max_m", 4.2))
         self.nominal_lane_width_m = float(rospy.get_param("~nominal_lane_width_m", 3.5))
+        self.lane_center_right_offset_m = max(
+            0.0, float(rospy.get_param("~lane_center_right_offset_m", 0.25))
+        )
         self.max_heading_error_rad = float(rospy.get_param("~max_heading_error_rad", math.radians(22.0)))
         self.require_left_dashed = bool(rospy.get_param("~require_left_dashed", True))
 
@@ -752,6 +755,33 @@ class HighwayLaneStrategyNode:
                 out.append(p)
         return out
 
+    def _bounded_lane_center_right_offset(self, lane_width: float) -> float:
+        """Keep the requested right bias inside both physical boundaries."""
+        required_clearance = (
+            0.5*self.vehicle_width_m + self.inner_boundary_safety_margin_m
+        )
+        available = max(0.0, 0.5*float(lane_width)-required_clearance)
+        return min(self.lane_center_right_offset_m, available)
+
+    def _hold_centerline_local(self) -> List[Tuple[float, float]]:
+        """Return the measured lane centre with a small safe right bias.
+
+        The offset is introduced over five metres so the path always starts at
+        the current vehicle pose.  This keeps the left side of the vehicle away
+        from adjacent traffic and the final solid while preserving a bounded
+        clearance to the right boundary.
+        """
+        center = self._centerline_local()
+        offset = self._bounded_lane_center_right_offset(
+            self._active_lane_width()
+        )
+        if offset <= 1e-6:
+            return center
+        return [
+            (x, y-offset*smoothstep5(max(0.0, float(x))/5.0))
+            for x, y in center
+        ]
+
     def _boundary_local(self, key: str) -> List[Tuple[float, float]]:
         """Return a lane boundary in base_link and extrapolate it back to x=0."""
         if self.rrt_lidar_only_mode or self.nominal_lane_fallback_active:
@@ -1036,11 +1066,16 @@ class HighwayLaneStrategyNode:
 
         current: List[Tuple[float, float]] = []
         target: List[Tuple[float, float]] = []
+        target_right_offset = self._bounded_lane_center_right_offset(lane_width)
         for i, (x, y) in enumerate(divider):
             tx, ty = tangent_at(divider, i)
             nx, ny = -ty, tx
             current.append((x - 0.5*lane_width*nx, y - 0.5*lane_width*ny))
-            target.append((x + 0.5*lane_width*nx, y + 0.5*lane_width*ny))
+            target_shift = 0.5*lane_width-target_right_offset
+            target.append((x + target_shift*nx, y + target_shift*ny))
+        self.last_rrt_diag["target_right_offset_m"] = round(
+            target_right_offset, 3
+        )
 
         origin_x, origin_y = current[0]
         current = [(x-origin_x, y-origin_y) for x, y in current]
@@ -1250,7 +1285,7 @@ class HighwayLaneStrategyNode:
         camera correction is rate-limited instead of rejecting the path and
         eventually stopping at the finite committed-path endpoint.
         """
-        camera = self._extend_local_polyline(self._centerline_local(), 40.0)
+        camera = self._extend_local_polyline(self._hold_centerline_local(), 40.0)
         previous = self._path_map_to_local(self.last_inner_path)
         if len(camera) < 3:
             return None, "inner_camera_path_short"
@@ -2387,6 +2422,13 @@ class HighwayLaneStrategyNode:
             # after hand-over and can otherwise block or reverse the next LEFT
             # change.
             control_center_y = center_y
+            desired_center_y = self._bounded_lane_center_right_offset(
+                self._active_lane_width()
+            )
+            control_center_error = (
+                None if control_center_y is None
+                else float(control_center_y)-desired_center_y
+            )
             control_heading = self._inner_center_heading() if lane_ok else None
             control_path_local = self._path_map_to_local(path)
             control_path_y = interp_y(control_path_local, 5.0)
@@ -2395,8 +2437,8 @@ class HighwayLaneStrategyNode:
                 and not self.lane_change_locked_by_left_solid
                 and lane_ok and not self.inner_handover_pending and not stop
                 and self.inner_hold_travel_m >= self.min_lane_hold_before_next_change_m
-                and control_center_y is not None
-                and abs(float(control_center_y)) <= self.next_change_center_error_m
+                and control_center_error is not None
+                and abs(float(control_center_error)) <= self.next_change_center_error_m
                 and control_heading is not None
                 and abs(float(control_heading)) <= self.change_heading_error_rad
                 # The measured midpoint and the actual filtered control path
@@ -2532,6 +2574,8 @@ class HighwayLaneStrategyNode:
                 "inner_hold_time_s": round(hold_time_s,2),
                 "centered_lane_hold_time_s": round(centered_hold_time_s,2),
                 "center_y8_m": None if center_y is None else round(center_y,3),
+                "desired_center_y_m": round(desired_center_y,3),
+                "center_target_error_m": None if control_center_error is None else round(control_center_error,3),
                 "control_path_y5_m": None if control_path_y is None else round(control_path_y,3),
                 "lane_center_source": (self.lane_info or {}).get("center_source"),
                 "lane_straddling": bool(((self.lane_info or {}).get("straddling_lane") or {}).get("detected", False)),

@@ -40,7 +40,8 @@ class DiagonalLaneChangeTest(unittest.TestCase):
                 n._boundary_local = lambda key: [(float(x), width/2) for x in (0, 5, 10, 15, 20, 25)]
                 points, length = n._generate_lane_change_local(width, 4.0)
                 self.assertEqual(points[0], (0.0, 0.0))
-                self.assertAlmostEqual(points[-1][1], width)
+                expected = width-n._bounded_lane_center_right_offset(width)
+                self.assertAlmostEqual(points[-1][1], expected)
                 headings = [math.atan2(b[1]-a[1], b[0]-a[0]) for a, b in zip(points, points[1:])]
                 self.assertLessEqual(max(headings), math.radians(15.0)+1e-5)
                 self.assertLess(abs(headings[-1]), 1e-6)
@@ -114,7 +115,7 @@ class DiagonalLaneChangeTest(unittest.TestCase):
 
         self.assertGreater(peak, 0.10)
         self.assertLess(peak, 0.17)
-        self.assertGreater(y, 3.35)
+        self.assertAlmostEqual(y, 3.25, delta=0.15)
         self.assertLess(abs(yaw), math.radians(3.0))
 
     def test_repeat_profile_at_actual_eight_mps_has_no_hard_right_snap(self):
@@ -153,7 +154,7 @@ class DiagonalLaneChangeTest(unittest.TestCase):
                 break
 
         self.assertGreater(most_negative, math.radians(-4.0))
-        self.assertAlmostEqual(y, 3.5, delta=0.15)
+        self.assertAlmostEqual(y, 3.25, delta=0.15)
         self.assertLess(abs(yaw), math.radians(3.0))
 
     def test_ego_offset_does_not_create_sharp_entry(self):
@@ -162,7 +163,7 @@ class DiagonalLaneChangeTest(unittest.TestCase):
         points, _ = n._generate_lane_change_local(3.5, 2.0)
         headings = [math.atan2(b[1]-a[1], b[0]-a[0]) for a, b in zip(points, points[1:])]
         self.assertLessEqual(max(headings), math.radians(15.0)+1e-5)
-        self.assertAlmostEqual(points[-1][1], 4.3)
+        self.assertAlmostEqual(points[-1][1], 4.05)
 
     def test_live_lidar_obstacle_is_considered_by_rrt_star(self):
         n = node_fixture()
@@ -310,6 +311,7 @@ class DiagonalLaneChangeTest(unittest.TestCase):
 
     def test_first_camera_correction_is_blended(self):
         n = node_fixture()
+        n.lane_center_right_offset_m = 0.0
         n._centerline_local.return_value = [(0.0, 0.0)] + [(float(x), -0.6) for x in range(5, 26)]
         path, reason = n._filtered_inner_path(Stamp(), .05)
         self.assertEqual(reason, 'ok')
@@ -335,6 +337,7 @@ class DiagonalLaneChangeTest(unittest.TestCase):
 
     def test_small_camera_center_jitter_keeps_committed_lane_reference(self):
         n = node_fixture()
+        n.lane_center_right_offset_m = 0.0
         n._odom_pose.return_value = (0.0, 3.5, 0.0, 2.0)
         n.last_inner_path = path_at(3.5)
         n._centerline_local.return_value = [
@@ -362,6 +365,23 @@ class DiagonalLaneChangeTest(unittest.TestCase):
         center = n._centerline_local()
         self.assertAlmostEqual(center[1][1], 0.05)
         self.assertTrue(all(abs(y-0.05) < 1e-6 for _, y in center[1:]))
+
+    def test_hold_target_uses_bounded_right_safety_offset(self):
+        n = node_fixture()
+        n._centerline_local.return_value = [
+            (float(x), 0.0) for x in range(11)
+        ]
+
+        hold = n._hold_centerline_local()
+
+        self.assertAlmostEqual(hold[0][1], 0.0)
+        self.assertAlmostEqual(hold[5][1], -0.25)
+        self.assertAlmostEqual(hold[-1][1], -0.25)
+        # A narrow 2.7 m lane clamps the requested 25 cm offset so the right
+        # vehicle edge retains the configured 20 cm line clearance.
+        self.assertAlmostEqual(
+            n._bounded_lane_center_right_offset(2.7), 0.204, places=3
+        )
 
     def test_physical_boundary_midpoint_is_primary_hold_path(self):
         n = node_fixture()
@@ -617,6 +637,7 @@ class DiagonalLaneChangeTest(unittest.TestCase):
 
     def test_path_blending_accounts_for_vehicle_motion(self):
         n = node_fixture()
+        n.lane_center_right_offset_m = 0.0
         n.last_inner_path = path_at(3.5)
         n._odom_pose.return_value = (10.0, 3.5, 0.0, 2.0)
         path, reason = n._filtered_inner_path(Stamp(), .05)
@@ -645,7 +666,7 @@ class DiagonalLaneChangeTest(unittest.TestCase):
                 else:
                     self.fail('did not finish diagonal transition')
                 self.assertLess(peak_yaw, math.radians(13))
-                self.assertLess(abs(y-3.5), .2)
+                self.assertLess(abs(y-3.25), .2)
                 self.assertLess(abs(yaw), math.radians(3))
 
 
