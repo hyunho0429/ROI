@@ -112,9 +112,48 @@ class DiagonalLaneChangeTest(unittest.TestCase):
             if stop:
                 break
 
-        self.assertGreater(peak, 0.17)
-        self.assertLess(peak, 0.25)
+        self.assertGreater(peak, 0.10)
+        self.assertLess(peak, 0.17)
         self.assertGreater(y, 3.35)
+        self.assertLess(abs(yaw), math.radians(3.0))
+
+    def test_repeat_profile_at_actual_eight_mps_has_no_hard_right_snap(self):
+        n = node_fixture()
+        n.lane_changes_done = 1
+        points, length = n._generate_lane_change_local(3.5, 8.0)
+        self.assertGreaterEqual(length, 21.5)
+
+        controller = MgeoPurePursuit(
+            [PathPoint(x, y, 0.0) for x, y in points],
+            wheelbase_m=3.0,
+            lookahead_min_m=4.0,
+            lookahead_gain=0.35,
+            goal_tolerance_m=1.5,
+        )
+        limiter = SteeringRateLimiter(0.20, 0.05)
+        x = y = yaw = 0.0
+        most_negative = 0.0
+        for step in range(120):
+            lookahead, rate = speed_adaptive_steering_profile(
+                8.0, 3.5, 0.75, 0.50, 4.0, 0.20
+            )
+            raw, stop, *_ = controller.compute(x, y, yaw, 8.0, lookahead)
+            limit = lateral_acceleration_steering_limit(
+                8.0, 3.0, 2.5, math.radians(40)
+            )
+            steering = limiter.update(
+                max(-limit, min(limit, raw)), step*0.05, True, rate
+            )
+            steering = max(-limit, min(limit, steering))
+            most_negative = min(most_negative, steering)
+            yaw += 8.0/3.0*math.tan(steering)*0.05
+            x += 8.0*math.cos(yaw)*0.05
+            y += 8.0*math.sin(yaw)*0.05
+            if stop:
+                break
+
+        self.assertGreater(most_negative, math.radians(-4.0))
+        self.assertAlmostEqual(y, 3.5, delta=0.15)
         self.assertLess(abs(yaw), math.radians(3.0))
 
     def test_ego_offset_does_not_create_sharp_entry(self):
@@ -195,11 +234,16 @@ class DiagonalLaneChangeTest(unittest.TestCase):
         n._centerline_local.return_value = [(0.0, 0.0)] + [(float(x), -0.6) for x in range(5, 26)]
         path, reason = n._filtered_inner_path(Stamp(), .05)
         self.assertEqual(reason, 'ok')
-        # Apply a decisive first correction so the vehicle does not remain on
-        # the left boundary, while retaining part of the previous path for a
-        # rate-limited steering hand-over.
-        self.assertGreater(abs(path.poses[1].pose.position.y), .25)
-        self.assertLess(abs(path.poses[1].pose.position.y), .45)
+        # Start recentering immediately, but spread the correction far enough
+        # ahead that the post-change hand-over cannot demand a hard opposite
+        # steering angle.
+        self.assertGreater(abs(path.poses[1].pose.position.y), .10)
+        self.assertLess(abs(path.poses[1].pose.position.y), .25)
+        heading = math.atan2(
+            path.poses[1].pose.position.y-path.poses[0].pose.position.y,
+            path.poses[1].pose.position.x-path.poses[0].pose.position.x,
+        )
+        self.assertLess(abs(heading), math.radians(6.0))
 
     def test_inner_path_converges_at_controller_lookahead(self):
         n = node_fixture()
@@ -383,8 +427,8 @@ class DiagonalLaneChangeTest(unittest.TestCase):
         path, stop, _, _, status, *_ = n._publish.call_args.args
         self.assertFalse(stop)
         self.assertEqual(status['reason'], 'ok')
-        self.assertGreater(abs(path.poses[1].pose.position.y), .30)
-        self.assertLess(abs(path.poses[1].pose.position.y), .60)
+        self.assertGreater(abs(path.poses[1].pose.position.y), .10)
+        self.assertLess(abs(path.poses[1].pose.position.y), .25)
         n.lane_invalid_since = Stamp(98.0)
         n._tick(None)
         self.assertFalse(n._publish.call_args.args[1])

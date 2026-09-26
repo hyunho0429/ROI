@@ -221,16 +221,16 @@ class HighwayLaneStrategyNode:
         self.change_ramp_ratio = float(rospy.get_param("~change_ramp_ratio", 0.2))
         self.change_max_heading_rad = math.radians(float(rospy.get_param("~change_max_heading_deg", 15.0)))
         self.repeat_change_min_length_m = float(
-            rospy.get_param("~repeat_change_min_length_m", 12.0)
+            rospy.get_param("~repeat_change_min_length_m", 16.0)
         )
         self.repeat_change_max_length_m = float(
-            rospy.get_param("~repeat_change_max_length_m", 18.0)
+            rospy.get_param("~repeat_change_max_length_m", 22.0)
         )
         self.repeat_change_time_s = float(
-            rospy.get_param("~repeat_change_time_s", 3.0)
+            rospy.get_param("~repeat_change_time_s", 3.5)
         )
         self.repeat_change_max_heading_rad = math.radians(float(
-            rospy.get_param("~repeat_change_max_heading_deg", 20.0)
+            rospy.get_param("~repeat_change_max_heading_deg", 15.0)
         ))
         if (
             not 0.0 < self.change_ramp_ratio < 0.5
@@ -242,8 +242,14 @@ class HighwayLaneStrategyNode:
         self.inner_path_blend_time_s = max(0.05, float(rospy.get_param("~inner_path_blend_time_s", 0.20)))
         self.inner_path_max_jump_m = float(rospy.get_param("~inner_path_max_jump_m", 1.20))
         self.inner_path_join_length_m = float(rospy.get_param("~inner_path_join_length_m", 4.0))
+        self.inner_path_join_time_s = max(
+            0.0, float(rospy.get_param("~inner_path_join_time_s", 1.0))
+        )
+        self.inner_path_max_heading_rad = math.radians(float(
+            rospy.get_param("~inner_path_max_heading_deg", 6.0)
+        ))
         self.inner_path_right_recenter_gain = max(
-            1.0, float(rospy.get_param("~inner_path_right_recenter_gain", 2.5))
+            1.0, float(rospy.get_param("~inner_path_right_recenter_gain", 1.25))
         )
         self.inner_boundary_bracket_margin_m = max(
             0.0, float(rospy.get_param("~inner_boundary_bracket_margin_m", 0.10))
@@ -1148,6 +1154,7 @@ class HighwayLaneStrategyNode:
             previous = [(0.0, 0.0), (1.0, 0.0)]
         previous = self._extend_local_polyline(previous, 40.0)
         alpha = 1.0-math.exp(-max(0.0, dt)/self.inner_path_blend_time_s)
+        _, _, _, ego_speed = self._odom_pose()
         limited = False
         blended = []
         for x, camera_y in camera:
@@ -1165,7 +1172,17 @@ class HighwayLaneStrategyNode:
             # the normal Pure Pursuit look-ahead range.  The old 18 m join made
             # the effective time constant around x=5 m tens of seconds, so an
             # offset at lane-change completion was effectively preserved.
-            spatial = smoothstep5((x-0.5)/max(self.inner_path_join_length_m, 1.0))
+            heading_join = (
+                abs(bounded_delta)/math.tan(self.inner_path_max_heading_rad)
+                if self.inner_path_max_heading_rad > 1e-3 else 0.0
+            )
+            join_length = max(
+                self.inner_path_join_length_m,
+                ego_speed*self.inner_path_join_time_s,
+                heading_join,
+                1.0,
+            )
+            spatial = smoothstep5((x-0.5)/join_length)
             recenter_gain = (
                 self.inner_path_right_recenter_gain
                 if bounded_delta < -self.inner_path_deadband_m else 1.0
@@ -1440,17 +1457,25 @@ class HighwayLaneStrategyNode:
         }, reverse=True)
         diagnostics = {}
         for v in candidates:
-            local, length = self._generate_lane_change_local(width, v)
+            # A repeat change starts while the vehicle may still be travelling
+            # faster than the new target speed.  Planning its geometry from the
+            # target alone produced a 12 m transition at an observed ~8 m/s,
+            # followed by a hard opposite correction.  Preserve the proven
+            # first-change profile, but size subsequent paths from actual entry
+            # speed until the longitudinal controller has caught up.
+            geometry_speed = max(v, ego_speed) if self.lane_changes_done > 0 else v
+            local, length = self._generate_lane_change_local(width, geometry_speed)
             if len(local) < 3:
                 diagnostics[str(v)] = {"divider": divider_diag, "reason": "lane_change_geometry_short"}
                 continue
-            curv_ok, max_k = self._path_curvature_ok(local, v)
+            curv_ok, max_k = self._path_curvature_ok(local, geometry_speed)
             gap_ok, gap_reason, gap_diag = self._gap_safe_for_speed(v, width, length)
             path = self._local_to_map(local, now)
             dyn_ok, dyn_reason = self._dynamic_path_safe(
-                path, v, self.change_start_m + length + 4.0
+                path, geometry_speed, self.change_start_m + length + 4.0
             )
             diagnostics[str(v)] = {
+                "geometry_speed_mps": round(geometry_speed, 2),
                 "lane_source": lane_source,
                 "divider_source": divider_reason,
                 "curvature": round(max_k,5),
@@ -2205,10 +2230,6 @@ class HighwayLaneStrategyNode:
                 "double_left_solid": self._double_left_solid_present(),
                 "fast_recenter": bool(
                     self.inner_handover_pending
-                    or (
-                        center_y is not None
-                        and float(center_y) < -self.change_center_error_m
-                    )
                 ),
                 "follow": follow,
             }, now, dt)
