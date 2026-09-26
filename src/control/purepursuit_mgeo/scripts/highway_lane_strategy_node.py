@@ -401,6 +401,7 @@ class HighwayLaneStrategyNode:
         self.inner_hold_travel_m = 0.0
         self.last_hold_xy: Optional[Tuple[float, float]] = None
         self.inner_hold_started_at: Optional[rospy.Time] = None
+        self.next_change_centered_since: Optional[rospy.Time] = None
 
         self.last_output_speed = self.cruise_speed_mps
         self.last_timer_time: Optional[rospy.Time] = None
@@ -1225,6 +1226,11 @@ class HighwayLaneStrategyNode:
         self.inner_hold_travel_m = 0.0
         self.last_hold_xy = (ex, ey)
         self.inner_hold_started_at = now
+        # The five-second dwell begins only after the new lane is physically
+        # centred.  Starting it here made the hand-over and counter-steer count
+        # as lane holding, so the next LEFT request could start almost as soon
+        # as the car visually settled in the intermediate lane.
+        self.next_change_centered_since = None
         self.release_since = None
         self.lane_invalid_since = None
         self.ready_since = None
@@ -2376,12 +2382,11 @@ class HighwayLaneStrategyNode:
             control_heading = self._inner_center_heading() if lane_ok else None
             control_path_local = self._path_map_to_local(path)
             control_path_y = interp_y(control_path_local, 5.0)
-            settled_for_next = (
+            centered_for_next = (
                 not final_lane_candidate
                 and not self.lane_change_locked_by_left_solid
                 and lane_ok and not self.inner_handover_pending and not stop
                 and self.inner_hold_travel_m >= self.min_lane_hold_before_next_change_m
-                and hold_time_s >= self.min_lane_hold_before_next_change_s
                 and control_center_y is not None
                 and abs(float(control_center_y)) <= self.next_change_center_error_m
                 and control_heading is not None
@@ -2392,6 +2397,20 @@ class HighwayLaneStrategyNode:
                 and control_path_y is not None
                 and abs(float(control_path_y)) <= self.next_change_center_error_m
                 and (self.lane_info or {}).get("output_status", "FRESH") == "FRESH"
+            )
+            if centered_for_next:
+                if self.next_change_centered_since is None:
+                    self.next_change_centered_since = now
+            else:
+                self.next_change_centered_since = None
+            centered_hold_time_s = (
+                0.0 if self.next_change_centered_since is None
+                else max(0.0, (now-self.next_change_centered_since).to_sec())
+            )
+            settled_for_next = bool(
+                centered_for_next
+                and hold_time_s >= self.min_lane_hold_before_next_change_s
+                and centered_hold_time_s >= self.min_lane_hold_before_next_change_s
             )
             next_change_pending = False
             if settled_for_next:
@@ -2497,6 +2516,7 @@ class HighwayLaneStrategyNode:
                 "global_d": None if global_d is None else round(global_d,2),
                 "inner_hold_travel_m": round(self.inner_hold_travel_m,2),
                 "inner_hold_time_s": round(hold_time_s,2),
+                "centered_lane_hold_time_s": round(centered_hold_time_s,2),
                 "center_y8_m": None if center_y is None else round(center_y,3),
                 "control_path_y5_m": None if control_path_y is None else round(control_path_y,3),
                 "lane_center_source": (self.lane_info or {}).get("center_source"),

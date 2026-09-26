@@ -15,6 +15,7 @@ class RepeatedLaneChangeTest(unittest.TestCase):
         n.min_lane_hold_before_next_change_m = 8.0
         n.min_lane_hold_before_next_change_s = 5.0
         n.inner_hold_started_at = safety.Stamp(90.0)
+        n.next_change_centered_since = safety.Stamp(90.0)
         n._global_signed_d.return_value = 3.5
         n._choose_lane_change = Mock(return_value=(safety.path_at(3.5), 2.0, 32.0, 'ok', {}))
 
@@ -36,12 +37,30 @@ class RepeatedLaneChangeTest(unittest.TestCase):
 
     def test_no_second_change_before_five_seconds(self):
         n = self.node
-        n.inner_hold_started_at = safety.Stamp(98.0)
+        n.next_change_centered_since = safety.Stamp(98.0)
         n.ready_since = safety.Stamp(95.0)
         self.tick(100.0)
         self.assertEqual(n.state, n.INNER_HOLD)
         self.assertIsNone(n.ready_since)
         n._choose_lane_change.assert_not_called()
+
+    def test_five_second_hold_starts_after_lane_center_is_stable(self):
+        n = self.node
+        n.next_change_centered_since = None
+
+        self.tick(100.0)
+        self.assertEqual(n.state, n.INNER_HOLD)
+        self.assertEqual(n.next_change_centered_since.seconds, 100.0)
+        n._choose_lane_change.assert_not_called()
+
+        self.tick(104.9)
+        self.assertEqual(n.state, n.INNER_HOLD)
+        n._choose_lane_change.assert_not_called()
+
+        self.tick(105.1)
+        self.assertIsNotNone(n.ready_since)
+        self.tick(105.7)
+        self.assertEqual(n.state, n.LANE_CHANGE)
 
     def test_second_change_requires_new_half_second_confirmation(self):
         n = self.node
@@ -231,6 +250,7 @@ class RepeatedLaneChangeTest(unittest.TestCase):
                 self.tick()
                 self.assertEqual(n.state, n.INNER_HOLD)
                 self.assertIsNone(n.ready_since)
+                self.assertIsNone(n.next_change_centered_since)
                 n._choose_lane_change.assert_not_called()
 
     def test_offset_filtered_path_delays_second_change(self):
@@ -244,6 +264,7 @@ class RepeatedLaneChangeTest(unittest.TestCase):
 
         self.assertEqual(n.state, n.INNER_HOLD)
         self.assertIsNone(n.ready_since)
+        self.assertIsNone(n.next_change_centered_since)
         n._choose_lane_change.assert_not_called()
         self.assertAlmostEqual(
             n._publish.call_args.args[4]['control_path_y5_m'], 0.35
