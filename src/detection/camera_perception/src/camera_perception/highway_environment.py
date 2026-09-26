@@ -106,6 +106,30 @@ class HighwayEnvironmentLatch:
         return self.latched if self.latch_once else conditions_met
 
 
+class AdjacentDashedHold:
+    """Bridge missed dashed frames but clear on positive solid evidence."""
+
+    def __init__(self, hold_s):
+        self.hold_s = float(hold_s)
+        if self.hold_s <= 0.0:
+            raise ValueError("hold_s must be positive")
+        self.last_dashed_at = None
+
+    def observe_dashed(self, detected, now):
+        if bool(detected):
+            self.last_dashed_at = float(now)
+
+    def observe_solid(self, detected):
+        if bool(detected):
+            self.last_dashed_at = None
+
+    def active(self, now):
+        return bool(
+            self.last_dashed_at is not None
+            and float(now)-self.last_dashed_at <= self.hold_s
+        )
+
+
 def exclusive_highway_active(highway_candidate, intersection_active):
     """Give intersection state priority over the highway/merge state."""
     return bool(highway_candidate) and not bool(intersection_active)

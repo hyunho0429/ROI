@@ -217,6 +217,7 @@ class DiagonalLaneChangeTest(unittest.TestCase):
         n.committed_path = path_at(3.5, end=50)
         n.committed_speed_mps = 4.0
         n.committed_change_length_m = 30.0
+        n.committed_enters_final_lane = True
         n._odom_pose.return_value = (
             28.0, 3.7, math.radians(8.0), 8.0
         )
@@ -229,6 +230,45 @@ class DiagonalLaneChangeTest(unittest.TestCase):
         self.assertLessEqual(
             abs(n._publish.call_args.args[4]['alignment']['target_lateral_error_m']),
             n.change_target_capture_m,
+        )
+
+    def test_final_solid_lane_capture_ends_left_path_before_solid_crossing(self):
+        n = node_fixture()
+        n.state = n.LANE_CHANGE
+        n.committed_path = path_at(3.5, end=50)
+        n.committed_speed_mps = 4.0
+        n.committed_change_length_m = 30.0
+        n.committed_enters_final_lane = True
+        # Progress is sufficient, but the ordinary committed-path capture is
+        # deliberately outside its 0.30 m tolerance.
+        n._odom_pose.return_value = (24.0, 2.9, 0.0, 4.0)
+        # The post-crossing classifier may still call the nearest line dashed.
+        # The pre-commit outer-solid observation must be sufficient.
+        n._final_lane_markings_present = safety.Mock(return_value=False)
+        n._inner_center_sanity.return_value = (True, 'ok', 0.20)
+        n._inner_center_heading = safety.Mock(return_value=0.0)
+
+        with safety.patch.object(
+            safety.NODE.rospy.Time, 'now', return_value=Stamp(100.0)
+        ):
+            n._tick(None)
+        self.assertEqual(n.state, n.LANE_CHANGE)
+        self.assertIsNotNone(n.final_lane_candidate_since)
+
+        fresh = Stamp(100.3)
+        n.base_path_at = n.base_stop_at = n.odom_at = n.obstacles_at = fresh
+        with safety.patch.object(
+            safety.NODE.rospy.Time, 'now', return_value=fresh
+        ):
+            n._tick(None)
+
+        self.assertEqual(n.state, n.INNER_HOLD)
+        self.assertTrue(n.lane_change_locked_by_left_solid)
+        self.assertFalse(n.inner_handover_pending)
+        self.assertEqual(n.lane_changes_done, 1)
+        self.assertEqual(
+            n._publish.call_args.args[4]['reason'],
+            'solid_left_lane_capture',
         )
 
     def test_target_capture_stabilizes_first_maneuver(self):

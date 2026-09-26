@@ -91,6 +91,7 @@
         output="screen">
     <param name="car_detected_topic" value="$(arg car_detected_topic)" />
     <param name="dashed_lane_topic" value="$(arg dashed_lane_topic)" />
+    <param name="left_solid_lane_topic" value="$(arg left_solid_lane_topic)" />
     <param name="output_topic" value="$(arg highway_environment_topic)" />
     <param name="intersection_detected_topic" value="$(arg intersection_detected_topic)" />
     <param name="require_dashed_lane" value="$(arg require_dashed_lane)" />

@@ -15,6 +15,7 @@ for path in (PACKAGE_SRC, REPOSITORY_ROOT):
         sys.path.insert(0, path)
 
 from camera_perception.highway_environment import (
+    AdjacentDashedHold,
     HighwayEnvironmentLatch,
     adjacent_left_lane_semantics,
     adjacent_left_lane_type,
@@ -53,6 +54,21 @@ class HighwayEnvironmentLatchTest(unittest.TestCase):
 
         self.assertTrue(state.update(True))
         self.assertFalse(state.update(False))
+
+
+class AdjacentDashedHoldTest(unittest.TestCase):
+    def test_false_frame_does_not_cancel_recent_dashed_observation(self):
+        state = AdjacentDashedHold(2.0)
+        state.observe_dashed(True, 10.0)
+        state.observe_dashed(False, 10.1)
+        self.assertTrue(state.active(11.9))
+        self.assertFalse(state.active(12.1))
+
+    def test_positive_solid_cancels_dashed_hold_immediately(self):
+        state = AdjacentDashedHold(2.0)
+        state.observe_dashed(True, 10.0)
+        state.observe_solid(True)
+        self.assertFalse(state.active(10.1))
 
 
 class AdjacentLeftLaneTest(unittest.TestCase):

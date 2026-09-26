@@ -314,6 +314,8 @@
     <!-- End repeated LEFT changes at the final lane, but keep following the
          midpoint between its nearest left solid and nearest right dashed line. -->
     <param name="final_lane_confirm_s" value="0.25" />
+    <param name="final_lane_capture_min_ratio" value="0.55" />
+    <param name="final_lane_capture_center_error_m" value="0.55" />
 
     <param name="change_start_m" value="3.0" />
     <param name="change_min_length_m" value="18.0" />

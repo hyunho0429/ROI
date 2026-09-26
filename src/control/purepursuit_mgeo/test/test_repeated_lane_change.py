@@ -152,6 +152,37 @@ class RepeatedLaneChangeTest(unittest.TestCase):
 
         self.assertFalse(n._final_lane_markings_present())
 
+    def test_outer_solid_marks_next_lane_as_final_before_crossing(self):
+        n = self.node
+        n.lane_info.update({
+            'lane_valid': True,
+            'output_status': 'FRESH',
+            'left_lane': {
+                'detected': True, 'type': 'white_dashed', 'age': 3,
+                'coef': [0.0, 1.75], 'x_range_m': [0.0, 30.0],
+            },
+            'left_outer_lane': {
+                'detected': True, 'type': 'white_solid', 'age': 3,
+                'coef': [0.0, 5.25], 'x_range_m': [0.0, 30.0],
+            },
+        })
+
+        self.assertTrue(n._target_lane_has_solid_left_boundary())
+
+        n.lane_info['left_outer_lane']['type'] = 'white_dashed'
+        self.assertFalse(n._target_lane_has_solid_left_boundary())
+
+    def test_final_target_commit_locks_out_a_third_change_on_completion(self):
+        n = self.node
+        n.committed_enters_final_lane = True
+
+        n._enter_inner_hold(
+            safety.Stamp(100.0), 0.0, 0.0, 'target_lane_capture', 8.0
+        )
+
+        self.assertTrue(n.lane_change_locked_by_left_solid)
+        self.assertEqual(n.state, n.INNER_HOLD)
+
     def test_two_fresh_left_solids_lock_further_lane_changes(self):
         n = self.node
         n.lane_info.update({

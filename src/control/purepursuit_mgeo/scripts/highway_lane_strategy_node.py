@@ -213,6 +213,15 @@ class HighwayLaneStrategyNode:
         self.final_lane_confirm_s = max(
             0.0, float(rospy.get_param("~final_lane_confirm_s", 0.25))
         )
+        self.final_lane_capture_min_ratio = clamp(
+            float(rospy.get_param("~final_lane_capture_min_ratio", 0.55)),
+            0.40,
+            0.90,
+        )
+        self.final_lane_capture_center_error_m = max(
+            0.10,
+            float(rospy.get_param("~final_lane_capture_center_error_m", 0.55)),
+        )
 
         self.vehicle_length_m = float(rospy.get_param("~vehicle_length_m", 4.635))
         self.vehicle_width_m = float(rospy.get_param("~vehicle_width_m", 1.892))
@@ -383,6 +392,7 @@ class HighwayLaneStrategyNode:
         self.committed_path: Optional[RosPath] = None
         self.committed_speed_mps = self.cruise_speed_mps
         self.committed_change_length_m = self.change_min_length_m
+        self.committed_enters_final_lane = False
         self.committed_rejoin_path: Optional[RosPath] = None
         self.rejoin_travel_m = 0.0
         self.last_rejoin_xy: Optional[Tuple[float, float]] = None
@@ -606,6 +616,44 @@ class HighwayLaneStrategyNode:
                 or lane.get("type") not in solid_types
             ):
                 return False
+        adjacent_y = self._lane_meta_y(adjacent, 7.0)
+        outer_y = self._lane_meta_y(outer, 7.0)
+        if adjacent_y is None or outer_y is None:
+            return False
+        separation = outer_y-adjacent_y
+        return (
+            0.15 <= adjacent_y <= 2.6
+            and self.outer_left_min_separation_m
+            <= separation <= self.outer_left_max_separation_m
+        )
+
+    def _target_lane_has_solid_left_boundary(self) -> bool:
+        """Predict the final lane before crossing the current dashed divider.
+
+        In the lane immediately to the right of the final lane, the current
+        adjacent boundary is dashed and the following outer-left boundary is
+        solid. Remembering that pair at commit time is more robust than waiting
+        for track identities and semantic classes to switch after the crossing.
+        """
+        info = self.lane_info or {}
+        if (
+            not bool(info.get("lane_valid", False))
+            or str(info.get("output_status", "")).upper() != "FRESH"
+        ):
+            return False
+        adjacent = info.get("left_lane") or {}
+        outer = info.get("left_outer_lane") or {}
+        if (
+            not bool(adjacent.get("detected", False))
+            or adjacent.get("type") != "white_dashed"
+            or bool(adjacent.get("from_guide", False))
+            or bool(adjacent.get("coasted", False))
+            or not bool(outer.get("detected", False))
+            or outer.get("type") not in ("white_solid", "yellow")
+            or bool(outer.get("from_guide", False))
+            or bool(outer.get("coasted", False))
+        ):
+            return False
         adjacent_y = self._lane_meta_y(adjacent, 7.0)
         outer_y = self._lane_meta_y(outer, 7.0)
         if adjacent_y is None or outer_y is None:
@@ -1183,6 +1231,9 @@ class HighwayLaneStrategyNode:
         self.last_inner_path = self.committed_path
         self.inner_handover_pending = True
         self.inner_lane_candidate_since = None
+        if self.committed_enters_final_lane:
+            self.lane_change_locked_by_left_solid = True
+            self.final_lane_candidate_since = None
         rospy.logwarn(
             "HIGHWAY lane change COMPLETE count=%d reason=%s remaining=%.2fm",
             self.lane_changes_done,
@@ -1915,6 +1966,9 @@ class HighwayLaneStrategyNode:
                     self.committed_path = path
                     self.committed_speed_mps = float(cand_speed)
                     self.committed_change_length_m = float(length)
+                    self.committed_enters_final_lane = (
+                        self._target_lane_has_solid_left_boundary()
+                    )
                     self.final_lane_candidate_since = None
                     self.change_travel_m = 0.0
                     self.last_change_xy = (ex,ey)
@@ -2040,6 +2094,74 @@ class HighwayLaneStrategyNode:
                 <= self.endpoint_handover_max_heading_rad
             )
 
+            # The final permitted lane is bounded by the nearest solid on the
+            # left. If that solid and a fresh bracketing boundary pair confirm
+            # that ego has reached this lane, end the committed LEFT path even
+            # when odometry-to-path alignment is noisy. Continuing the RRT path
+            # in this situation preserves residual left yaw and can carry the
+            # car across the solid into the forbidden solid-solid lane.
+            final_center_ok = False
+            final_center_y = None
+            final_center_heading = None
+            final_lane_capture_progress = (
+                self.change_start_m
+                + self.final_lane_capture_min_ratio*self.committed_change_length_m
+            )
+            final_lane_expected = bool(
+                self.committed_enters_final_lane
+                or self._final_lane_markings_present()
+            )
+            if final_lane_expected:
+                final_center_ok, _, final_center_y = self._inner_center_sanity(
+                    require_two_boundaries=True
+                )
+                final_center_heading = self._inner_center_heading()
+            final_lane_captured = bool(
+                final_center_ok
+                and final_center_y is not None
+                and abs(float(final_center_y))
+                <= self.final_lane_capture_center_error_m
+                and final_center_heading is not None
+                and abs(float(final_center_heading))
+                <= self.change_heading_error_rad
+                and float(alignment_diag.get("path_progress_m", 0.0))
+                >= final_lane_capture_progress
+            )
+            if final_lane_captured and not stop:
+                if self.final_lane_candidate_since is None:
+                    self.final_lane_candidate_since = now
+                elif (
+                    now-self.final_lane_candidate_since
+                ).to_sec() >= self.final_lane_confirm_s:
+                    self.lane_change_locked_by_left_solid = True
+                    self._enter_inner_hold(
+                        now, ex, ey, "solid_left_lane_capture", remaining_to_end
+                    )
+                    # The physical pair has already been confirmed here, so
+                    # hand control to its bounded midpoint immediately rather
+                    # than carrying the remaining left-biased RRT tangent.
+                    self.inner_handover_pending = False
+                    filtered, _ = self._filtered_inner_path(now, dt)
+                    if filtered is not None:
+                        self.last_inner_path = filtered
+                    self._publish(
+                        self.last_inner_path,
+                        False,
+                        speed,
+                        True,
+                        {
+                            "reason": "solid_left_lane_capture",
+                            "alignment": alignment_diag,
+                            "center_y8_m": round(float(final_center_y), 3),
+                            "follow": follow,
+                        },
+                        now,
+                        dt,
+                    )
+                    return
+            elif not final_lane_expected:
+                self.final_lane_candidate_since = None
+
             # At high entry speed the car can reach the new lane centre before
             # the distance-based completion timer expires. Continuing the RRT
             # state then preserves left yaw long enough to cross another
@@ -2098,6 +2220,8 @@ class HighwayLaneStrategyNode:
                 "recoverable_endpoint_alignment":recoverable_endpoint_alignment,
                 "handover_aligned":handover_aligned,
                 "target_lane_captured":target_lane_captured,
+                "final_lane_captured":final_lane_captured,
+                "committed_enters_final_lane":self.committed_enters_final_lane,
                 "target_capture_progress_m":round(target_capture_progress,2),
                 "alignment":alignment_diag,
                 "follow":follow,
@@ -2280,6 +2404,9 @@ class HighwayLaneStrategyNode:
                         self.committed_path = p
                         self.committed_speed_mps = float(v)
                         self.committed_change_length_m = float(length)
+                        self.committed_enters_final_lane = (
+                            self._target_lane_has_solid_left_boundary()
+                        )
                         self.final_lane_candidate_since = None
                         self.change_travel_m = 0.0
                         self.last_change_xy = (ex,ey)

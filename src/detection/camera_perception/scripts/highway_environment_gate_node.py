@@ -8,6 +8,7 @@ import rospy
 from std_msgs.msg import Bool
 
 from camera_perception.highway_environment import (
+    AdjacentDashedHold,
     HighwayEnvironmentLatch,
     exclusive_highway_active,
 )
@@ -24,6 +25,10 @@ class HighwayEnvironmentGateNode:
         )
         self.dashed_lane_topic = _param(
             "dashed_lane_topic", "/perception/camera/dashed_lane_detected"
+        )
+        self.left_solid_lane_topic = _param(
+            "left_solid_lane_topic",
+            "/perception/camera/left_solid_lane_detected",
         )
         self.left_parallel_dynamic_topic = _param(
             "left_parallel_dynamic_topic",
@@ -56,7 +61,7 @@ class HighwayEnvironmentGateNode:
             raise ValueError("publish_rate_hz must be positive")
 
         self.last_car_detected_at = None
-        self.last_dashed_lane_detected_at = None
+        self.dashed_hold = AdjacentDashedHold(self.dashed_lane_hold_s)
         self.last_left_parallel_dynamic_at = None
         self.last_output = None
         self.intersection_active = False
@@ -78,6 +83,12 @@ class HighwayEnvironmentGateNode:
             self._dashed_lane_callback,
             queue_size=1,
         )
+        self.left_solid_lane_subscriber = rospy.Subscriber(
+            self.left_solid_lane_topic,
+            Bool,
+            self._left_solid_lane_callback,
+            queue_size=1,
+        )
         self.left_parallel_dynamic_subscriber = rospy.Subscriber(
             self.left_parallel_dynamic_topic,
             Bool,
@@ -96,11 +107,12 @@ class HighwayEnvironmentGateNode:
         rospy.on_shutdown(self._shutdown)
 
         rospy.logwarn(
-            "Highway gate: car=%s dashed=%s required_dashed=%s "
+            "Highway gate: car=%s dashed=%s left_solid=%s required_dashed=%s "
             "left_parallel_dynamic=%s required_left_parallel_dynamic=%s "
             "intersection_override=%s latch_once=%s output=%s",
             self.car_detected_topic,
             self.dashed_lane_topic,
+            self.left_solid_lane_topic,
             self.require_dashed_lane,
             self.left_parallel_dynamic_topic,
             self.require_left_parallel_dynamic,
@@ -114,13 +126,13 @@ class HighwayEnvironmentGateNode:
             self.last_car_detected_at = time.monotonic()
 
     def _dashed_lane_callback(self, message):
-        if message.data:
-            self.last_dashed_lane_detected_at = time.monotonic()
-        else:
-            # A fresh solid/missing adjacent-left boundary revokes the dashed
-            # condition immediately.  The hold only bridges missing packets;
-            # it must not combine an old, distant dashed line with a later car.
-            self.last_dashed_lane_detected_at = None
+        self.dashed_hold.observe_dashed(message.data, time.monotonic())
+
+    def _left_solid_lane_callback(self, message):
+        # A positively identified nearest solid revokes the dashed condition
+        # immediately. A false dashed Bool alone is ambiguous: it can mean one
+        # dropped lane frame, so let the configured hold bridge it instead.
+        self.dashed_hold.observe_solid(message.data)
 
     def _left_parallel_dynamic_callback(self, message):
         if message.data:
@@ -144,11 +156,7 @@ class HighwayEnvironmentGateNode:
         car_active = self._recent(
             self.last_car_detected_at, self.car_hold_s, now
         )
-        dashed_active = self._recent(
-            self.last_dashed_lane_detected_at,
-            self.dashed_lane_hold_s,
-            now,
-        )
+        dashed_active = self.dashed_hold.active(now)
         left_parallel_dynamic_active = self._recent(
             self.last_left_parallel_dynamic_at,
             self.left_parallel_dynamic_hold_s,
