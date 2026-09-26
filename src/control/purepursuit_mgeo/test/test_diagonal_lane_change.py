@@ -465,6 +465,25 @@ class DiagonalLaneChangeTest(unittest.TestCase):
         # control path close to the already committed lane reference.
         self.assertLess(abs(path.poses[5].pose.position.y), 0.08)
 
+    def test_boundary_hugging_path_gets_immediate_safe_recenter(self):
+        n = node_fixture()
+        n.last_inner_path = path_at(0.8)
+        n._boundary_local = lambda key: [
+            (float(x), 0.75 if key == "left_boundary_points" else -2.75)
+            for x in range(41)
+        ]
+        n._centerline_local.return_value = [
+            (float(x), -1.0) for x in range(41)
+        ]
+
+        path, reason = n._filtered_inner_path(Stamp(), 0.05)
+
+        self.assertEqual(reason, "limited")
+        # At five metres the ordinary 0.8 s blend would still point left.
+        # Boundary recovery instead commands a bounded correction to the right.
+        self.assertLess(path.poses[5].pose.position.y, -0.25)
+        self.assertGreater(path.poses[5].pose.position.y, -0.36)
+
     def test_straddling_line_is_not_used_as_lane_center(self):
         n = node_fixture()
         n._centerline_local = safety.NODE.HighwayLaneStrategyNode._centerline_local.__get__(n)

@@ -605,6 +605,23 @@ class HighwaySafetyTest(unittest.TestCase):
         self.assertIsNone(n.inner_lane_candidate_since)
         self.assertGreater(len(path.poses), 20)
 
+    def test_inner_hold_always_requires_two_fresh_bracketing_boundaries(self):
+        n = self.node
+        n.inner_handover_pending = False
+        n._inner_center_sanity.return_value = (
+            False, "inner_right_boundary_missing", None
+        )
+
+        path, stop, _, _, status, *_ = self.tick()
+
+        n._inner_center_sanity.assert_called_with(require_two_boundaries=True)
+        self.assertFalse(stop)
+        self.assertTrue(status["lane_fallback"])
+        self.assertEqual(
+            status["reason"], "lane_grace_inner_right_boundary_missing"
+        )
+        self.assertGreater(len(path.poses), 20)
+
     def test_straddling_lane_is_rejected_during_handover(self):
         n = self.node
         n._lane_valid = NODE.HighwayLaneStrategyNode._lane_valid.__get__(n)

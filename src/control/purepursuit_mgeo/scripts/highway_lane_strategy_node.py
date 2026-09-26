@@ -257,8 +257,14 @@ class HighwayLaneStrategyNode:
         self.inner_boundary_bracket_margin_m = max(
             0.0, float(rospy.get_param("~inner_boundary_bracket_margin_m", 0.10))
         )
+        self.inner_boundary_safety_margin_m = max(
+            0.0, float(rospy.get_param("~inner_boundary_safety_margin_m", 0.20))
+        )
         self.inner_path_deadband_m = max(
             0.0, float(rospy.get_param("~inner_path_deadband_m", 0.15))
+        )
+        self.next_change_center_error_m = max(
+            0.05, float(rospy.get_param("~next_change_center_error_m", 0.25))
         )
         self.change_time_s = float(rospy.get_param("~change_time_s", 4.0))
         self.change_post_hold_m = float(rospy.get_param("~change_post_hold_m", 10.0))
@@ -546,7 +552,13 @@ class HighwayLaneStrategyNode:
         return False, "adjacent_left_not_dashed"
 
     def _final_lane_markings_present(self) -> bool:
-        """True only in the intended solid-left/dashed-right final lane."""
+        """True when the nearest fresh boundary on the left is solid.
+
+        The right boundary may be temporarily hidden while the vehicle settles
+        after crossing a dashed divider.  Requiring a simultaneous right-dashed
+        observation left a short window in which another LEFT maneuver could
+        be armed toward the solid-solid lane.
+        """
         info = self.lane_info or {}
         if (
             not bool(info.get("lane_valid", False))
@@ -562,20 +574,7 @@ class HighwayLaneStrategyNode:
             max_y_m=2.6,
             min_track_age=2,
         )
-        if self._double_left_solid_present():
-            return True
-        right = info.get("right_lane") or {}
-        if (
-            not bool(right.get("detected", False))
-            or bool(right.get("from_guide", False))
-            or bool(right.get("coasted", False))
-        ):
-            return False
-        intended_final_lane = (
-            left_type == "white_solid"
-            and right.get("type") == "white_dashed"
-        )
-        return intended_final_lane
+        return left_type in ("white_solid", "yellow")
 
     @staticmethod
     def _lane_meta_y(lane: dict, x_m: float) -> Optional[float]:
@@ -1209,6 +1208,11 @@ class HighwayLaneStrategyNode:
         previous = self._extend_local_polyline(previous, 40.0)
         alpha = 1.0-math.exp(-max(0.0, dt)/self.inner_path_blend_time_s)
         _, _, _, ego_speed = self._odom_pose()
+        left_boundary = self._boundary_local("left_boundary_points")
+        right_boundary = self._boundary_local("right_boundary_points")
+        center_clearance = (
+            0.5*self.vehicle_width_m + self.inner_boundary_safety_margin_m
+        )
         limited = False
         blended = []
         for x, camera_y in camera:
@@ -1242,7 +1246,41 @@ class HighwayLaneStrategyNode:
                 if bounded_delta < -self.inner_path_deadband_m else 1.0
             )
             effective_alpha = min(1.0, alpha*recenter_gain)
-            blended.append((x, previous_y+effective_alpha*spatial*bounded_delta))
+            blended_y = previous_y+effective_alpha*spatial*bounded_delta
+
+            # If the currently filtered path is already too close to either
+            # physical line, temporal smoothing must not keep it there for
+            # several more seconds. Recover toward the verified midpoint at
+            # the configured heading limit while retaining a continuous path
+            # from the current vehicle pose.
+            left_y = interp_y(left_boundary, x)
+            right_y = interp_y(right_boundary, x)
+            if (
+                x > 0.5
+                and left_y is not None and right_y is not None
+                and float(left_y) > self.inner_boundary_bracket_margin_m
+                and float(right_y) < -self.inner_boundary_bracket_margin_m
+            ):
+                safe_low = float(right_y)+center_clearance
+                safe_high = float(left_y)-center_clearance
+                if safe_low <= safe_high:
+                    previous_outside = (
+                        previous_y < safe_low or previous_y > safe_high
+                    )
+                    if previous_outside:
+                        safe_target = clamp(camera_y, safe_low, safe_high)
+                        heading_envelope = math.tan(
+                            self.inner_path_max_heading_rad
+                        )*max(0.0, x-0.5)
+                        recovery_y = clamp(
+                            safe_target, -heading_envelope, heading_envelope
+                        )
+                        if previous_y > safe_high:
+                            blended_y = min(blended_y, recovery_y)
+                        else:
+                            blended_y = max(blended_y, recovery_y)
+                        limited = True
+            blended.append((x, blended_y))
         return self._local_to_map(blended, now), "limited" if limited else "ok"
 
     def _rolling_inner_fallback(self, now: rospy.Time) -> Optional[RosPath]:
@@ -2105,7 +2143,13 @@ class HighwayLaneStrategyNode:
                     self.inner_lane_candidate_since = None
             if lane_ok:
                 if not center_ok:
-                    center_ok, center_reason, center_y = self._inner_center_sanity()
+                    # Keep using only a fresh physical pair that brackets ego.
+                    # A one-sided estimate can jump to the next lane after the
+                    # dashed line changes identity and was the source of the
+                    # slow drift across the final solid boundary.
+                    center_ok, center_reason, center_y = self._inner_center_sanity(
+                        require_two_boundaries=True
+                    )
                 if not center_ok:
                     lane_ok = False
                     lane_reason = center_reason
@@ -2206,6 +2250,8 @@ class HighwayLaneStrategyNode:
             # change.
             control_center_y = center_y
             control_heading = self._inner_center_heading() if lane_ok else None
+            control_path_local = self._path_map_to_local(path)
+            control_path_y = interp_y(control_path_local, 5.0)
             settled_for_next = (
                 not final_lane_candidate
                 and not self.lane_change_locked_by_left_solid
@@ -2213,9 +2259,14 @@ class HighwayLaneStrategyNode:
                 and self.inner_hold_travel_m >= self.min_lane_hold_before_next_change_m
                 and hold_time_s >= self.min_lane_hold_before_next_change_s
                 and control_center_y is not None
-                and abs(float(control_center_y)) <= self.change_center_error_m
+                and abs(float(control_center_y)) <= self.next_change_center_error_m
                 and control_heading is not None
                 and abs(float(control_heading)) <= self.change_heading_error_rad
+                # The measured midpoint and the actual filtered control path
+                # must both be centered. This prevents a new RRT request while
+                # the car is still following close to the left dashed line.
+                and control_path_y is not None
+                and abs(float(control_path_y)) <= self.next_change_center_error_m
                 and (self.lane_info or {}).get("output_status", "FRESH") == "FRESH"
             )
             next_change_pending = False
@@ -2320,6 +2371,7 @@ class HighwayLaneStrategyNode:
                 "inner_hold_travel_m": round(self.inner_hold_travel_m,2),
                 "inner_hold_time_s": round(hold_time_s,2),
                 "center_y8_m": None if center_y is None else round(center_y,3),
+                "control_path_y5_m": None if control_path_y is None else round(control_path_y,3),
                 "lane_center_source": (self.lane_info or {}).get("center_source"),
                 "lane_straddling": bool(((self.lane_info or {}).get("straddling_lane") or {}).get("detected", False)),
                 "lane_grace": lane_grace,

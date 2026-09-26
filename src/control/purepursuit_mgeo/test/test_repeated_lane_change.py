@@ -114,7 +114,7 @@ class RepeatedLaneChangeTest(unittest.TestCase):
         n._choose_lane_change.assert_not_called()
         n._generate_rejoin_path.assert_not_called()
 
-    def test_left_solid_without_right_dashed_does_not_lock_final_lane(self):
+    def test_nearest_left_solid_locks_even_when_right_boundary_is_hidden(self):
         n = self.node
         n.lane_info.update({
             'lane_valid': True,
@@ -126,11 +126,12 @@ class RepeatedLaneChangeTest(unittest.TestCase):
                 'coef': [0.0, 1.75],
                 'x_range_m': [0.0, 30.0],
             },
-            # The double-solid lock is independent of right-lane visibility.
+            # Right boundary visibility must not open a brief window for a
+            # further merge across the nearest left solid.
             'right_lane': {'detected': False, 'type': None},
         })
 
-        self.assertFalse(n._final_lane_markings_present())
+        self.assertTrue(n._final_lane_markings_present())
 
     def test_far_left_solid_does_not_block_change_across_adjacent_dashed(self):
         n = self.node
@@ -200,6 +201,22 @@ class RepeatedLaneChangeTest(unittest.TestCase):
                 self.assertEqual(n.state, n.INNER_HOLD)
                 self.assertIsNone(n.ready_since)
                 n._choose_lane_change.assert_not_called()
+
+    def test_offset_filtered_path_delays_second_change(self):
+        n = self.node
+        n._filtered_inner_path = Mock(
+            return_value=(safety.path_at(0.35), 'ok')
+        )
+        n.ready_since = safety.Stamp(95.0)
+
+        self.tick()
+
+        self.assertEqual(n.state, n.INNER_HOLD)
+        self.assertIsNone(n.ready_since)
+        n._choose_lane_change.assert_not_called()
+        self.assertAlmostEqual(
+            n._publish.call_args.args[4]['control_path_y5_m'], 0.35
+        )
 
     def test_stale_reported_errors_do_not_reverse_next_change(self):
         n = self.node

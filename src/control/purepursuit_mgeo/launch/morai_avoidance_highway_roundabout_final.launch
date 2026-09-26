@@ -335,7 +335,13 @@
     <param name="inner_path_max_heading_deg" value="4.0" />
     <param name="inner_path_right_recenter_gain" value="1.0" />
     <param name="inner_boundary_bracket_margin_m" value="0.10" />
+    <!-- Keep the planned vehicle centre at least half a vehicle width plus
+         20 cm from each detected physical lane boundary. -->
+    <param name="inner_boundary_safety_margin_m" value="0.20" />
     <param name="inner_path_deadband_m" value="0.15" />
+    <!-- A repeat change starts only after both the measured midpoint and the
+         filtered path are within 25 cm of the current lane centre. -->
+    <param name="next_change_center_error_m" value="0.25" />
     <param name="change_time_s" value="4.0" />
     <param name="change_post_hold_m" value="10.0" />
     <!-- Live vehicle-frame RRT*: consumes current lane/odom/LiDAR in memory. -->
