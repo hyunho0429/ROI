@@ -263,6 +263,10 @@ class HighwayLaneStrategyNode:
         self.inner_path_right_recenter_gain = max(
             1.0, float(rospy.get_param("~inner_path_right_recenter_gain", 1.0))
         )
+        self.inner_path_force_recenter_error_m = max(
+            0.10,
+            float(rospy.get_param("~inner_path_force_recenter_error_m", 0.30)),
+        )
         self.inner_boundary_bracket_margin_m = max(
             0.0, float(rospy.get_param("~inner_boundary_bracket_margin_m", 0.10))
         )
@@ -274,6 +278,10 @@ class HighwayLaneStrategyNode:
         )
         self.next_change_center_error_m = max(
             0.05, float(rospy.get_param("~next_change_center_error_m", 0.25))
+        )
+        self.next_change_center_loss_grace_s = max(
+            0.0,
+            float(rospy.get_param("~next_change_center_loss_grace_s", 0.40)),
         )
         self.change_time_s = float(rospy.get_param("~change_time_s", 4.0))
         self.change_post_hold_m = float(rospy.get_param("~change_post_hold_m", 10.0))
@@ -402,6 +410,7 @@ class HighwayLaneStrategyNode:
         self.last_hold_xy: Optional[Tuple[float, float]] = None
         self.inner_hold_started_at: Optional[rospy.Time] = None
         self.next_change_centered_since: Optional[rospy.Time] = None
+        self.next_change_center_lost_since: Optional[rospy.Time] = None
 
         self.last_output_speed = self.cruise_speed_mps
         self.last_timer_time: Optional[rospy.Time] = None
@@ -563,29 +572,15 @@ class HighwayLaneStrategyNode:
         return False, "adjacent_left_not_dashed"
 
     def _final_lane_markings_present(self) -> bool:
-        """True when the nearest fresh boundary on the left is solid.
+        """Require the two-solid final boundary pattern after hand-over.
 
-        The right boundary may be temporarily hidden while the vehicle settles
-        after crossing a dashed divider.  Requiring a simultaneous right-dashed
-        observation left a short window in which another LEFT maneuver could
-        be armed toward the solid-solid lane.
+        A single dashed segment is occasionally classified as solid while lane
+        identities switch after a merge.  Latching on that one observation can
+        permanently suppress the next valid change in an intermediate lane.
+        The pre-commit dashed+outer-solid check still locks the known final
+        target immediately; this check is the post-change fallback.
         """
-        info = self.lane_info or {}
-        if (
-            not bool(info.get("lane_valid", False))
-            or str(info.get("output_status", "")).upper() != "FRESH"
-        ):
-            return False
-
-        from camera_perception.highway_environment import adjacent_left_lane_type
-
-        left_type = adjacent_left_lane_type(
-            info,
-            eval_x_m=7.0,
-            max_y_m=2.6,
-            min_track_age=2,
-        )
-        return left_type in ("white_solid", "yellow")
+        return self._double_left_solid_present()
 
     @staticmethod
     def _lane_meta_y(lane: dict, x_m: float) -> Optional[float]:
@@ -683,7 +678,7 @@ class HighwayLaneStrategyNode:
             self.ready_since = None
             self.release_since = None
             rospy.logwarn(
-                "HIGHWAY further lane changes OFF: nearest left=white_solid; "
+                "HIGHWAY further lane changes OFF: double left solid; "
                 "holding measured lane centre"
             )
         return True
@@ -1231,6 +1226,7 @@ class HighwayLaneStrategyNode:
         # as lane holding, so the next LEFT request could start almost as soon
         # as the car visually settled in the intermediate lane.
         self.next_change_centered_since = None
+        self.next_change_center_lost_since = None
         self.release_since = None
         self.lane_invalid_since = None
         self.ready_since = None
@@ -1324,7 +1320,17 @@ class HighwayLaneStrategyNode:
                     previous_outside = (
                         previous_y < safe_low or previous_y > safe_high
                     )
-                    if previous_outside:
+                    # Even before the old path violates the hard footprint
+                    # margin, a sustained midpoint more than 30 cm to the right
+                    # means the vehicle is visibly hugging the crossed LEFT
+                    # divider.  Follow that verified midpoint immediately at
+                    # the normal heading limit instead of waiting for the slow
+                    # temporal blend to converge.
+                    right_recenter_needed = (
+                        float(camera_y)
+                        < float(previous_y)-self.inner_path_force_recenter_error_m
+                    )
+                    if previous_outside or right_recenter_needed:
                         safe_target = clamp(camera_y, safe_low, safe_high)
                         heading_envelope = math.tan(
                             self.inner_path_max_heading_rad
@@ -1334,8 +1340,10 @@ class HighwayLaneStrategyNode:
                         )
                         if previous_y > safe_high:
                             blended_y = min(blended_y, recovery_y)
-                        else:
+                        elif previous_y < safe_low:
                             blended_y = max(blended_y, recovery_y)
+                        elif right_recenter_needed:
+                            blended_y = min(blended_y, recovery_y)
                         limited = True
             blended.append((x, blended_y))
         return self._local_to_map(blended, now), "limited" if limited else "ok"
@@ -2399,10 +2407,16 @@ class HighwayLaneStrategyNode:
                 and (self.lane_info or {}).get("output_status", "FRESH") == "FRESH"
             )
             if centered_for_next:
+                self.next_change_center_lost_since = None
                 if self.next_change_centered_since is None:
                     self.next_change_centered_since = now
             else:
-                self.next_change_centered_since = None
+                if self.next_change_center_lost_since is None:
+                    self.next_change_center_lost_since = now
+                elif (
+                    now-self.next_change_center_lost_since
+                ).to_sec() > self.next_change_center_loss_grace_s:
+                    self.next_change_centered_since = None
             centered_hold_time_s = (
                 0.0 if self.next_change_centered_since is None
                 else max(0.0, (now-self.next_change_centered_since).to_sec())

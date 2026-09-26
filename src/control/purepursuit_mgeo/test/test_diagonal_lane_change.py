@@ -524,6 +524,24 @@ class DiagonalLaneChangeTest(unittest.TestCase):
         self.assertLess(path.poses[5].pose.position.y, -0.25)
         self.assertGreater(path.poses[5].pose.position.y, -0.36)
 
+    def test_left_biased_path_recenters_before_hard_margin_is_crossed(self):
+        n = node_fixture()
+        n.last_inner_path = path_at()
+        n._boundary_local = lambda key: [
+            (float(x), 1.30 if key == "left_boundary_points" else -2.20)
+            for x in range(41)
+        ]
+        n._centerline_local.return_value = [
+            (float(x), -0.45) for x in range(41)
+        ]
+
+        path, reason = n._filtered_inner_path(Stamp(), 0.05)
+
+        self.assertEqual(reason, "limited")
+        # The old path is still inside the footprint safety envelope, but the
+        # measured midpoint proves that ego is 45 cm left of lane centre.
+        self.assertLess(path.poses[5].pose.position.y, -0.25)
+
     def test_straddling_line_is_not_used_as_lane_center(self):
         n = node_fixture()
         n._centerline_local = safety.NODE.HighwayLaneStrategyNode._centerline_local.__get__(n)

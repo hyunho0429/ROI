@@ -338,6 +338,7 @@
     <param name="inner_path_join_time_s" value="1.5" />
     <param name="inner_path_max_heading_deg" value="4.0" />
     <param name="inner_path_right_recenter_gain" value="1.0" />
+    <param name="inner_path_force_recenter_error_m" value="0.30" />
     <param name="inner_boundary_bracket_margin_m" value="0.10" />
     <!-- Keep the planned vehicle centre at least half a vehicle width plus
          20 cm from each detected physical lane boundary. -->
@@ -346,6 +347,9 @@
     <!-- A repeat change starts only after both the measured midpoint and the
          filtered path are within 25 cm of the current lane centre. -->
     <param name="next_change_center_error_m" value="0.25" />
+    <!-- Preserve the centred-lane timer across one or two missed camera
+         frames, but never commit a new change on a stale frame. -->
+    <param name="next_change_center_loss_grace_s" value="0.40" />
     <param name="change_time_s" value="4.0" />
     <param name="change_post_hold_m" value="10.0" />
     <!-- Live vehicle-frame RRT*: consumes current lane/odom/LiDAR in memory. -->

@@ -80,7 +80,7 @@ class RepeatedLaneChangeTest(unittest.TestCase):
         self.assertEqual(n.state, n.LANE_CHANGE)
         self.assertEqual(n._publish.call_args.args[4]['reason'], 'next_left_lane_change')
 
-    def test_left_solid_right_dashed_locks_further_changes_and_holds_lane(self):
+    def test_two_left_solids_lock_further_changes_and_hold_lane(self):
         n = self.node
         n.lane_info.update({
             'lane_valid': True,
@@ -99,6 +99,15 @@ class RepeatedLaneChangeTest(unittest.TestCase):
                 'type': 'white_dashed',
                 'from_guide': False,
                 'coasted': False,
+            },
+            'left_outer_lane': {
+                'detected': True,
+                'type': 'white_solid',
+                'from_guide': False,
+                'coasted': False,
+                'age': 3,
+                'coef': [0.0, 5.25],
+                'x_range_m': [0.0, 30.0],
             },
         })
         n._global_signed_d.return_value = 0.2
@@ -133,7 +142,7 @@ class RepeatedLaneChangeTest(unittest.TestCase):
         n._choose_lane_change.assert_not_called()
         n._generate_rejoin_path.assert_not_called()
 
-    def test_nearest_left_solid_locks_even_when_right_boundary_is_hidden(self):
+    def test_single_left_solid_does_not_lock_intermediate_lane(self):
         n = self.node
         n.lane_info.update({
             'lane_valid': True,
@@ -145,12 +154,10 @@ class RepeatedLaneChangeTest(unittest.TestCase):
                 'coef': [0.0, 1.75],
                 'x_range_m': [0.0, 30.0],
             },
-            # Right boundary visibility must not open a brief window for a
-            # further merge across the nearest left solid.
             'right_lane': {'detected': False, 'type': None},
         })
 
-        self.assertTrue(n._final_lane_markings_present())
+        self.assertFalse(n._final_lane_markings_present())
 
     def test_far_left_solid_does_not_block_change_across_adjacent_dashed(self):
         n = self.node
@@ -246,12 +253,16 @@ class RepeatedLaneChangeTest(unittest.TestCase):
                     (float(x), slope*float(x)) for x in range(51)
                 ]
                 n.ready_since = safety.Stamp(95.0)
+                n.next_change_centered_since = safety.Stamp(90.0)
+                n.next_change_center_lost_since = None
                 n._choose_lane_change.reset_mock()
                 self.tick()
                 self.assertEqual(n.state, n.INNER_HOLD)
                 self.assertIsNone(n.ready_since)
-                self.assertIsNone(n.next_change_centered_since)
+                self.assertIsNotNone(n.next_change_centered_since)
                 n._choose_lane_change.assert_not_called()
+                self.tick(100.5)
+                self.assertIsNone(n.next_change_centered_since)
 
     def test_offset_filtered_path_delays_second_change(self):
         n = self.node
@@ -259,16 +270,34 @@ class RepeatedLaneChangeTest(unittest.TestCase):
             return_value=(safety.path_at(0.35), 'ok')
         )
         n.ready_since = safety.Stamp(95.0)
+        n.next_change_centered_since = safety.Stamp(90.0)
+        n.next_change_center_lost_since = None
 
         self.tick()
 
         self.assertEqual(n.state, n.INNER_HOLD)
         self.assertIsNone(n.ready_since)
-        self.assertIsNone(n.next_change_centered_since)
+        self.assertIsNotNone(n.next_change_centered_since)
         n._choose_lane_change.assert_not_called()
         self.assertAlmostEqual(
             n._publish.call_args.args[4]['control_path_y5_m'], 0.35
         )
+        self.tick(100.5)
+        self.assertIsNone(n.next_change_centered_since)
+
+    def test_brief_camera_dropout_preserves_centered_lane_timer(self):
+        n = self.node
+        n.next_change_centered_since = safety.Stamp(95.0)
+        n.lane_info['output_status'] = 'HELD'
+
+        self.tick(100.0)
+        self.assertEqual(n.next_change_centered_since.seconds, 95.0)
+        n._choose_lane_change.assert_not_called()
+
+        n.lane_info['output_status'] = 'FRESH'
+        self.tick(100.2)
+        self.assertEqual(n.next_change_centered_since.seconds, 95.0)
+        self.assertIsNotNone(n.ready_since)
 
     def test_stale_reported_errors_do_not_reverse_next_change(self):
         n = self.node
