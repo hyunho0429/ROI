@@ -201,6 +201,9 @@ class HighwayLaneStrategyNode:
         self.inner_handover_confirm_s = float(
             rospy.get_param("~inner_handover_confirm_s", 0.20)
         )
+        self.inner_handover_min_s = max(
+            0.0, float(rospy.get_param("~inner_handover_min_s", 2.0))
+        )
         self.inner_center_switch_max_delta_m = float(
             rospy.get_param("~inner_center_switch_max_delta_m", 1.60)
         )
@@ -239,23 +242,23 @@ class HighwayLaneStrategyNode:
             or self.repeat_change_min_length_m > self.repeat_change_max_length_m
         ):
             raise ValueError("invalid diagonal lane-change ramp or heading limit")
-        self.inner_path_blend_time_s = max(0.05, float(rospy.get_param("~inner_path_blend_time_s", 0.20)))
-        self.inner_path_max_jump_m = float(rospy.get_param("~inner_path_max_jump_m", 1.20))
+        self.inner_path_blend_time_s = max(0.05, float(rospy.get_param("~inner_path_blend_time_s", 0.80)))
+        self.inner_path_max_jump_m = float(rospy.get_param("~inner_path_max_jump_m", 0.60))
         self.inner_path_join_length_m = float(rospy.get_param("~inner_path_join_length_m", 4.0))
         self.inner_path_join_time_s = max(
-            0.0, float(rospy.get_param("~inner_path_join_time_s", 1.0))
+            0.0, float(rospy.get_param("~inner_path_join_time_s", 1.5))
         )
         self.inner_path_max_heading_rad = math.radians(float(
-            rospy.get_param("~inner_path_max_heading_deg", 6.0)
+            rospy.get_param("~inner_path_max_heading_deg", 4.0)
         ))
         self.inner_path_right_recenter_gain = max(
-            1.0, float(rospy.get_param("~inner_path_right_recenter_gain", 1.25))
+            1.0, float(rospy.get_param("~inner_path_right_recenter_gain", 1.0))
         )
         self.inner_boundary_bracket_margin_m = max(
             0.0, float(rospy.get_param("~inner_boundary_bracket_margin_m", 0.10))
         )
         self.inner_path_deadband_m = max(
-            0.0, float(rospy.get_param("~inner_path_deadband_m", 0.10))
+            0.0, float(rospy.get_param("~inner_path_deadband_m", 0.15))
         )
         self.change_time_s = float(rospy.get_param("~change_time_s", 4.0))
         self.change_post_hold_m = float(rospy.get_param("~change_post_hold_m", 10.0))
@@ -1989,8 +1992,7 @@ class HighwayLaneStrategyNode:
                 + self.change_target_capture_min_ratio*self.committed_change_length_m
             )
             target_lane_captured = bool(
-                self.lane_changes_done > 0
-                and target_lateral_error is not None
+                target_lateral_error is not None
                 and abs(float(target_lateral_error)) <= self.change_target_capture_m
                 and float(alignment_diag.get("path_progress_m", 0.0))
                 >= target_capture_progress
@@ -2070,10 +2072,18 @@ class HighwayLaneStrategyNode:
         if self.state == self.INNER_HOLD:
             lane_ok, lane_reason = self._lane_valid(now)
             final_lane_candidate = self._update_final_lane_lock(now, lane_ok)
+            hold_time_s = (
+                0.0 if self.inner_hold_started_at is None
+                else max(0.0, (now-self.inner_hold_started_at).to_sec())
+            )
             center_ok = False
             center_y = None
             if self.inner_handover_pending:
-                if lane_ok:
+                if hold_time_s < self.inner_handover_min_s:
+                    self.inner_lane_candidate_since = None
+                    lane_ok = False
+                    lane_reason = "lane_handover_min_hold"
+                elif lane_ok:
                     center_ok, center_reason, center_y = self._inner_center_sanity(
                         require_two_boundaries=True
                     )
@@ -2196,10 +2206,6 @@ class HighwayLaneStrategyNode:
             # change.
             control_center_y = center_y
             control_heading = self._inner_center_heading() if lane_ok else None
-            hold_time_s = (
-                0.0 if self.inner_hold_started_at is None
-                else max(0.0, (now-self.inner_hold_started_at).to_sec())
-            )
             settled_for_next = (
                 not final_lane_candidate
                 and not self.lane_change_locked_by_left_solid
@@ -2322,9 +2328,7 @@ class HighwayLaneStrategyNode:
                 "final_lane_markings": final_lane_candidate,
                 "lane_change_enabled": not self.lane_change_locked_by_left_solid,
                 "double_left_solid": self._double_left_solid_present(),
-                "fast_recenter": bool(
-                    self.inner_handover_pending
-                ),
+                "fast_recenter": False,
                 "follow": follow,
             }, now, dt)
             return

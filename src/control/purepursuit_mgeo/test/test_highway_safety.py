@@ -529,6 +529,7 @@ class HighwaySafetyTest(unittest.TestCase):
     def test_inner_handover_waits_for_stable_new_lane_without_slowing(self):
         n = self.node
         n.inner_handover_pending = True
+        n.inner_hold_started_at = Stamp(97.0)
         n.committed_speed_mps = n.cruise_speed_mps
         n._global_signed_d.return_value = 3.5
 
@@ -548,6 +549,7 @@ class HighwaySafetyTest(unittest.TestCase):
     def test_dashed_track_id_changes_do_not_reset_center_handover(self):
         n = self.node
         n.inner_handover_pending = True
+        n.inner_hold_started_at = Stamp(97.0)
         n.committed_speed_mps = n.cruise_speed_mps
         n._global_signed_d.return_value = 3.5
         n.lane_info.update({
@@ -575,6 +577,7 @@ class HighwaySafetyTest(unittest.TestCase):
     def test_invalid_center_restarts_handover_confirmation(self):
         n = self.node
         n.inner_handover_pending = True
+        n.inner_hold_started_at = Stamp(97.0)
         n.inner_lane_candidate_since = Stamp(99.9)
         n._inner_center_sanity.return_value = (False,"inner_center_not_ego_lane",1.2)
         n._global_signed_d.return_value = 3.5
@@ -584,6 +587,23 @@ class HighwaySafetyTest(unittest.TestCase):
         self.assertTrue(n.inner_handover_pending)
         self.assertIsNone(n.inner_lane_candidate_since)
         self.assertIn("inner_center_not_ego_lane",n._publish.call_args.args[4]["reason"])
+
+    def test_inner_handover_keeps_committed_target_during_minimum_hold(self):
+        n = self.node
+        n.inner_handover_pending = True
+        n.inner_hold_started_at = Stamp(99.0)
+        n.committed_speed_mps = n.cruise_speed_mps
+        n._global_signed_d.return_value = 3.5
+
+        path, stop, speed, _, status, *_ = self.tick()
+
+        self.assertFalse(stop)
+        self.assertEqual(speed, n.cruise_speed_mps)
+        self.assertTrue(status["lane_handover_pending"])
+        self.assertEqual(status["reason"], "lane_handover_min_hold")
+        self.assertFalse(status["fast_recenter"])
+        self.assertIsNone(n.inner_lane_candidate_since)
+        self.assertGreater(len(path.poses), 20)
 
     def test_straddling_lane_is_rejected_during_handover(self):
         n = self.node

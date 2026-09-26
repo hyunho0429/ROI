@@ -306,6 +306,7 @@
     <param name="inner_center_max_abs_y_m" value="1.60" />
     <param name="inner_lane_invalid_grace_s" value="1.20" />
     <param name="inner_handover_confirm_s" value="0.20" />
+    <param name="inner_handover_min_s" value="2.0" />
     <!-- Allow a sizeable post-RRT recenter correction; the fresh two-boundary
          bracket and absolute ego-lane checks reject an adjacent-lane jump. -->
     <param name="inner_center_switch_max_delta_m" value="1.60" />
@@ -327,14 +328,14 @@
     <param name="repeat_change_max_heading_deg" value="15.0" />
     <!-- Follow the midpoint of the newly detected left/right boundaries soon
          after hand-over while retaining a smooth steering transition. -->
-    <param name="inner_path_blend_time_s" value="0.20" />
-    <param name="inner_path_max_jump_m" value="1.20" />
+    <param name="inner_path_blend_time_s" value="0.80" />
+    <param name="inner_path_max_jump_m" value="0.60" />
     <param name="inner_path_join_length_m" value="4.0" />
-    <param name="inner_path_join_time_s" value="1.0" />
-    <param name="inner_path_max_heading_deg" value="6.0" />
-    <param name="inner_path_right_recenter_gain" value="1.25" />
+    <param name="inner_path_join_time_s" value="1.5" />
+    <param name="inner_path_max_heading_deg" value="4.0" />
+    <param name="inner_path_right_recenter_gain" value="1.0" />
     <param name="inner_boundary_bracket_margin_m" value="0.10" />
-    <param name="inner_path_deadband_m" value="0.10" />
+    <param name="inner_path_deadband_m" value="0.15" />
     <param name="change_time_s" value="4.0" />
     <param name="change_post_hold_m" value="10.0" />
     <!-- Live vehicle-frame RRT*: consumes current lane/odom/LiDAR in memory. -->

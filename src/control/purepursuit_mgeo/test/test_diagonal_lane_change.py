@@ -231,7 +231,7 @@ class DiagonalLaneChangeTest(unittest.TestCase):
             n.change_target_capture_m,
         )
 
-    def test_target_capture_guard_does_not_change_first_maneuver(self):
+    def test_target_capture_stabilizes_first_maneuver(self):
         n = node_fixture()
         n.state = n.LANE_CHANGE
         n.committed_path = path_at(3.5, end=50)
@@ -243,8 +243,11 @@ class DiagonalLaneChangeTest(unittest.TestCase):
 
         n._tick(None)
 
-        self.assertEqual(n.state, n.LANE_CHANGE)
-        self.assertFalse(n._publish.call_args.args[4]['target_lane_captured'])
+        self.assertEqual(n.state, n.INNER_HOLD)
+        self.assertEqual(n.lane_changes_done, 1)
+        self.assertEqual(
+            n._publish.call_args.args[4]['reason'], 'target_lane_capture'
+        )
 
     def test_endpoint_handover_accepts_recoverable_lateral_offset(self):
         n = node_fixture()
@@ -273,13 +276,13 @@ class DiagonalLaneChangeTest(unittest.TestCase):
         # Start recentering immediately, but spread the correction far enough
         # ahead that the post-change hand-over cannot demand a hard opposite
         # steering angle.
-        self.assertGreater(abs(path.poses[1].pose.position.y), .10)
-        self.assertLess(abs(path.poses[1].pose.position.y), .25)
+        self.assertGreater(abs(path.poses[1].pose.position.y), .01)
+        self.assertLess(abs(path.poses[1].pose.position.y), .05)
         heading = math.atan2(
             path.poses[1].pose.position.y-path.poses[0].pose.position.y,
             path.poses[1].pose.position.x-path.poses[0].pose.position.x,
         )
-        self.assertLess(abs(heading), math.radians(6.0))
+        self.assertLess(abs(heading), math.radians(4.0))
 
     def test_inner_path_converges_at_controller_lookahead(self):
         n = node_fixture()
@@ -431,7 +434,7 @@ class DiagonalLaneChangeTest(unittest.TestCase):
         self.assertFalse(valid)
         self.assertEqual(reason, 'inner_boundaries_do_not_bracket_ego')
 
-    def test_rightward_recentering_is_accelerated_after_left_edge_finish(self):
+    def test_recentering_gain_is_symmetric_after_lane_change(self):
         n = node_fixture()
         n.last_inner_path = path_at()
         n._centerline_local.return_value = [
@@ -444,7 +447,23 @@ class DiagonalLaneChangeTest(unittest.TestCase):
         normal_path, _ = n._filtered_inner_path(Stamp(), 0.05)
         normal_y = normal_path.poses[5].pose.position.y
 
-        self.assertLess(fast_y, normal_y)
+        self.assertAlmostEqual(fast_y, normal_y)
+
+    def test_alternating_camera_center_does_not_build_large_oscillation(self):
+        n = node_fixture()
+        n.last_inner_path = path_at()
+        for index in range(80):
+            offset = -0.8 if index % 2 == 0 else 0.8
+            n._centerline_local.return_value = [
+                (float(x), offset) for x in range(41)
+            ]
+            path, _ = n._filtered_inner_path(Stamp(), 0.05)
+            n.last_inner_path = path
+
+        # Alternating lane-center assignments used to accumulate into large
+        # left/right steering reversals.  The temporal filter must keep the
+        # control path close to the already committed lane reference.
+        self.assertLess(abs(path.poses[5].pose.position.y), 0.08)
 
     def test_straddling_line_is_not_used_as_lane_center(self):
         n = node_fixture()
@@ -463,8 +482,8 @@ class DiagonalLaneChangeTest(unittest.TestCase):
         path, stop, _, _, status, *_ = n._publish.call_args.args
         self.assertFalse(stop)
         self.assertEqual(status['reason'], 'ok')
-        self.assertGreater(abs(path.poses[1].pose.position.y), .10)
-        self.assertLess(abs(path.poses[1].pose.position.y), .25)
+        self.assertGreater(abs(path.poses[1].pose.position.y), .01)
+        self.assertLess(abs(path.poses[1].pose.position.y), .05)
         n.lane_invalid_since = Stamp(98.0)
         n._tick(None)
         self.assertFalse(n._publish.call_args.args[1])
