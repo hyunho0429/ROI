@@ -187,7 +187,7 @@ class HighwayLaneStrategyNode:
             rospy.get_param("~left_divider_expected_tol_m", 0.90)
         )
         self.inner_center_max_abs_y_m = float(
-            rospy.get_param("~inner_center_max_abs_y_m", 0.90)
+            rospy.get_param("~inner_center_max_abs_y_m", 1.60)
         )
         self.inner_lane_invalid_grace_s = float(
             rospy.get_param("~inner_lane_invalid_grace_s", 1.20)
@@ -233,9 +233,9 @@ class HighwayLaneStrategyNode:
             or self.repeat_change_min_length_m > self.repeat_change_max_length_m
         ):
             raise ValueError("invalid diagonal lane-change ramp or heading limit")
-        self.inner_path_blend_time_s = max(0.05, float(rospy.get_param("~inner_path_blend_time_s", 0.60)))
-        self.inner_path_max_jump_m = float(rospy.get_param("~inner_path_max_jump_m", 0.45))
-        self.inner_path_join_length_m = float(rospy.get_param("~inner_path_join_length_m", 10.0))
+        self.inner_path_blend_time_s = max(0.05, float(rospy.get_param("~inner_path_blend_time_s", 0.40)))
+        self.inner_path_max_jump_m = float(rospy.get_param("~inner_path_max_jump_m", 1.00))
+        self.inner_path_join_length_m = float(rospy.get_param("~inner_path_join_length_m", 6.0))
         self.inner_path_deadband_m = max(
             0.0, float(rospy.get_param("~inner_path_deadband_m", 0.10))
         )
@@ -256,6 +256,12 @@ class HighwayLaneStrategyNode:
         self.change_center_error_m = float(rospy.get_param("~change_center_error_m", 0.45))
         self.change_heading_error_rad = float(rospy.get_param("~change_heading_error_rad", math.radians(10.0)))
         self.change_complete_confirm_s = float(rospy.get_param("~change_complete_confirm_s", 0.45))
+        self.endpoint_handover_max_error_m = float(
+            rospy.get_param("~endpoint_handover_max_error_m", 1.60)
+        )
+        self.endpoint_handover_max_heading_rad = math.radians(float(
+            rospy.get_param("~endpoint_handover_max_heading_deg", 15.0)
+        ))
         # Never let the finite committed lane-change path reach Pure Pursuit's
         # ordinary goal-stop condition.  Once the lateral transition is done and
         # only a few metres of post-hold remain, hand over to the receding-horizon
@@ -1592,7 +1598,7 @@ class HighwayLaneStrategyNode:
             and self.lane_changes_done > 0
         )
         self.fast_change_pub.publish(Bool(data=fast_change))
-        status.update({"state": self.state, "active": bool(active), "stop": bool(stop), "target_speed_mps": round(speed_out,2), "lane_changes_done": self.lane_changes_done})
+        status.update({"state": self.state, "active": bool(active), "stop": bool(stop), "target_speed_mps": round(speed_out,2), "lane_changes_done": self.lane_changes_done, "fast_change_active": fast_change})
         self.state_pub.publish(String(data=json.dumps(status, separators=(",", ":"))))
         if stop:
             rospy.logwarn_throttle(0.5, "HIGHWAY STOP state=%s reason=%s follow=%s", self.state, str(status.get("reason")), json.dumps(status.get("follow", {}), separators=(",", ":")))
@@ -1762,8 +1768,24 @@ class HighwayLaneStrategyNode:
             )
             geometry_complete = settled or endpoint_guard_complete
             aligned, alignment_diag = self._committed_alignment()
+            # Do not let Pure Pursuit reach the finite path's goal-stop zone.
+            # Near the endpoint, a recoverable lateral offset belongs to the
+            # continuous camera-centre controller. Waiting for sub-0.45 m
+            # alignment here can park the car at the end of the RRT path and
+            # also prevents lane_changes_done from enabling the fast profile
+            # for the following change.
+            recoverable_endpoint_alignment = bool(
+                endpoint_guard_complete
+                and float(alignment_diag.get("path_error_m", float("inf")))
+                <= self.endpoint_handover_max_error_m
+                and float(alignment_diag.get("heading_error_rad", float("inf")))
+                <= self.endpoint_handover_max_heading_rad
+                and float(alignment_diag.get("path_progress_m", 0.0))
+                >= self.change_start_m + 0.85*self.committed_change_length_m
+            )
+            handover_aligned = aligned or recoverable_endpoint_alignment
 
-            if geometry_complete and aligned and not stop:
+            if geometry_complete and handover_aligned and not stop:
                 if self.complete_since is None:
                     self.complete_since = now
                 elif (now-self.complete_since).to_sec() >= self.change_complete_confirm_s:
@@ -1804,6 +1826,8 @@ class HighwayLaneStrategyNode:
                 "endpoint_guard_complete":endpoint_guard_complete,
                 "geometry_complete":geometry_complete,
                 "aligned":aligned,
+                "recoverable_endpoint_alignment":recoverable_endpoint_alignment,
+                "handover_aligned":handover_aligned,
                 "alignment":alignment_diag,
                 "follow":follow,
                 "lane_change_speed_floor_mps":round(speed_floor,2),
@@ -1878,8 +1902,13 @@ class HighwayLaneStrategyNode:
                 # Camera hand-over failure alone is not a braking condition.
                 # Continue on the rolling committed path and react only to a
                 # true lead vehicle or a predicted forward collision.
-                hold_speed = min(self.cruise_speed_mps, self.committed_speed_mps)
-                adaptive, emergency, follow = self._adaptive_speed(hold_speed)
+                # committed_speed_mps is only the speed that made the merge
+                # slot safe. Once the maneuver is complete, return toward the
+                # requested cruise speed unless a real lead vehicle requires
+                # following control.
+                adaptive, emergency, follow = self._adaptive_speed(
+                    self.cruise_speed_mps
+                )
             else:
                 adaptive, emergency, follow = 0.0, False, {}
 
@@ -1903,10 +1932,14 @@ class HighwayLaneStrategyNode:
                 stop = False
                 inner_reason = (lane_reason if lane_reason.startswith("lane_handover_")
                                 else "lane_handover_" + lane_reason)
-            elif self.lane_change_locked_by_left_solid and not lane_grace:
-                # In the final lane there is no further merge path that can
-                # safely recover a prolonged camera loss. Stop instead of
-                # extending the last tangent until the vehicle leaves the lane.
+            elif (
+                self.lane_change_locked_by_left_solid
+                and not lane_grace
+                and not lane_fallback
+            ):
+                # Stop only when neither camera geometry nor the last verified
+                # centre path can be continued. A transient solid/dashed
+                # hand-over must not stop the car in the final lane.
                 stop = True
                 inner_reason = "final_lane_geometry_lost"
             elif lane_grace or lane_fallback:

@@ -617,10 +617,21 @@ class HighwaySafetyTest(unittest.TestCase):
         path, stop, speed, _, status, *_ = self.tick()
 
         self.assertFalse(stop)
-        self.assertEqual(speed, min(n.cruise_speed_mps, n.committed_speed_mps))
+        self.assertEqual(speed, n.cruise_speed_mps)
         self.assertTrue(status["lane_fallback"])
         self.assertEqual(status["reason"], "lane_fallback_lane_info_missing_or_stale")
         self.assertGreater(len(path.poses), len(n.committed_path.poses))
+
+    def test_inner_hold_does_not_keep_temporary_merge_speed(self):
+        n = self.node
+        n.cruise_speed_mps = 4.0
+        n.committed_speed_mps = 3.5
+        n._global_signed_d.return_value = 3.5
+
+        _, stop, speed, _, _, *_ = self.tick()
+
+        self.assertFalse(stop)
+        self.assertEqual(speed, 4.0)
 
     def test_inner_hold_lead_gate_uses_commanded_lane_during_camera_handover(self):
         n = self.node

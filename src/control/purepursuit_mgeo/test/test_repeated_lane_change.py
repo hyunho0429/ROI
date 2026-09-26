@@ -150,7 +150,7 @@ class RepeatedLaneChangeTest(unittest.TestCase):
 
         self.assertFalse(n._final_lane_markings_present())
 
-    def test_final_lane_stops_after_lane_geometry_grace_expires(self):
+    def test_final_lane_continues_last_verified_center_after_camera_dropout(self):
         n = self.node
         n.lane_change_locked_by_left_solid = True
         n._lane_valid.return_value = (False, 'lane_invalid')
@@ -158,10 +158,10 @@ class RepeatedLaneChangeTest(unittest.TestCase):
 
         self.tick(100.0)
 
-        self.assertTrue(n._publish.call_args.args[1])
+        self.assertFalse(n._publish.call_args.args[1])
         self.assertEqual(
             n._publish.call_args.args[4]['reason'],
-            'final_lane_geometry_lost',
+            'lane_fallback_lane_invalid',
         )
 
     def test_control_center_or_heading_error_delays_second_change(self):

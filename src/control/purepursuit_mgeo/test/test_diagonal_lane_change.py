@@ -166,11 +166,30 @@ class DiagonalLaneChangeTest(unittest.TestCase):
         self.assertEqual(n.state, n.INNER_HOLD)
         self.assertEqual(n.inner_hold_started_at.seconds, 100.0)
 
+    def test_endpoint_handover_accepts_recoverable_lateral_offset(self):
+        n = node_fixture()
+        n.state = n.LANE_CHANGE
+        n.committed_path = path_at(3.5)
+        n.committed_change_length_m = 32.0
+        n.change_travel_m = 45.0
+        n.complete_since = Stamp(98.0)
+        # Near the finite endpoint and parallel to the target lane, but still
+        # 1.2 m from its centre. INNER_HOLD must take over and recenter instead
+        # of allowing Pure Pursuit's finite-path goal stop.
+        n._odom_pose.return_value = (47.0, 2.3, 0.0, 2.0)
+
+        n._tick(None)
+
+        self.assertEqual(n.state, n.INNER_HOLD)
+        self.assertTrue(
+            n._publish.call_args.args[4]["recoverable_endpoint_alignment"]
+        )
+
     def test_first_camera_correction_is_blended(self):
         n = node_fixture()
         n._centerline_local.return_value = [(0.0, 0.0)] + [(float(x), -0.6) for x in range(5, 26)]
         path, reason = n._filtered_inner_path(Stamp(), .05)
-        self.assertEqual(reason, 'limited')
+        self.assertEqual(reason, 'ok')
         # The first update may correct faster than the former 0.35 s filter,
         # but must still apply less than a quarter of the observed jump.
         self.assertLess(abs(path.poses[1].pose.position.y), .15)
@@ -285,6 +304,19 @@ class DiagonalLaneChangeTest(unittest.TestCase):
         self.assertFalse(valid)
         self.assertEqual(reason, 'inner_center_wrong_lane')
         self.assertAlmostEqual(center_y, -0.8)
+
+    def test_lane_boundary_offset_remains_a_valid_recentering_target(self):
+        n = node_fixture()
+        n._inner_center_sanity = safety.NODE.HighwayLaneStrategyNode._inner_center_sanity.__get__(n)
+        n._centerline_local.return_value = [
+            (float(x), -1.1) for x in range(41)
+        ]
+
+        valid, reason, center_y = n._inner_center_sanity()
+
+        self.assertTrue(valid)
+        self.assertEqual(reason, "ok")
+        self.assertAlmostEqual(center_y, -1.1)
 
     def test_straddling_line_is_not_used_as_lane_center(self):
         n = node_fixture()
