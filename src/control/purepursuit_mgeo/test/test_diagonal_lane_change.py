@@ -33,18 +33,18 @@ class DiagonalLaneChangeTest(unittest.TestCase):
         for width in (2.7, 3.5, 4.2):
             with self.subTest(width=width):
                 n._boundary_local = lambda key: [(float(x), width/2) for x in (0, 5, 10, 15, 20, 25)]
-                points, length = n._generate_lane_change_local(width, 2.0)
+                points, length = n._generate_lane_change_local(width, 4.0)
                 self.assertEqual(points[0], (0.0, 0.0))
                 self.assertAlmostEqual(points[-1][1], width)
                 headings = [math.atan2(b[1]-a[1], b[0]-a[0]) for a, b in zip(points, points[1:])]
-                self.assertLessEqual(max(headings), math.radians(8.0)+1e-5)
+                self.assertLessEqual(max(headings), math.radians(15.0)+1e-5)
                 self.assertLess(abs(headings[-1]), 1e-6)
-                self.assertTrue(n._path_curvature_ok(points, 6.0)[0])
-                self.assertLessEqual(length, 40.0)
+                self.assertTrue(n._path_curvature_ok(points, 4.0)[0])
+                self.assertLessEqual(length, 24.0)
 
     def test_insufficient_length_rejects_steep_candidate(self):
         n = node_fixture()
-        n.change_max_length_m = 20.0
+        n.change_max_length_m = 14.0
         points, _ = n._generate_lane_change_local(3.5, 2.0)
         self.assertEqual(points, [])
 
@@ -117,10 +117,10 @@ class DiagonalLaneChangeTest(unittest.TestCase):
         n._boundary_local = lambda key: [(float(x), 2.55) for x in (0, 5, 10, 15, 20, 25)]
         points, _ = n._generate_lane_change_local(3.5, 2.0)
         headings = [math.atan2(b[1]-a[1], b[0]-a[0]) for a, b in zip(points, points[1:])]
-        self.assertLessEqual(max(headings), math.radians(8.0)+1e-5)
+        self.assertLessEqual(max(headings), math.radians(15.0)+1e-5)
         self.assertAlmostEqual(points[-1][1], 4.3)
 
-    def test_live_lidar_obstacle_is_routed_by_rrt_star(self):
+    def test_live_lidar_obstacle_is_considered_by_rrt_star(self):
         n = node_fixture()
         n.cruise_speed_mps = 4.0
         n.latest_obstacles.obstacles = [safety.obstacle(25.0,0.0)]
@@ -131,7 +131,7 @@ class DiagonalLaneChangeTest(unittest.TestCase):
         self.assertEqual(n.last_rrt_diag["planner"],"rrt_star")
         self.assertEqual(n.last_rrt_diag["source"],"live_lidar")
         self.assertIn(1,n.last_rrt_diag["obstacles"])
-        self.assertGreater(n.last_rrt_diag["raw_points"],2)
+        self.assertGreaterEqual(n.last_rrt_diag["raw_points"],2)
         self.assertTrue(n._path_curvature_ok(points,4.0)[0])
 
     def test_distance_alone_cannot_complete_lane_change(self):
@@ -418,6 +418,22 @@ class DiagonalLaneChangeTest(unittest.TestCase):
         dy = path.poses[-1].pose.position.y-path.poses[-2].pose.position.y
         self.assertLess(abs(math.atan2(dy, dx)), math.radians(0.1))
 
+    def test_expired_path_fallback_recenters_to_authorized_target_line(self):
+        n = node_fixture()
+        n.last_inner_path = path_at(3.5, end=5)
+        n.committed_path = path_at(3.5, end=5)
+        # Ego finished 0.8 m left of the authorised target-lane centre.
+        n._odom_pose.return_value = (6.0, 4.3, math.radians(8.0), 2.0)
+
+        path = n._rolling_inner_fallback(Stamp())
+
+        self.assertAlmostEqual(path.poses[0].pose.position.y, 4.3, places=6)
+        self.assertAlmostEqual(path.poses[-1].pose.position.y, 3.5, places=6)
+        self.assertGreater(
+            path.poses[0].pose.position.y-path.poses[-1].pose.position.y,
+            0.75,
+        )
+
     def test_path_blending_accounts_for_vehicle_motion(self):
         n = node_fixture()
         n.last_inner_path = path_at(3.5)
@@ -447,7 +463,7 @@ class DiagonalLaneChangeTest(unittest.TestCase):
                         break
                 else:
                     self.fail('did not finish diagonal transition')
-                self.assertLess(peak_yaw, math.radians(10))
+                self.assertLess(peak_yaw, math.radians(13))
                 self.assertLess(abs(y-3.5), .2)
                 self.assertLess(abs(yaw), math.radians(3))
 

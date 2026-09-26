@@ -109,9 +109,9 @@
     <arg name="yolo_confidence" value="$(arg yolo_confidence)" />
     <arg name="yolo_inference_size" value="$(arg yolo_inference_size)" />
     <arg name="enable_highway_gate" value="$(arg enable_camera_object_detection)" />
-    <!-- Keep LiDAR gap perception alive after highway activation. The strategy
-         itself still requires fresh dashed/solid semantics for every merge. -->
-    <arg name="merge_highway_gate_required" value="false" />
+    <!-- Do not show or publish a merge-space decision before the camera has
+         confirmed the highway environment. -->
+    <arg name="merge_highway_gate_required" value="true" />
     <arg name="highway_environment_topic" value="$(arg highway_environment_topic)" />
     <arg name="require_dashed_lane" value="$(arg highway_require_dashed_lane)" />
     <arg name="highway_latch_once" value="$(arg highway_latch_once)" />
@@ -275,9 +275,9 @@
     <param name="force_highway_active" value="false" />
     <!-- Use measured lane boundaries for the RRT corridor and post-change hold. -->
     <param name="rrt_lidar_only_mode" value="false" />
-    <!-- Keep measured lanes primary, but allow a nominal straight-lane bridge
-         after the highway gate has activated if geometry briefly drops out. -->
-    <param name="allow_nominal_lane_fallback" value="true" />
+    <!-- A lane change may start only from fresh measured lane geometry. The
+         committed target line handles short dropouts after a change starts. -->
+    <param name="allow_nominal_lane_fallback" value="false" />
 
     <param name="cruise_speed_mps" value="$(arg target_speed_mps)" />
     <!-- Keep merge speed within 12.5% of cruise; wait for a faster gap otherwise. -->
@@ -285,7 +285,7 @@
     <param name="lane_change_min_speed_mps" value="2.5" />
     <param name="min_lane_hold_before_next_change_m" value="8.0" />
     <param name="min_lane_hold_before_next_change_s" value="5.0" />
-    <param name="highway_confirm_s" value="0.0" />
+    <param name="highway_confirm_s" value="0.5" />
     <param name="ready_confirm_s" value="0.5" />
 
     <param name="min_lane_confidence" value="0.45" />
@@ -310,12 +310,12 @@
     <param name="final_lane_confirm_s" value="0.25" />
 
     <param name="change_start_m" value="3.0" />
-    <param name="change_min_length_m" value="32.0" />
-    <param name="change_max_length_m" value="40.0" />
+    <param name="change_min_length_m" value="18.0" />
+    <param name="change_max_length_m" value="24.0" />
     <param name="change_ramp_ratio" value="0.20" />
-    <param name="change_max_heading_deg" value="8.0" />
-    <!-- The first merge stays shallow. Later merges use a shorter, steeper
-         diagonal so the car does not spend too long straddling a divider. -->
+    <param name="change_max_heading_deg" value="15.0" />
+    <!-- Both the first and later merges use a decisive diagonal so the car
+         does not spend too long straddling a divider. -->
     <param name="repeat_change_min_length_m" value="12.0" />
     <param name="repeat_change_max_length_m" value="18.0" />
     <param name="repeat_change_time_s" value="3.0" />
@@ -328,7 +328,7 @@
     <param name="inner_path_right_recenter_gain" value="2.5" />
     <param name="inner_boundary_bracket_margin_m" value="0.10" />
     <param name="inner_path_deadband_m" value="0.10" />
-    <param name="change_time_s" value="7.0" />
+    <param name="change_time_s" value="4.0" />
     <param name="change_post_hold_m" value="10.0" />
     <!-- Live vehicle-frame RRT*: consumes current lane/odom/LiDAR in memory. -->
     <param name="rrt_step_size_m" value="2.0" />
@@ -339,7 +339,7 @@
     <param name="rrt_max_heading_deg" value="20.0" />
     <param name="rrt_corridor_margin_m" value="0.35" />
     <param name="rrt_smooth_iterations" value="1" />
-    <param name="change_settle_m" value="6.0" />
+    <param name="change_settle_m" value="3.0" />
     <param name="repeat_change_settle_m" value="3.0" />
     <param name="change_endpoint_guard_m" value="6.0" />
     <param name="endpoint_handover_max_error_m" value="1.60" />

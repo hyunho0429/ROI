@@ -216,10 +216,10 @@ class HighwayLaneStrategyNode:
         self.vehicle_center_from_base_m = float(rospy.get_param("~vehicle_center_from_base_m", 1.50))
 
         self.change_start_m = float(rospy.get_param("~change_start_m", 3.0))
-        self.change_min_length_m = float(rospy.get_param("~change_min_length_m", 32.0))
-        self.change_max_length_m = float(rospy.get_param("~change_max_length_m", 40.0))
+        self.change_min_length_m = float(rospy.get_param("~change_min_length_m", 18.0))
+        self.change_max_length_m = float(rospy.get_param("~change_max_length_m", 24.0))
         self.change_ramp_ratio = float(rospy.get_param("~change_ramp_ratio", 0.2))
-        self.change_max_heading_rad = math.radians(float(rospy.get_param("~change_max_heading_deg", 8.0)))
+        self.change_max_heading_rad = math.radians(float(rospy.get_param("~change_max_heading_deg", 15.0)))
         self.repeat_change_min_length_m = float(
             rospy.get_param("~repeat_change_min_length_m", 12.0)
         )
@@ -251,7 +251,7 @@ class HighwayLaneStrategyNode:
         self.inner_path_deadband_m = max(
             0.0, float(rospy.get_param("~inner_path_deadband_m", 0.10))
         )
-        self.change_time_s = float(rospy.get_param("~change_time_s", 5.5))
+        self.change_time_s = float(rospy.get_param("~change_time_s", 4.0))
         self.change_post_hold_m = float(rospy.get_param("~change_post_hold_m", 10.0))
         self.rrt_step_size_m = float(rospy.get_param("~rrt_step_size_m", 2.0))
         self.rrt_max_iterations = int(rospy.get_param("~rrt_max_iterations", 50))
@@ -1194,23 +1194,36 @@ class HighwayLaneStrategyNode:
             # classification a lane-aligned reference while camera hand-over
             # settles.
             heading_error = 0.0
+            line_intercept = 0.0
             if reference is not None and len(reference.poses) >= 2:
                 a = reference.poses[-2].pose.position
                 b = reference.poses[-1].pose.position
                 dx = float(b.x)-float(a.x)
                 dy = float(b.y)-float(a.y)
                 if math.hypot(dx, dy) > 1e-6:
-                    _, _, ego_yaw, _ = self._odom_pose()
+                    ex, ey, ego_yaw, _ = self._odom_pose()
                     target_yaw = math.atan2(dy, dx)
                     heading_error = math.atan2(
                         math.sin(target_yaw-ego_yaw),
                         math.cos(target_yaw-ego_yaw),
                     )
+                    cosine, sine = math.cos(ego_yaw), math.sin(ego_yaw)
+                    adx, ady = float(a.x)-ex, float(a.y)-ey
+                    a_local_x = cosine*adx + sine*ady
+                    a_local_y = -sine*adx + cosine*ady
+                    slope = math.tan(heading_error)
+                    line_intercept = a_local_y-slope*a_local_x
             length = max(20.0, self.inner_fallback_path_length_m)
-            previous = [
-                (d*math.cos(heading_error), d*math.sin(heading_error))
-                for d in [0.5*float(i) for i in range(int(2.0*length)+1)]
-            ]
+            slope = math.tan(heading_error)
+            join_length = clamp(self.inner_path_join_length_m, 2.5, 6.0)
+            previous = []
+            for index in range(int(2.0*length)+1):
+                x = 0.5*float(index)
+                target_y = slope*x+smoothstep5(x/join_length)*line_intercept
+                # Begin at the current pose, then join the authorised RRT
+                # target-lane centre. This corrects both lateral offset and yaw
+                # instead of preserving a boundary-hugging parallel line.
+                previous.append((x, target_y))
         previous = self._extend_local_polyline(
             previous, max(20.0, self.inner_fallback_path_length_m)
         )
@@ -1693,7 +1706,7 @@ class HighwayLaneStrategyNode:
         self.speed_pub.publish(Float64(data=float(speed_out)))
         self.active_pub.publish(Bool(data=bool(active)))
         fast_change = bool(active and (
-            (self.state == self.LANE_CHANGE and self.lane_changes_done > 0)
+            self.state == self.LANE_CHANGE
             or bool(status.get("fast_recenter", False))
         ))
         self.fast_change_pub.publish(Bool(data=fast_change))
