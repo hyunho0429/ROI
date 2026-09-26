@@ -300,9 +300,10 @@
          boundary; an adjacent-lane centre is still rejected at about 3.5 m. -->
     <param name="inner_center_max_abs_y_m" value="1.60" />
     <param name="inner_lane_invalid_grace_s" value="1.20" />
-    <param name="inner_handover_confirm_s" value="0.60" />
-    <!-- Reject a camera center that jumps back toward the lane just left. -->
-    <param name="inner_center_switch_max_delta_m" value="0.45" />
+    <param name="inner_handover_confirm_s" value="0.20" />
+    <!-- Allow a sizeable post-RRT recenter correction; the fresh two-boundary
+         bracket and absolute ego-lane checks reject an adjacent-lane jump. -->
+    <param name="inner_center_switch_max_delta_m" value="1.60" />
     <param name="inner_fallback_path_length_m" value="60.0" />
     <!-- End repeated LEFT changes at the final lane, but keep following the
          midpoint between its nearest left solid and nearest right dashed line. -->
@@ -321,10 +322,10 @@
     <param name="repeat_change_max_heading_deg" value="20.0" />
     <!-- Follow the midpoint of the newly detected left/right boundaries soon
          after hand-over while retaining a smooth steering transition. -->
-    <param name="inner_path_blend_time_s" value="0.40" />
-    <param name="inner_path_max_jump_m" value="1.00" />
-    <param name="inner_path_join_length_m" value="6.0" />
-    <param name="inner_path_right_recenter_gain" value="1.8" />
+    <param name="inner_path_blend_time_s" value="0.20" />
+    <param name="inner_path_max_jump_m" value="1.20" />
+    <param name="inner_path_join_length_m" value="4.0" />
+    <param name="inner_path_right_recenter_gain" value="2.5" />
     <param name="inner_boundary_bracket_margin_m" value="0.10" />
     <param name="inner_path_deadband_m" value="0.10" />
     <param name="change_time_s" value="7.0" />

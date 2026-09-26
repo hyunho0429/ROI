@@ -190,9 +190,11 @@ class DiagonalLaneChangeTest(unittest.TestCase):
         n._centerline_local.return_value = [(0.0, 0.0)] + [(float(x), -0.6) for x in range(5, 26)]
         path, reason = n._filtered_inner_path(Stamp(), .05)
         self.assertEqual(reason, 'ok')
-        # The first update may correct faster than the former 0.35 s filter,
-        # but must still apply less than a quarter of the observed jump.
-        self.assertLess(abs(path.poses[1].pose.position.y), .15)
+        # Apply a decisive first correction so the vehicle does not remain on
+        # the left boundary, while retaining part of the previous path for a
+        # rate-limited steering hand-over.
+        self.assertGreater(abs(path.poses[1].pose.position.y), .25)
+        self.assertLess(abs(path.poses[1].pose.position.y), .45)
 
     def test_inner_path_converges_at_controller_lookahead(self):
         n = node_fixture()
@@ -281,7 +283,7 @@ class DiagonalLaneChangeTest(unittest.TestCase):
             (False, 'inner_right_boundary_missing', None),
         )
 
-    def test_post_change_center_cannot_jump_back_toward_previous_lane(self):
+    def test_post_change_offset_center_is_accepted_for_recentering(self):
         n = node_fixture()
         n._boundary_local = safety.NODE.HighwayLaneStrategyNode._boundary_local.__get__(n)
         n._centerline_local = safety.NODE.HighwayLaneStrategyNode._centerline_local.__get__(n)
@@ -294,15 +296,16 @@ class DiagonalLaneChangeTest(unittest.TestCase):
             'lane_width_m': 3.5,
             'left_lane': {'detected': True},
             'right_lane': {'detected': True},
-            # A plausible-width pair centered 0.8 m to the right is still the
-            # wrong hand-over target relative to the committed RRT lane.
+            # The RRT can finish left of the newly measured center.  A fresh
+            # physical boundary pair that brackets ego is therefore a valid
+            # rightward recentering target even with a 0.8 m correction.
             'left_boundary_points': [[float(x), 0.95] for x in range(5, 26)],
             'right_boundary_points': [[float(x), -2.55] for x in range(5, 26)],
             'centerline_points': [[float(x), -0.8] for x in range(5, 26)],
         }
         valid, reason, center_y = n._inner_center_sanity(require_two_boundaries=True)
-        self.assertFalse(valid)
-        self.assertEqual(reason, 'inner_center_wrong_lane')
+        self.assertTrue(valid)
+        self.assertEqual(reason, 'ok')
         self.assertAlmostEqual(center_y, -0.8)
 
     def test_lane_boundary_offset_remains_a_valid_recentering_target(self):
@@ -375,7 +378,8 @@ class DiagonalLaneChangeTest(unittest.TestCase):
         path, stop, _, _, status, *_ = n._publish.call_args.args
         self.assertFalse(stop)
         self.assertEqual(status['reason'], 'ok')
-        self.assertLess(abs(path.poses[1].pose.position.y), .20)
+        self.assertGreater(abs(path.poses[1].pose.position.y), .30)
+        self.assertLess(abs(path.poses[1].pose.position.y), .60)
         n.lane_invalid_since = Stamp(98.0)
         n._tick(None)
         self.assertFalse(n._publish.call_args.args[1])
@@ -397,6 +401,22 @@ class DiagonalLaneChangeTest(unittest.TestCase):
         n._centerline_local.return_value = [(float(x), 0.0) for x in range(41)]
         path, _ = n._filtered_inner_path(Stamp(), .05)
         self.assertGreater(len(path.poses), 20)
+
+    def test_expired_diagonal_path_fallback_uses_authorized_lane_heading(self):
+        n = node_fixture()
+        n.last_inner_path = path_at(3.5, end=5)
+        n.committed_path = path_at(3.5, end=5)
+        n._odom_pose.return_value = (6.0, 3.5, math.radians(12.0), 2.0)
+
+        path = n._rolling_inner_fallback(Stamp())
+
+        self.assertGreater(len(path.poses), 20)
+        # The fallback stays on the completed lane in map coordinates instead
+        # of extending the vehicle's remaining 12 degree diagonal yaw.
+        self.assertTrue(all(abs(p.pose.position.y-3.5) < 1e-6 for p in path.poses))
+        dx = path.poses[-1].pose.position.x-path.poses[-2].pose.position.x
+        dy = path.poses[-1].pose.position.y-path.poses[-2].pose.position.y
+        self.assertLess(abs(math.atan2(dy, dx)), math.radians(0.1))
 
     def test_path_blending_accounts_for_vehicle_motion(self):
         n = node_fixture()

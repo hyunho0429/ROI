@@ -199,10 +199,10 @@ class HighwayLaneStrategyNode:
             rospy.get_param("~inner_lane_invalid_grace_s", 1.20)
         )
         self.inner_handover_confirm_s = float(
-            rospy.get_param("~inner_handover_confirm_s", 0.60)
+            rospy.get_param("~inner_handover_confirm_s", 0.20)
         )
         self.inner_center_switch_max_delta_m = float(
-            rospy.get_param("~inner_center_switch_max_delta_m", 0.45)
+            rospy.get_param("~inner_center_switch_max_delta_m", 1.60)
         )
         self.inner_fallback_path_length_m = float(
             rospy.get_param("~inner_fallback_path_length_m", 60.0)
@@ -239,11 +239,11 @@ class HighwayLaneStrategyNode:
             or self.repeat_change_min_length_m > self.repeat_change_max_length_m
         ):
             raise ValueError("invalid diagonal lane-change ramp or heading limit")
-        self.inner_path_blend_time_s = max(0.05, float(rospy.get_param("~inner_path_blend_time_s", 0.40)))
-        self.inner_path_max_jump_m = float(rospy.get_param("~inner_path_max_jump_m", 1.00))
-        self.inner_path_join_length_m = float(rospy.get_param("~inner_path_join_length_m", 6.0))
+        self.inner_path_blend_time_s = max(0.05, float(rospy.get_param("~inner_path_blend_time_s", 0.20)))
+        self.inner_path_max_jump_m = float(rospy.get_param("~inner_path_max_jump_m", 1.20))
+        self.inner_path_join_length_m = float(rospy.get_param("~inner_path_join_length_m", 4.0))
         self.inner_path_right_recenter_gain = max(
-            1.0, float(rospy.get_param("~inner_path_right_recenter_gain", 1.8))
+            1.0, float(rospy.get_param("~inner_path_right_recenter_gain", 2.5))
         )
         self.inner_boundary_bracket_margin_m = max(
             0.0, float(rospy.get_param("~inner_boundary_bracket_margin_m", 0.10))
@@ -1182,9 +1182,35 @@ class HighwayLaneStrategyNode:
         and extending its final tangent prevents Pure Pursuit from reaching a
         finite endpoint while lane perception settles after crossing a line.
         """
-        previous = self._path_map_to_local(self.last_inner_path or self.committed_path)
-        if len(previous) < 2:
-            previous = [(0.0, 0.0), (1.0, 0.0)]
+        reference = self.last_inner_path or self.committed_path
+        previous = self._path_map_to_local(reference)
+        remaining_length = polyline_arclength(previous)[-1] if len(previous) >= 2 else 0.0
+        if len(previous) < 3 or remaining_length < 3.0:
+            # The old fallback used local +x here.  Local +x is the *current
+            # vehicle yaw*, so a car that finished the merge at a small left
+            # yaw kept drifting diagonally into the next lane without a new
+            # gap decision.  Continue instead along the final map heading of
+            # the already authorised path.  This also gives lead-vehicle
+            # classification a lane-aligned reference while camera hand-over
+            # settles.
+            heading_error = 0.0
+            if reference is not None and len(reference.poses) >= 2:
+                a = reference.poses[-2].pose.position
+                b = reference.poses[-1].pose.position
+                dx = float(b.x)-float(a.x)
+                dy = float(b.y)-float(a.y)
+                if math.hypot(dx, dy) > 1e-6:
+                    _, _, ego_yaw, _ = self._odom_pose()
+                    target_yaw = math.atan2(dy, dx)
+                    heading_error = math.atan2(
+                        math.sin(target_yaw-ego_yaw),
+                        math.cos(target_yaw-ego_yaw),
+                    )
+            length = max(20.0, self.inner_fallback_path_length_m)
+            previous = [
+                (d*math.cos(heading_error), d*math.sin(heading_error))
+                for d in [0.5*float(i) for i in range(int(2.0*length)+1)]
+            ]
         previous = self._extend_local_polyline(
             previous, max(20.0, self.inner_fallback_path_length_m)
         )

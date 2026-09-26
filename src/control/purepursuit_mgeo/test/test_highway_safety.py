@@ -535,18 +535,12 @@ class HighwaySafetyTest(unittest.TestCase):
 
         n.lane_info["left_lane"]["track_id"] = 20
         n.lane_info["right_lane"]["track_id"] = 21
-        with patch.object(NODE.rospy.Time,"now",return_value=Stamp(100.2)):
+        with patch.object(NODE.rospy.Time,"now",return_value=Stamp(100.1)):
             n._tick(None)
         self.assertTrue(n.inner_handover_pending)
         self.assertEqual(n.inner_lane_candidate_since.seconds,100.0)
 
-        with patch.object(NODE.rospy.Time,"now",return_value=Stamp(100.31)):
-            n._tick(None)
-        self.assertTrue(n.inner_handover_pending)
-
-        fresh = Stamp(100.70)
-        n.base_path_at = n.base_stop_at = n.odom_at = n.obstacles_at = fresh
-        with patch.object(NODE.rospy.Time,"now",return_value=Stamp(100.70)):
+        with patch.object(NODE.rospy.Time,"now",return_value=Stamp(100.21)):
             n._tick(None)
         self.assertFalse(n.inner_handover_pending)
 
@@ -654,6 +648,23 @@ class HighwaySafetyTest(unittest.TestCase):
         lead, _, _ = n._current_lane_lead()
 
         self.assertIsNone(lead)
+
+    def test_diagonal_handover_fallback_does_not_treat_next_lane_as_lead(self):
+        n = self.node
+        n.state = n.INNER_HOLD
+        n._odom_pose.return_value = (6.0,3.5,math.radians(12.0),2.0)
+        n.last_inner_path = path_at(3.5,end=5)
+        n.committed_path = path_at(3.5,end=5)
+        fallback = n._rolling_inner_fallback(Stamp())
+        n.last_inner_path = fallback
+        # With the old current-yaw extension this left-lane car lay directly
+        # on the diagonal fallback and caused a false slowdown/stop.
+        n.latest_obstacles.obstacles = [obstacle(22.0,7.0)]
+
+        lead, _, _ = n._current_lane_lead()
+
+        self.assertIsNone(lead)
+        self.assertTrue(n._dynamic_path_safe(fallback,2.0)[0])
 
     def test_committed_path_lead_gap_is_independent_of_vehicle_yaw(self):
         n = self.node
