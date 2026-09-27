@@ -94,7 +94,7 @@ CPU_THREADS = int(os.environ.get("MORAI_YOLO_CPU_THREADS", "0"))
 # person, unified car, stop sign.  The competition dataset labels every
 # relevant vehicle (including bus/train) as ``car``, so raw COCO bus/truck
 # classes must not independently activate the situation gates.
-BASE_TARGET_CLASSES = [0, 2, 11]
+BASE_TARGET_CLASSES = [0, 2, 5, 7, 11]
 TRAFFIC_KEYWORDS = (
     "red", "green", "yellow", "left", "right", "arrow", "amber", "traffic"
 )
