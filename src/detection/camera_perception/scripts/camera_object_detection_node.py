@@ -2,6 +2,46 @@ import ctypes
 import argparse
 import os
 import threading
+import torch
+import torch.nn as nn
+import ultralytics.nn.tasks as tasks
+
+class ChannelAttention(nn.Module):
+    def __init__(self, channels, reduction=16):
+        super().__init__()
+        self.fc = nn.Sequential(
+            nn.Linear(channels, max(1, channels // reduction), bias=False),
+            nn.ReLU(inplace=True),
+            nn.Linear(max(1, channels // reduction), channels, bias=False)
+        )
+        self.sigmoid = nn.Sigmoid()
+    def forward(self, x):
+        b, c, _, _ = x.size()
+        avg_out = self.fc(x.mean((2, 3)).view(b, c)).view(b, c, 1, 1)
+        max_out = self.fc(x.amax((2, 3)).view(b, c)).view(b, c, 1, 1)
+        return x * self.sigmoid(avg_out + max_out)
+
+class SpatialAttention(nn.Module):
+    def __init__(self, kernel_size=7):
+        super().__init__()
+        self.conv = nn.Conv2d(2, 1, kernel_size, padding=kernel_size // 2, bias=False)
+        self.sigmoid = nn.Sigmoid()
+    def forward(self, x):
+        avg_out = torch.mean(x, dim=1, keepdim=True)
+        max_out, _ = torch.max(x, dim=1, keepdim=True)
+        mask = self.sigmoid(self.conv(torch.cat([avg_out, max_out], dim=1)))
+        return x * mask
+
+class CBAM(nn.Module):
+    def __init__(self, c1, kernel_size=7):
+        super().__init__()
+        self.ca = ChannelAttention(c1)
+        self.sa = SpatialAttention(kernel_size)
+    def forward(self, x):
+        return self.sa(self.ca(x))
+
+# YOLO 내부 파서에 CBAM 강제 등록
+tasks.CBAM = CBAM
 
 # X11 멀티스레드 충돌 방지 설정
 try:
@@ -51,27 +91,44 @@ INFERENCE_SIZE = int(os.environ.get("MORAI_YOLO_INFERENCE_SIZE", "416"))
 DISPLAY_FPS = float(os.environ.get("MORAI_YOLO_DISPLAY_FPS", "0.0"))
 CPU_THREADS = int(os.environ.get("MORAI_YOLO_CPU_THREADS", "0"))
 
-# feature-camera 브랜치의 탐지 대상과 신호등 분류 규칙.
-BASE_TARGET_CLASSES = [0, 1, 2, 3, 5, 7, 11]
-TRAFFIC_KEYWORDS = ("red", "green", "yellow", "left", "amber", "traffic")
+# person, unified car, stop sign.  The competition dataset labels every
+# relevant vehicle (including bus/train) as ``car``, so raw COCO bus/truck
+# classes must not independently activate the situation gates.
+BASE_TARGET_CLASSES = [0, 2, 11]
+TRAFFIC_KEYWORDS = (
+    "red", "green", "yellow", "left", "right", "arrow", "amber", "traffic"
+)
 
 
 def _parse_traffic_signal(label):
     normalized = label.lower()
-    if "red" in normalized and "left" in normalized:
-        return "Red_Left", "RED + LEFT", (0, 165, 255)
+    # GREEN has the highest priority, including ambiguous mixed-label names.
     if "green" in normalized and "left" in normalized:
         return "Green_Left", "GREEN + LEFT", (0, 255, 128)
+    if "green" in normalized and "right" in normalized:
+        return "Green_Right", "GREEN + RIGHT", (0, 255, 128)
+    if "green" in normalized and "arrow" in normalized:
+        return "Green_Arrow", "GREEN + ARROW", (0, 255, 128)
+    if "green" in normalized:
+        return "Green", "GREEN", (0, 255, 0)
+    if "red" in normalized and "left" in normalized:
+        return "Red_Left", "RED + LEFT", (0, 165, 255)
+    if "red" in normalized and "right" in normalized:
+        return "Red_Right", "RED + RIGHT", (0, 165, 255)
+    if "red" in normalized and "arrow" in normalized:
+        return "Red_Arrow", "RED + ARROW", (0, 165, 255)
     if "red" in normalized and "yellow" in normalized:
         return "Red_Yellow", "RED + YELLOW", (0, 128, 255)
     if "left" in normalized:
         return "Left", "LEFT", (255, 255, 0)
+    if "right" in normalized:
+        return "Right", "RIGHT", (255, 255, 0)
+    if "arrow" in normalized:
+        return "Arrow", "ARROW", (255, 255, 0)
     if "red" in normalized:
         return "Red", "RED", (0, 0, 255)
     if "yellow" in normalized or "amber" in normalized:
         return "Yellow", "YELLOW", (0, 255, 255)
-    if "green" in normalized:
-        return "Green", "GREEN", (0, 255, 0)
     return None, None, None
 
 def _resolve_model_path(model_path):
@@ -90,7 +147,7 @@ def main(ip=IP, port=PORT, base_model_path=BASE_MODEL_PATH,
          traffic_light_topic="/detection/traffic_light",
          obstacle_topic="/detection/obstacle",
          inference_size=INFERENCE_SIZE, display_fps=DISPLAY_FPS,
-         cpu_threads=CPU_THREADS):
+         cpu_threads=CPU_THREADS, show_raw_preview=False):
     """Cam 4 UDP receive, asynchronous YOLO inference, and live display.
 
     Camera receive/display must not wait for model inference.  The inference
@@ -102,6 +159,9 @@ def main(ip=IP, port=PORT, base_model_path=BASE_MODEL_PATH,
     from std_msgs.msg import Bool, Header
     from common.msg import ObjectInfo, ObjectInfoArray
     from ultralytics import YOLO
+    from collections import Counter
+    
+    show_raw_preview = bool(show_raw_preview)
 
     # PyTorch otherwise tends to occupy every vCPU in a small VirtualBox VM,
     # starving the UDP/decode/GUI thread as soon as the first inference starts.
@@ -204,7 +264,8 @@ def main(ip=IP, port=PORT, base_model_path=BASE_MODEL_PATH,
         "fps": 0.0,
     }
     stop_worker = threading.Event()
-
+    
+    
     def collect_detections(result, model, color, image_height, is_custom=False):
         detections = []
         boxes = result.boxes if result.boxes is not None else ()
@@ -217,7 +278,6 @@ def main(ip=IP, port=PORT, base_model_path=BASE_MODEL_PATH,
                 continue
             x1, y1, x2, y2 = coords
 
-            # Preserve the original soft ROI for custom traffic-light labels.
             y_center = (y1 + y2) * 0.5
             if is_custom and any(
                 name in label for name in ("Red", "Green", "Yellow")
@@ -227,6 +287,9 @@ def main(ip=IP, port=PORT, base_model_path=BASE_MODEL_PATH,
             detections.append((x1, y1, x2, y2, label, score, color))
         return detections
 
+    def inference_worker():
+        last_inferred_sequence = 0
+    
     def collect_custom_detections(result, model, image_height):
         """Apply the feature-camera traffic-light and obstacle filters."""
         detections = []
@@ -294,11 +357,32 @@ def main(ip=IP, port=PORT, base_model_path=BASE_MODEL_PATH,
             started_at = time.monotonic()
 
             try:
-                base_results = base_model.predict(
+                # ==========================================
+                # 1. 추론 전 ROI 크롭 (상단: 신호등, 하단: 장애물)
+                # ==========================================
+                h, w = image.shape[:2]
+
+                # (1) 신호등용 상단 크롭 (y: 0 ~ h*0.5)
+                img_tf = image[0:int(h * 0.5), :]
+                # 필요에 따라 .track() 또는 .predict() 사용
+                # results_tf = base_model.track(img_tf, persist=True, tracker="bytetrack.yaml")
+
+                # (2) 장애물용 하단 크롭 (y: h*0.3 ~ h)
+                cut_y = int(h * 0.3)
+                img_obs = image[cut_y:h, :]
+                # results_obs = custom_model.track(img_obs, persist=True, tracker="bytetrack.yaml")
+            
+                # ⚠️ [참고] 하단 크롭 결과 BBox 좌표를 원본으로 복원할 때는 
+                # 반드시 y 좌표(y1, y2, yc 등)에 `cut_y`를 더해주는 산수를 거쳐야 합니다!
+                # 예시: 원본_y = 크롭된_y + cut_y
+                # ==========================================            
+                base_results = base_model.track(
                     source=image,
                     classes=BASE_TARGET_CLASSES,
                     imgsz=inference_size,
                     conf=confidence,
+                    persist=True,
+                    tracker="bytetrack.yaml",
                     verbose=False,
                 )
                 base_boxes = (
@@ -316,13 +400,7 @@ def main(ip=IP, port=PORT, base_model_path=BASE_MODEL_PATH,
                 base_objects = []
                 for box in base_boxes:
                     label = str(base_model.names[int(box.cls[0])]).lower()
-                    class_name = (
-                        "Car"
-                        if label in {
-                            "car", "bus", "truck", "motorcycle", "bicycle"
-                        }
-                        else label.capitalize()
-                    )
+                    class_name = "Car" if label == "car" else label.capitalize()
                     base_objects.append(object_message(box, base_model, class_name))
 
                 # Publish and display the COCO road-vehicle/person result immediately.
@@ -360,8 +438,8 @@ def main(ip=IP, port=PORT, base_model_path=BASE_MODEL_PATH,
                         fps=smoothed_fps,
                     )
 
-                # Preserve the existing topic name for compatibility. Its
-                # highway-gate meaning now covers car, bus, and truck.
+                # One shared unified-car state feeds both the highway and
+                # intersection situation gates.
                 car_detected = highway_vehicle_detected(detected_labels)
                 person_detected = "person" in detected_labels
                 with detection_state_lock:
@@ -373,7 +451,7 @@ def main(ip=IP, port=PORT, base_model_path=BASE_MODEL_PATH,
                 if car_detected:
                     rospy.loginfo_throttle(
                         1.0,
-                        "YOLO highway vehicle detected (%s); camera condition is true",
+                        "YOLO unified Car detected (%s); camera condition is true",
                         ",".join(
                             sorted(detected_labels.intersection(HIGHWAY_VEHICLE_CLASSES))
                         ),
@@ -384,35 +462,133 @@ def main(ip=IP, port=PORT, base_model_path=BASE_MODEL_PATH,
                         "YOLO person detected; pedestrian fusion camera condition is true",
                     )
 
+	   	
+                
+                # ==========================================
+                # 신호등 전용 딥 크롭(Deep Crop) 및 시계열 필터 로직
+                # ==========================================
+                global track_history
+                if 'track_history' not in globals():
+                    track_history = {}
+
+                # 💡 [핵심 수정] GUI(화면 출력)를 위한 빈 리스트를 미리 선언합니다!
+                custom_detections = [] 
+
                 if custom_model is not None:
-                    custom_results = custom_model.predict(
-                        source=image,
+                    h, w = image.shape[:2]
+                    
+                    # 🔥 1. 화면 과감하게 자르기 (ROI)
+                    # 좌우 20%씩 날리고, 하단 50% 날림
+                    c_x1 = int(w * 0.2)
+                    c_x2 = int(w * 0.6)
+                    c_y1 = int(w * 0.05)
+                    c_y2 = int(h * 0.5)
+                    
+                    cropped_image = image[c_y1:c_y2, c_x1:c_x2]
+                    
+                    # 잘라낸 이미지로만 YOLO 트래킹 추론
+                    custom_results = custom_model.track(
+                        source=cropped_image,
                         imgsz=inference_size,
-                        conf=confidence,
+                        conf=confidence, 
+                        persist=True,
+                        tracker="bytetrack.yaml",
                         verbose=False,
                     )
-                    (
-                        custom_detections,
-                        traffic_objects,
-                        custom_obstacle_objects,
-                    ) = collect_custom_detections(
-                        custom_results[0], custom_model, image.shape[0]
-                    )
+                    
+                    tracked_traffic_objects = []
+                    
+                    for result in custom_results:
+                        boxes = result.boxes
+                        if boxes.id is not None:
+                            xyxys = boxes.xyxy.cpu().numpy()
+                            confs = boxes.conf.cpu().numpy()
+                            classes = boxes.cls.int().cpu().tolist()
+                            track_ids = boxes.id.int().cpu().tolist()
+            
+                            for xyxy, conf, cls, track_id in zip(xyxys, confs, classes, track_ids):
+                                class_name_temp = custom_model.names[cls]
+                                is_traffic_light = any(kw in class_name_temp.lower() for kw in ['red', 'yellow', 'green', 'left'])
+                                
+                                # 🔥 신호등이 아니면 무시
+                                if not is_traffic_light:
+                                    continue
+                                
+                                # =========================================================
+                                # 💡 [추가] 비정상적으로 거대한 박스(오탐지) 쳐내기!
+                                # =========================================================
+                                box_w = xyxy[2] - xyxy[0] # 박스의 가로 길이
+                                box_h = xyxy[3] - xyxy[1] # 박스의 세로 길이
+                                
+                                # 원본 이미지 너비(w)와 높이(h) 기준 최대 비율 설정
+                                # 신호등은 화면 전체 너비의 25%, 높이의 15%를 넘을 수 없다고 가정합니다.
+                                max_allowed_w = w * 0.15 
+                                max_allowed_h = h * 0.10 
+                                
+                                if box_w > max_allowed_w or box_h > max_allowed_h:
+                                    # 박스가 허용치보다 크면 헛것(구름, 구조물 등)으로 간주하고 버림!
+                                    continue
+                                # =========================================================
+
+                                # ================= 시계열 다수결(Majority Vote) =================
+                                if track_id not in track_history:
+                                    track_history[track_id] = []
+                    
+                                track_history[track_id].append(cls)
+                
+                                WINDOW_SIZE = 5
+                                if len(track_history[track_id]) > WINDOW_SIZE:
+                                    track_history[track_id].pop(0)
+                                    
+                                stable_cls = Counter(track_history[track_id]).most_common(1)[0][0]
+                                class_name = custom_model.names[stable_cls]
+                                # ================================================================
+                                
+                                # 🔥 2. 잘라냈던 좌표를 원본 화면 좌표로 복구
+                                x1 = xyxy[0] + c_x1
+                                y1 = xyxy[1] + c_y1
+                                x2 = xyxy[2] + c_x1
+                                y2 = xyxy[3] + c_y1
+                                
+                                # 💡 ROS ObjectInfo 메시지 형식 조립
+                                from common.msg import ObjectInfo 
+                                msg = ObjectInfo()
+                                msg.class_name = class_name
+                                msg.conf = float(conf)
+                                msg.x_center = float((x1 + x2) / 2.0)
+                                msg.y_center = float((y1 + y2) / 2.0)
+                                msg.width = float(x2 - x1)
+                                msg.height = float(y2 - y1)
+                                
+                                tracked_traffic_objects.append(msg)
+                                
+                                # 모니터링 GUI 창에 띄울 박스와 색상 설정
+                                color = (0, 255, 255)
+                                if 'red' in class_name.lower(): color = (0, 0, 255)
+                                elif 'green' in class_name.lower(): color = (0, 255, 0)
+                                
+                                custom_detections.append((x1, y1, x2, y2, class_name, float(conf), color))
+                    
+                    
+                    # 💡 메모리 누수 방지: 현재 화면에 잡힌 ID만 추려내서, 
+                    # 과거 수첩(track_history)에 남아있는 안 보이는 ID들을 싹 지워줍니다.
+                    current_ids = [track_id for result in custom_results if result.boxes.id is not None for track_id in result.boxes.id.int().cpu().tolist()]
+                    # 수첩에 적힌 ID 중 현재 안 보이는 것은 삭제!
+                    track_history = {tid: hist for tid, hist in track_history.items() if tid in current_ids}
+                    
                     if custom_detections:
+                        # 인식된 신호등 이름들만 뽑아서 쉼표로 연결 (예: RED, YELLOW)
                         labels = ", ".join(sorted({d[4] for d in custom_detections}))
                         rospy.loginfo_throttle(
                             1.0, "%s custom detections: %s", CAM_NAME, labels
                         )
-
+                    # =========================================================
+                    # 3. 최종 퍼블리시
                     traffic_light_publisher.publish(
-                        object_array(sequence, traffic_objects)
+                        object_array(sequence, tracked_traffic_objects)
                     )
-                    obstacle_publisher.publish(
-                        object_array(
-                            sequence, base_objects + custom_obstacle_objects
-                        )
-                    )
-
+                    
+                
                     # Preserve the custom detector, but apply it as a second
                     # revision of the exact same frame. The base result has
                     # already reached the display and ROS topics above.
@@ -478,30 +654,29 @@ def main(ip=IP, port=PORT, base_model_path=BASE_MODEL_PATH,
                         stale_for,
                         health,
                     )
-                    waiting = (
-                        last_live_image.copy()
-                        if last_live_image is not None
-                        else np.zeros((480, 640, 3), dtype=np.uint8)
-                    )
-                    cv2.rectangle(
-                        waiting,
-                        (0, 0),
-                        (waiting.shape[1], 38),
-                        (0, 0, 180),
-                        -1,
-                    )
-                    cv2.putText(
-                        waiting,
-                        "NO NEW CAMERA FRAME - check MORAI UDP",
-                        (8, 26),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.62,
-                        (255, 255, 255),
-                        2,
-                    )
-                    cv2.imshow(
-                        live_window, waiting
-                    )
+                    if show_raw_preview:
+                        waiting = (
+                            last_live_image.copy()
+                            if last_live_image is not None
+                            else np.zeros((480, 640, 3), dtype=np.uint8)
+                        )
+                        cv2.rectangle(
+                            waiting,
+                            (0, 0),
+                            (waiting.shape[1], 38),
+                            (0, 0, 180),
+                            -1,
+                        )
+                        cv2.putText(
+                            waiting,
+                            "NO NEW CAMERA FRAME - check MORAI UDP",
+                            (8, 26),
+                            cv2.FONT_HERSHEY_SIMPLEX,
+                            0.62,
+                            (255, 255, 255),
+                            2,
+                        )
+                        cv2.imshow(live_window, waiting)
                 if cv2.waitKey(1) & 0xFF == ord('q'):
                     break
                 continue
@@ -514,7 +689,8 @@ def main(ip=IP, port=PORT, base_model_path=BASE_MODEL_PATH,
             image = cv2.imdecode(image_np, cv2.IMREAD_COLOR)
             if image is None or image.size == 0:
                 continue
-            last_live_image = image
+            if show_raw_preview:
+                last_live_image = image
             last_live_frame_at = time.monotonic()
 
             # Replace the pending inference job instead of queueing this frame.
@@ -546,36 +722,37 @@ def main(ip=IP, port=PORT, base_model_path=BASE_MODEL_PATH,
             # for the exact source frame used by its YOLO inference.
             with result_lock:
                 shown_result = dict(latest_result)
-            display_frame = image.copy()
             result_age_ms = (
                 (time.monotonic() - shown_result["completed_at"]) * 1000.0
                 if shown_result["completed_at"] > 0.0
                 else 0.0
             )
-            status = (
-                f"LIVE {smoothed_live_fps:.1f} FPS | "
-                f"YOLO {shown_result['fps']:.1f} FPS | "
-                f"infer {shown_result['inference_ms']:.0f} ms | "
-                f"latency {shown_result['latency_ms']:.0f} ms | "
-                f"age {result_age_ms:.0f} ms"
-            )
-            cv2.rectangle(
-                display_frame,
-                (0, 0),
-                (display_frame.shape[1], 30),
-                (0, 0, 0),
-                -1,
-            )
-            cv2.putText(
-                display_frame,
-                status,
-                (8, 21),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.55,
-                (255, 255, 255),
-                1,
-            )
-            cv2.imshow(live_window, display_frame)
+            if show_raw_preview:
+                display_frame = image.copy()
+                status = (
+                    f"LIVE {smoothed_live_fps:.1f} FPS | "
+                    f"YOLO {shown_result['fps']:.1f} FPS | "
+                    f"infer {shown_result['inference_ms']:.0f} ms | "
+                    f"latency {shown_result['latency_ms']:.0f} ms | "
+                    f"age {result_age_ms:.0f} ms"
+                )
+                cv2.rectangle(
+                    display_frame,
+                    (0, 0),
+                    (display_frame.shape[1], 30),
+                    (0, 0, 0),
+                    -1,
+                )
+                cv2.putText(
+                    display_frame,
+                    status,
+                    (8, 21),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.55,
+                    (255, 255, 255),
+                    1,
+                )
+                cv2.imshow(live_window, display_frame)
 
             # A BASE revision is displayed as soon as the primary detector
             # finishes. If configured, BASE+CUSTOM follows on the same exact
@@ -679,8 +856,16 @@ if __name__ == "__main__":
         default=CPU_THREADS,
         help="PyTorch CPU threads; 0 reserves at least one vCPU for camera/GUI",
     )
+    parser.add_argument(
+        "--show-raw-preview",
+        type=int,
+        choices=(0, 1),
+        default=0,
+        help="show the unprocessed camera window (0 disables it)",
+    )
     args = parser.parse_args()
     main(args.cam_ip, args.cam_port, args.base_model, args.custom_model,
          args.confidence, args.car_detected_topic, args.person_detected_topic,
          args.traffic_light_topic, args.obstacle_topic,
-         args.inference_size, args.display_fps, args.cpu_threads)
+         args.inference_size, args.display_fps, args.cpu_threads,
+         bool(args.show_raw_preview))
