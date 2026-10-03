@@ -15,7 +15,7 @@
        default="$(find morai_bringup)/../../../data/routes/2026_molit_comp_global_path.txt" />
   <arg name="link_set_file"
        default="$(find morai_bringup)/../../../data/mgeo/R_KR_PR_K-city_2025/link_set.json" />
-  <arg name="enable_control" default="false" />
+  <arg name="enable_control" default="true" />
   <!-- Set target_speed_mps:=15.0 for the competition speed profile. -->
   <arg name="target_speed_mps" default="2.0" />
   <arg name="managed_timeout_s" default="1.0" />

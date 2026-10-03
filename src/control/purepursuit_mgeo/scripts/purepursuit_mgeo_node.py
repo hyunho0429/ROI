@@ -426,6 +426,7 @@ class PurePursuitNode:
                 fast_lookahead,
             )
             active_count = len(self.controller.points)
+        requested_steering = steering
         steering_limit = self.max_steering
         if self.steering_rate_active:
             steering_limit = lateral_acceleration_steering_limit(
@@ -435,7 +436,6 @@ class PurePursuitNode:
                 self.max_steering,
             )
         steering = max(-steering_limit, min(steering_limit, steering))
-
         avoidance_stop = self.path_manager_stop if self.require_path_manager_status else False
         merge_stop = self.merge_stop_required if (self.enable_merge_gate and self.merge_requested) else False
 
@@ -499,6 +499,23 @@ class PurePursuitNode:
         # command from the preceding mode cannot leak into the high-speed
         # highway limit while that remembered value ramps down.
         steering = max(-steering_limit, min(steering_limit, steering))
+        if self.fast_change_active:
+            dx = target.x - pose.position.x
+            dy = target.y - pose.position.y
+            target_left = -math.sin(yaw)*dx + math.cos(yaw)*dy
+            rospy.logwarn_throttle(
+                1.0,
+                "PP LANE_CHANGE control=%s path_points=%d target_left=%.2fm "
+                "steer_raw=%.4f limit=%.4f command=%.4f stop=%s path_stop=%s",
+                self.enable_control,
+                active_count,
+                target_left,
+                requested_steering,
+                steering_limit,
+                steering,
+                stop,
+                path_stop,
+            )
 
         target_msg = PointStamped()
         target_msg.header.stamp = now

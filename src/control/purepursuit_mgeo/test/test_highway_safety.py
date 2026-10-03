@@ -740,6 +740,31 @@ class HighwaySafetyTest(unittest.TestCase):
         self.assertLess(speed, n.committed_speed_mps)
         self.assertEqual(status["follow"]["lead"], 1)
 
+    def test_missed_change_replans_from_current_lane_before_path_expires(self):
+        n = self.node
+        n.state = n.LANE_CHANGE
+        n.committed_path = path_at(3.25, end=95)
+        n.committed_change_length_m = 82.0
+        n.change_travel_m = 92.0
+        n.last_change_xy = (92.0, 0.0)
+        n._odom_pose.return_value = (92.0, 0.0, 0.0, 22.8)
+        n._adaptive_speed = Mock(return_value=(15.0, False, {}))
+        n._dynamic_path_safe = Mock(return_value=(True, "ok"))
+        n._committed_alignment = Mock(return_value=(False, {
+            "path_error_m": 3.25, "heading_error_rad": 0.0,
+            "path_progress_m": 92.0, "target_lateral_error_m": -3.25,
+            "target_heading_error_rad": 0.0,
+        }))
+
+        path, stop, _, active, status, *_ = self.tick()
+
+        self.assertEqual(n.state, n.WAIT_GAP)
+        self.assertIsNone(n.committed_path)
+        self.assertFalse(stop)
+        self.assertTrue(active)
+        self.assertEqual(status["reason"], "committed_path_exhausted_replan")
+        self.assertGreater(len(path.poses), 3)
+
     def test_lane_change_checks_future_target_lane_collision(self):
         n = self.node
         n.state = n.LANE_CHANGE

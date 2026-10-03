@@ -2424,7 +2424,14 @@ class HighwayLaneStrategyNode:
                     self.last_change_xy = (ex,ey)
                     self.complete_since = None
                     self.state = self.LANE_CHANGE
-                    rospy.logwarn("HIGHWAY lane change COMMITTED speed=%.2f length=%.1f", cand_speed, length)
+                    rospy.logwarn(
+                        "HIGHWAY lane change COMMITTED speed=%.2f length=%.1f "
+                        "path_points=%d target_right_offset=%.2fm",
+                        cand_speed,
+                        length,
+                        len(path.poses),
+                        self.last_rrt_diag.get("target_right_offset_m", float("nan")),
+                    )
             else:
                 self.ready_since = None
             wait_path = self.latest_base_path if base_fresh else None
@@ -2696,6 +2703,44 @@ class HighwayLaneStrategyNode:
                     dt,
                 )
                 return
+
+            # A missed change must not remain in LANE_CHANGE after the finite
+            # RRT path ends. Pure Pursuit then aims at its last point behind the
+            # car and the highway no-brake mode lets it coast straight. Return
+            # to the freshly measured current lane and plan a new attempt.
+            if (
+                endpoint_guard_complete
+                and not handover_aligned
+                and not target_lane_captured
+                and lane_ok
+            ):
+                current_pair_ok, _, _ = self._inner_center_sanity(
+                    require_two_boundaries=True
+                )
+                if current_pair_ok:
+                    current_center = self._hold_centerline_local()
+                    if len(current_center) >= 3:
+                        current_center = self._extend_local_polyline(
+                            current_center, max(60.0, 4.0*ego_speed)
+                        )
+                        recovery_path = self._local_to_map(current_center, now)
+                        self.state = self.WAIT_GAP
+                        self.ready_since = None
+                        self.committed_path = None
+                        self.last_wait_center_path = recovery_path
+                        self.last_wait_center_at = now
+                        rospy.logwarn(
+                            "HIGHWAY lane change MISSED target; current lane "
+                            "reacquired and RRT will replan"
+                        )
+                        self._publish(
+                            recovery_path, False, speed, True,
+                            {"reason": "committed_path_exhausted_replan",
+                             "alignment": alignment_diag,
+                             "wait_path_source": "camera_midpoint"},
+                            now, dt,
+                        )
+                        return
 
             if geometry_complete and handover_aligned and not stop:
                 if self.complete_since is None:
