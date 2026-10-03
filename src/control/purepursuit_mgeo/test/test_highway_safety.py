@@ -353,7 +353,7 @@ class HighwaySafetyTest(unittest.TestCase):
         self.assertEqual(n._active_lane_width(), n.nominal_lane_width_m)
         self.assertGreater(len(n._centerline_local()), 3)
 
-    def test_yolo_highway_with_empty_adjacent_lane_generates_rrt_path(self):
+    def test_yolo_highway_with_empty_adjacent_lane_generates_quintic_path(self):
         n = self.node
         n.lane_changes_done = 0
         n.force_highway_active = False
@@ -383,7 +383,7 @@ class HighwaySafetyTest(unittest.TestCase):
             "nominal_lane_fallback_lane_info_missing_or_stale",
         )
         self.assertEqual(diagnostics["4.0"]["gap"]["objects"], [])
-        self.assertEqual(diagnostics["4.0"]["rrt"]["reason"], "ok")
+        self.assertEqual(diagnostics["4.0"]["trajectory"]["reason"], "ok")
 
     def test_forced_test_mode_bypasses_upstream_merge_gate(self):
         n = self.node
@@ -553,7 +553,7 @@ class HighwaySafetyTest(unittest.TestCase):
 
         self.assertIsNotNone(path, (reason, diag))
         self.assertEqual(speed, 15.0)
-        self.assertEqual(diag["15.0"]["rrt"]["moving_obstacles_dynamic_only"], [1, 2])
+        self.assertEqual(diag["15.0"]["trajectory"]["planner"], "frenet_quintic")
         self.assertEqual(diag["15.0"]["dyn"], "ok")
 
         n.latest_obstacles.obstacles = [obstacle(25.0, 3.5, vx=8.0)]

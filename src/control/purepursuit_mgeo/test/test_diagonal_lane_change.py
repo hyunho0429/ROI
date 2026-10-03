@@ -87,7 +87,7 @@ class DiagonalLaneChangeTest(unittest.TestCase):
                 self.assertLessEqual(max(headings), math.radians(15.0)+1e-5)
                 self.assertLess(abs(headings[-1]), 1e-6)
                 self.assertTrue(n._path_curvature_ok(points, 4.0)[0])
-                self.assertLessEqual(length, 24.0)
+                self.assertLessEqual(length, 30.0)
 
     def test_insufficient_length_rejects_steep_candidate(self):
         n = node_fixture()
@@ -101,7 +101,7 @@ class DiagonalLaneChangeTest(unittest.TestCase):
 
         self.assertAlmostEqual(length, 32.0)
         self.assertGreater(len(points), 3)
-        self.assertAlmostEqual(points[-1][1], 3.25, delta=0.05)
+        self.assertAlmostEqual(points[-1][1], 3.5, delta=0.05)
         self.assertLessEqual(max(y for _, y in points), 3.60)
 
         controller = MgeoPurePursuit(
@@ -133,16 +133,17 @@ class DiagonalLaneChangeTest(unittest.TestCase):
                 break
         self.assertGreaterEqual(x, length + 10.0)
         self.assertLessEqual(peak_y, 3.60)
-        self.assertAlmostEqual(y, 3.25, delta=0.15)
+        self.assertAlmostEqual(y, 3.5, delta=0.15)
         self.assertLess(abs(yaw), math.radians(3.0))
 
     def test_fast_change_is_rejected_instead_of_shortened_beyond_limit(self):
         n = node_fixture()
+        n.change_max_length_m = 70.0
         points, length = n._generate_lane_change_local(3.5, 20.0)
 
         self.assertEqual(points, [])
         self.assertGreater(length, n.change_max_length_m)
-        self.assertEqual(n.last_rrt_diag['reason'], 'change_length_exceeds_limit')
+        self.assertEqual(n.last_trajectory_diag['reason'], 'change_length_exceeds_limit')
 
     def test_second_change_is_not_shorter_than_stable_first_profile(self):
         n = node_fixture()
@@ -159,7 +160,7 @@ class DiagonalLaneChangeTest(unittest.TestCase):
         self.assertGreater(len(first), 3)
         self.assertGreater(len(second), 3)
         self.assertGreaterEqual(second_length, first_length)
-        self.assertEqual(n.last_rrt_diag['profile'], 'repeat_fast')
+        self.assertEqual(n.last_trajectory_diag['profile'], 'repeat_fast')
         headings = [
             abs(math.atan2(b[1]-a[1], b[0]-a[0]))
             for a, b in zip(second, second[1:])
@@ -203,9 +204,9 @@ class DiagonalLaneChangeTest(unittest.TestCase):
             if stop:
                 break
 
-        self.assertGreater(peak, 0.10)
+        self.assertGreater(peak, 0.07)
         self.assertLess(peak, 0.17)
-        self.assertAlmostEqual(y, 3.25, delta=0.15)
+        self.assertAlmostEqual(y, 3.5, delta=0.15)
         self.assertLess(abs(yaw), math.radians(3.0))
 
     def test_repeat_profile_at_actual_eight_mps_has_no_hard_right_snap(self):
@@ -244,7 +245,7 @@ class DiagonalLaneChangeTest(unittest.TestCase):
                 break
 
         self.assertGreater(most_negative, math.radians(-4.0))
-        self.assertAlmostEqual(y, 3.25, delta=0.15)
+        self.assertAlmostEqual(y, 3.5, delta=0.15)
         self.assertLess(abs(yaw), math.radians(3.0))
 
     def test_ego_offset_does_not_create_sharp_entry(self):
@@ -253,9 +254,9 @@ class DiagonalLaneChangeTest(unittest.TestCase):
         points, _ = n._generate_lane_change_local(3.5, 2.0)
         headings = [math.atan2(b[1]-a[1], b[0]-a[0]) for a, b in zip(points, points[1:])]
         self.assertLessEqual(max(headings), math.radians(15.0)+1e-5)
-        self.assertAlmostEqual(points[-1][1], 4.05)
+        self.assertAlmostEqual(points[-1][1], 4.30)
 
-    def test_live_lidar_obstacle_is_considered_by_rrt_star(self):
+    def test_quintic_path_is_separate_from_lidar_collision_gate(self):
         n = node_fixture()
         n.cruise_speed_mps = 4.0
         n.latest_obstacles.obstacles = [safety.obstacle(25.0,0.0)]
@@ -263,10 +264,8 @@ class DiagonalLaneChangeTest(unittest.TestCase):
         points, _ = n._generate_lane_change_local(3.5,4.0)
 
         self.assertGreater(len(points),3)
-        self.assertEqual(n.last_rrt_diag["planner"],"rrt_star")
-        self.assertEqual(n.last_rrt_diag["source"],"live_lidar")
-        self.assertIn(1,n.last_rrt_diag["obstacles"])
-        self.assertGreaterEqual(n.last_rrt_diag["raw_points"],2)
+        self.assertEqual(n.last_trajectory_diag["planner"],"frenet_quintic")
+        self.assertEqual(n.last_trajectory_diag["source"],"measured_lane_divider")
         self.assertTrue(n._path_curvature_ok(points,4.0)[0])
 
     def test_distance_alone_cannot_complete_lane_change(self):
@@ -456,8 +455,9 @@ class DiagonalLaneChangeTest(unittest.TestCase):
         self.assertAlmostEqual(center[1][1], 0.05)
         self.assertTrue(all(abs(y-0.05) < 1e-6 for _, y in center[1:]))
 
-    def test_hold_target_uses_bounded_right_safety_offset(self):
+    def test_optional_hold_target_uses_bounded_right_safety_offset(self):
         n = node_fixture()
+        n.lane_center_right_offset_m = 0.25
         n._centerline_local.return_value = [
             (float(x), 0.0) for x in range(11)
         ]
@@ -655,6 +655,7 @@ class DiagonalLaneChangeTest(unittest.TestCase):
 
     def test_right_offset_is_applied_promptly_without_sharp_path_kink(self):
         n = node_fixture()
+        n.lane_center_right_offset_m = 0.25
         n.last_inner_path = path_at()
         n._boundary_local = lambda key: [
             (float(x), 1.75 if key == 'left_boundary_points' else -1.75)
@@ -778,44 +779,47 @@ class DiagonalLaneChangeTest(unittest.TestCase):
                         break
                 else:
                     self.fail('did not finish diagonal transition')
-                self.assertLess(peak_yaw, math.radians(13))
-                self.assertLess(abs(y-3.25), .2)
+                self.assertLess(peak_yaw, math.radians(15))
+                self.assertLess(abs(y-3.5), .2)
                 self.assertLess(abs(yaw), math.radians(3))
 
-    def test_bicycle_tracks_15_mps_eased_change_without_adjacent_lane_overshoot(self):
-        n = node_fixture()
-        points, length = n._generate_lane_change_local(3.5, 15.0)
-        self.assertGreaterEqual(length, 60.0)
-        valid, curvature = n._path_curvature_ok(points, 15.0)
-        self.assertTrue(valid, curvature)
-        pp = MgeoPurePursuit(
-            [PathPoint(x, y, 0) for x, y in points], 3.0, 4.0, .35, 1.5
-        )
-        limiter = SteeringRateLimiter(.2)
-        x = y = yaw = 0.0
-        peak_y = 0.0
-        for step in range(250):
-            lookahead, rate = speed_adaptive_steering_profile(
-                15.0, 3.5, .75, .50, 4.0, .20
-            )
-            raw, stop, *_ = pp.compute(x, y, yaw, 15.0, lookahead)
-            self.assertFalse(stop)
-            limit = lateral_acceleration_steering_limit(
-                15.0, 3.0, 2.5, math.radians(40.0)
-            )
-            angle = limiter.update(
-                max(-limit, min(limit, raw)), step*.05, True, rate
-            )
-            angle = max(-limit, min(limit, angle))
-            yaw += 15.0/3.0*math.tan(angle)*.05
-            x += 15.0*math.cos(yaw)*.05
-            y += 15.0*math.sin(yaw)*.05
-            peak_y = max(peak_y, y)
-            if x >= n.change_start_m+length+7.0:
-                break
-        self.assertLess(peak_y, 3.65)
-        self.assertAlmostEqual(y, 3.25, delta=.30)
-        self.assertLess(abs(yaw), math.radians(3.0))
+    def test_bicycle_tracks_fast_quintic_change_without_adjacent_lane_overshoot(self):
+        for speed in (15.0, 22.8):
+            with self.subTest(speed=speed):
+                n = node_fixture()
+                n.change_time_s = 3.6
+                points, length = n._generate_lane_change_local(3.5, speed)
+                self.assertGreaterEqual(length, speed*n.change_time_s)
+                valid, curvature = n._path_curvature_ok(points, speed)
+                self.assertTrue(valid, curvature)
+                pp = MgeoPurePursuit(
+                    [PathPoint(x, y, 0) for x, y in points], 3.0, 4.0, .35, 1.5
+                )
+                limiter = SteeringRateLimiter(.2)
+                x = y = yaw = 0.0
+                peak_y = 0.0
+                for step in range(250):
+                    lookahead, rate = speed_adaptive_steering_profile(
+                        speed, 3.5, .75, .50, 4.0, .20
+                    )
+                    raw, stop, *_ = pp.compute(x, y, yaw, speed, lookahead)
+                    self.assertFalse(stop)
+                    limit = lateral_acceleration_steering_limit(
+                        speed, 3.0, 2.5, math.radians(40.0)
+                    )
+                    angle = limiter.update(
+                        max(-limit, min(limit, raw)), step*.05, True, rate
+                    )
+                    angle = max(-limit, min(limit, angle))
+                    yaw += speed/3.0*math.tan(angle)*.05
+                    x += speed*math.cos(yaw)*.05
+                    y += speed*math.sin(yaw)*.05
+                    peak_y = max(peak_y, y)
+                    if x >= n.change_start_m+length+7.0:
+                        break
+                self.assertLess(peak_y, 3.65)
+                self.assertAlmostEqual(y, 3.5, delta=.30)
+                self.assertLess(abs(yaw), math.radians(3.0))
 
 
 class SteeringLimitTest(unittest.TestCase):

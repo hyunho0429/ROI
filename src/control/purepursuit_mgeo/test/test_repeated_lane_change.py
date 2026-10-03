@@ -105,6 +105,7 @@ class RepeatedLaneChangeTest(unittest.TestCase):
                 'type': 'white_dashed',
                 'from_guide': False,
                 'coasted': False,
+                'coef': [0.0, -1.75],
             },
             'left_outer_lane': {
                 'detected': True,
@@ -148,7 +149,7 @@ class RepeatedLaneChangeTest(unittest.TestCase):
         n._choose_lane_change.assert_not_called()
         n._generate_rejoin_path.assert_not_called()
 
-    def test_single_left_solid_does_not_lock_intermediate_lane(self):
+    def test_single_left_solid_without_right_boundary_does_not_lock(self):
         n = self.node
         n.lane_info.update({
             'lane_valid': True,
@@ -164,6 +165,26 @@ class RepeatedLaneChangeTest(unittest.TestCase):
         })
 
         self.assertFalse(n._final_lane_markings_present())
+
+    def test_nearest_left_solid_and_right_dashed_lock_after_confirmation(self):
+        n = self.node
+        n.lane_info.update({
+            'lane_valid': True, 'output_status': 'FRESH',
+            'left_lane': {
+                'detected': True, 'type': 'white_solid', 'age': 3,
+                'coef': [0.0, 1.75], 'x_range_m': [0.0, 30.0],
+            },
+            'right_lane': {
+                'detected': True, 'type': 'white_dashed', 'age': 3,
+                'coef': [0.0, -1.75], 'x_range_m': [0.0, 30.0],
+            },
+            'left_outer_lane': {'detected': False},
+        })
+        self.assertTrue(n._final_lane_markings_present())
+        self.tick(100.0)
+        self.tick(100.6)
+        self.assertTrue(n.lane_change_locked_by_left_solid)
+        n._choose_lane_change.assert_not_called()
 
     def test_far_left_solid_does_not_block_change_across_adjacent_dashed(self):
         n = self.node
@@ -228,7 +249,8 @@ class RepeatedLaneChangeTest(unittest.TestCase):
                 'detected': True, 'type': 'white_solid', 'age': 3,
                 'coef': [0.0, 5.25], 'x_range_m': [0.0, 30.0],
             },
-            'right_lane': {'detected': False, 'type': None},
+            'right_lane': {'detected': True, 'type': 'white_dashed',
+                           'coef': [0.0, -1.75]},
         })
 
         self.assertTrue(n._double_left_solid_present())

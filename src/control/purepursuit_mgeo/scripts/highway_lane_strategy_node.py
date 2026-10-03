@@ -11,7 +11,7 @@ and LiDAR tracked obstacles / odometry.
 Outside the highway scenario, it simply republishes the existing avoidance
 PathManager path/stop and the cruise speed. During the highway scenario it:
   1) waits for a safe LEFT merge gap while holding the measured lane centre;
-  2) plans a live RRT* path from the current lane into the left lane;
+  2) plans a measured-lane Frenet/quintic path into the left lane;
   3) keeps following the camera-reported current lane centerline after the
      change, so the vehicle does NOT get pulled back to the original outer
      global path;
@@ -40,13 +40,7 @@ from std_msgs.msg import Bool, Float64, String
 from lidar_perception.msg import LidarObstacleArray
 from purepursuit_mgeo.path import PathPoint, load_mgeo_path
 from purepursuit_mgeo.lane_geometry import pose_at, reproject
-from purepursuit_mgeo.motion import diagonal_progress, lead_brake_decision
-from purepursuit_mgeo.rrt_star import (
-    RRTStarPlanner,
-    RectObstacle,
-    elastic_smooth,
-    resample_path,
-)
+from purepursuit_mgeo.motion import lead_brake_decision
 
 
 def clamp(v: float, lo: float, hi: float) -> float:
@@ -176,7 +170,7 @@ class HighwayLaneStrategyNode:
         # The upstream merge gate applies its own camera activation, temporal
         # confirmation and target-lane geometry before publishing ``available``.
         # This node repeats the decisive checks below using the current LiDAR
-        # tracks and the actual RRT* candidate.  Allow the highway stack to skip
+        # tracks and the actual quintic trajectory candidate.  Allow the highway stack to skip
         # that redundant veto so a short, valid opening is not missed.
         self.bypass_sensor_merge_gate = bool(
             rospy.get_param("~bypass_sensor_merge_gate", False)
@@ -187,7 +181,7 @@ class HighwayLaneStrategyNode:
         self.lane_width_max_m = float(rospy.get_param("~lane_width_max_m", 4.2))
         self.nominal_lane_width_m = float(rospy.get_param("~nominal_lane_width_m", 3.5))
         self.lane_center_right_offset_m = max(
-            0.0, float(rospy.get_param("~lane_center_right_offset_m", 0.25))
+            0.0, float(rospy.get_param("~lane_center_right_offset_m", 0.0))
         )
         self.max_heading_error_rad = float(rospy.get_param("~max_heading_error_rad", math.radians(22.0)))
         self.require_left_dashed = bool(rospy.get_param("~require_left_dashed", True))
@@ -247,14 +241,13 @@ class HighwayLaneStrategyNode:
 
         self.change_start_m = float(rospy.get_param("~change_start_m", 3.0))
         self.change_min_length_m = float(rospy.get_param("~change_min_length_m", 18.0))
-        self.change_max_length_m = float(rospy.get_param("~change_max_length_m", 75.0))
-        self.change_ramp_ratio = float(rospy.get_param("~change_ramp_ratio", 0.2))
+        self.change_max_length_m = float(rospy.get_param("~change_max_length_m", 90.0))
         self.change_max_heading_rad = math.radians(float(rospy.get_param("~change_max_heading_deg", 15.0)))
         self.repeat_change_min_length_m = float(
             rospy.get_param("~repeat_change_min_length_m", 18.0)
         )
         self.repeat_change_max_length_m = float(
-            rospy.get_param("~repeat_change_max_length_m", 70.0)
+            rospy.get_param("~repeat_change_max_length_m", 90.0)
         )
         self.repeat_change_time_s = float(
             rospy.get_param("~repeat_change_time_s", 3.8)
@@ -263,12 +256,11 @@ class HighwayLaneStrategyNode:
             rospy.get_param("~repeat_change_max_heading_deg", 15.0)
         ))
         if (
-            not 0.0 < self.change_ramp_ratio < 0.5
-            or not 0.0 < self.change_max_heading_rad < math.pi/4
+            not 0.0 < self.change_max_heading_rad < math.pi/4
             or not 0.0 < self.repeat_change_max_heading_rad < math.pi/4
             or self.repeat_change_min_length_m > self.repeat_change_max_length_m
         ):
-            raise ValueError("invalid diagonal lane-change ramp or heading limit")
+            raise ValueError("invalid lane-change heading or length limit")
         self.inner_path_blend_time_s = max(0.05, float(rospy.get_param("~inner_path_blend_time_s", 0.80)))
         self.inner_path_max_jump_m = float(rospy.get_param("~inner_path_max_jump_m", 0.60))
         self.inner_handover_max_distance_m = max(
@@ -312,20 +304,6 @@ class HighwayLaneStrategyNode:
         )
         self.change_time_s = float(rospy.get_param("~change_time_s", 4.0))
         self.change_post_hold_m = float(rospy.get_param("~change_post_hold_m", 10.0))
-        self.rrt_step_size_m = float(rospy.get_param("~rrt_step_size_m", 2.0))
-        self.rrt_max_iterations = int(rospy.get_param("~rrt_max_iterations", 50))
-        self.rrt_goal_sample_rate = float(rospy.get_param("~rrt_goal_sample_rate", 0.15))
-        self.rrt_search_radius_m = float(rospy.get_param("~rrt_search_radius_m", 6.0))
-        self.rrt_goal_tolerance_m = float(rospy.get_param("~rrt_goal_tolerance_m", 2.5))
-        self.rrt_max_heading_rad = math.radians(
-            float(rospy.get_param("~rrt_max_heading_deg", 20.0))
-        )
-        self.rrt_corridor_margin_m = float(rospy.get_param("~rrt_corridor_margin_m", 0.35))
-        self.rrt_static_speed_threshold_mps = max(
-            0.0, float(rospy.get_param("~rrt_static_speed_threshold_mps", 0.60))
-        )
-        self.rrt_smooth_iterations = int(rospy.get_param("~rrt_smooth_iterations", 1))
-        self.rrt_random_seed = int(rospy.get_param("~rrt_random_seed", 20))
         self.change_complete_min_ratio = float(rospy.get_param("~change_complete_min_ratio", 0.72))
         self.change_center_error_m = float(rospy.get_param("~change_center_error_m", 0.45))
         self.change_heading_error_rad = float(rospy.get_param("~change_heading_error_rad", math.radians(10.0)))
@@ -392,7 +370,7 @@ class HighwayLaneStrategyNode:
         self.committed_stop_horizon_s = float(
             rospy.get_param("~committed_stop_horizon_s", 1.0)
         )
-        # Entry remains protected by the gap/TTC and full RRT* collision checks.
+        # Entry remains protected by the gap/TTC and full trajectory collision checks.
         # When disabled, a newly predicted side/future overlap is diagnostic
         # after commitment instead of parking the vehicle over a lane divider.
         # A true lead emergency still commands an immediate stop.
@@ -401,7 +379,7 @@ class HighwayLaneStrategyNode:
         )
         # Competition-only override: when disabled, an active highway state
         # never publishes a brake/stop request while it still has a path to
-        # follow.  Pre-commit gap/TTC/RRT* checks continue to decide whether a
+        # follow.  Pre-commit gap/TTC/trajectory checks decide whether a
         # lane change may start.  The suppressed reason remains in diagnostics.
         self.highway_braking_enabled = bool(
             rospy.get_param("~highway_braking_enabled", True)
@@ -468,7 +446,7 @@ class HighwayLaneStrategyNode:
         self.last_wait_center_at: Optional[rospy.Time] = None
         self.lane_invalid_since: Optional[rospy.Time] = None
         self.inner_handover_pending = False
-        self.last_rrt_diag = {}
+        self.last_trajectory_diag = {}
         self.inner_lane_candidate_since: Optional[rospy.Time] = None
         self.final_lane_candidate_since: Optional[rospy.Time] = None
         self.lane_change_locked_by_left_solid = False
@@ -499,9 +477,7 @@ class HighwayLaneStrategyNode:
         rospy.Subscriber(self.merge_unavailable_topic, Bool, self._merge_unavailable_cb, queue_size=1)
 
         self.timer = rospy.Timer(rospy.Duration(1.0 / max(self.rate_hz, 1.0)), self._tick)
-        # RRT* can take longer than one control cycle on the simulator VM.
-        # Keep the lead-safety channel alive independently of path planning;
-        # Pure Pursuit must not interpret a slow RRT iteration as a lost node.
+        # Keep the lead-safety channel alive independently of path planning.
         self.lead_safety_timer = rospy.Timer(rospy.Duration(0.1), self._publish_lead_safety)
         rospy.logwarn(
             "Highway lane strategy: repeated LEFT lane changes enabled cruise=%.2f m/s; real-lane centerline enabled",
@@ -689,15 +665,31 @@ class HighwayLaneStrategyNode:
         return False, "adjacent_left_not_dashed"
 
     def _final_lane_markings_present(self) -> bool:
-        """Require the two-solid final boundary pattern after hand-over.
+        """Recognize a fresh, nearest solid boundary in the occupied lane.
 
-        A single dashed segment is occasionally classified as solid while lane
-        identities switch after a merge.  Latching on that one observation can
-        permanently suppress the next valid change in an intermediate lane.
-        The pre-commit dashed+outer-solid check still locks the known final
-        target immediately; this check is the post-change fallback.
+        Require a bracketing right boundary too, so an outer-left solid does
+        not get mistaken for the boundary of the newly reached lane.
         """
-        return self._double_left_solid_present()
+        info = self.lane_info or {}
+        if not info.get("lane_valid") or info.get("output_status") != "FRESH":
+            return False
+        left = info.get("left_lane") or {}
+        right = info.get("right_lane") or {}
+        if any(not lane.get("detected") or lane.get("coasted") or lane.get("from_guide")
+               for lane in (left, right)):
+            return False
+        if left.get("type") not in ("white_solid", "yellow"):
+            return False
+        if int(left.get("age", 0)) < 2:
+            return False
+        left_y = self._lane_meta_y_current(left, 7.0)
+        right_y = self._lane_meta_y_current(right, 7.0)
+        return bool(
+            left_y is not None and right_y is not None
+            and 0.15 <= left_y <= 2.6
+            and -2.6 <= right_y <= -0.15
+            and self.lane_width_min_m <= left_y-right_y <= self.lane_width_max_m
+        )
 
     @staticmethod
     def _lane_meta_y(lane: dict, x_m: float) -> Optional[float]:
@@ -808,14 +800,14 @@ class HighwayLaneStrategyNode:
             self.ready_since = None
             self.release_since = None
             rospy.logwarn(
-                "HIGHWAY further lane changes OFF: double left solid; "
+                "HIGHWAY further lane changes OFF: nearest left solid; "
                 "holding measured lane centre"
             )
         return True
 
     def _centerline_local(self) -> List[Tuple[float, float]]:
         if self.rrt_lidar_only_mode or self.nominal_lane_fallback_active:
-            # The RRT test course is a straight highway. Receding points in the
+            # The lane-change test course is a straight highway. Receding points in the
             # current vehicle frame keep planning independent of camera packets.
             return [(0.5*index, 0.0) for index in range(121)]
         straddling = (self.lane_info or {}).get("straddling_lane") or {}
@@ -887,7 +879,7 @@ class HighwayLaneStrategyNode:
         return min(self.lane_center_right_offset_m, available)
 
     def _hold_centerline_local(self) -> List[Tuple[float, float]]:
-        """Return the measured lane centre with a small safe right bias.
+        """Follow the measured lane midpoint, with optional bounded right bias.
 
         The offset is introduced over five metres so the path always starts at
         the current vehicle pose.  This keeps the left side of the vehicle away
@@ -1011,7 +1003,7 @@ class HighwayLaneStrategyNode:
         # The post-change hold must be based on the newly observed lane, not a
         # held pre-change result, a nominal fallback, or a one-sided width
         # estimate.  Until both boundaries settle, the caller keeps rolling the
-        # already committed RRT path forward.
+        # already committed lane-change path forward.
         info = self.lane_info or {}
         left = self._boundary_local("left_boundary_points")
         right = self._boundary_local("right_boundary_points")
@@ -1056,7 +1048,7 @@ class HighwayLaneStrategyNode:
         if require_two_boundaries:
             # The last filtered path may itself have drifted with successive
             # camera lane-ID changes. Compare against the immutable target
-            # lane reached by the preceding RRT manoeuvre instead.
+            # lane reached by the preceding lane-change manoeuvre instead.
             reference_y = self._committed_target_local_y(8.0)
             if reference_y is None:
                 reference = self._path_map_to_local(self.last_inner_path)
@@ -1232,7 +1224,7 @@ class HighwayLaneStrategyNode:
         return self._local_to_map(blended, now)
 
     def _generate_lane_change_local(self, lane_width: float, speed_mps: float) -> Tuple[List[Tuple[float, float]], float]:
-        """Plan one live LEFT lane change with RRT* in the vehicle frame."""
+        """Quintic lateral shift between measured lane centres in a road frame."""
         repeated = self.lane_changes_done > 0
         min_length = (
             self.repeat_change_min_length_m if repeated
@@ -1249,36 +1241,54 @@ class HighwayLaneStrategyNode:
             self.repeat_change_max_heading_rad if repeated
             else self.change_max_heading_rad
         )
-        self.last_rrt_diag = {
-            "planner":"rrt_star",
-            "source":"live_lidar",
+        self.last_trajectory_diag = {
+            "planner":"frenet_quintic",
+            "source":"measured_lane_divider",
             "profile":"repeat_fast" if repeated else "first_stable",
         }
         divider = self._boundary_local("left_boundary_points")
         if len(divider) < 3:
-            self.last_rrt_diag["reason"] = "divider_short"
+            self.last_trajectory_diag["reason"] = "divider_short"
             return [], min_length
         tx, ty = tangent_at(divider, 0)
-        # Include ego's initial offset from the detected source-lane center.
+        target_right_offset = self._bounded_lane_center_right_offset(lane_width)
+        target_shift = 0.5*lane_width-target_right_offset
+        # The reference is the physical divider. Include the ego's offset from
+        # its current centre instead of assuming the car starts perfectly centred.
         shift_m = max(lane_width, math.hypot(
-            divider[0][0]-0.5*lane_width*ty, divider[0][1]+0.5*lane_width*tx))
-        heading_length = shift_m / ((1.0-self.change_ramp_ratio) * math.tan(max_heading))
-        required_length = max(max(speed_mps, 1.0) * change_time, heading_length)
+            divider[0][0]-target_shift*ty,
+            divider[0][1]+target_shift*tx,
+        ))
+        # 6u^5-15u^4+10u^3 has max first/second derivatives 1.875/5.774.
+        # These bounds prevent a short manoeuvre from being accepted at 82 km/h
+        # and then clipped to nearly zero by the steering acceleration limit.
+        # Leave a sampling margin above the continuous 1.875 slope bound.
+        heading_length = 1.90*shift_m/max(math.tan(max_heading), 1e-3)
+        acceleration_length = max(speed_mps, 1.0)*math.sqrt(
+            5.774*shift_m/max(self.max_lateral_accel_mps2, 0.1)
+        )
+        required_length = max(
+            max(speed_mps, 1.0)*change_time,
+            heading_length,
+            acceleration_length,
+        )
         if required_length > max_length:
-            self.last_rrt_diag.update({
+            self.last_trajectory_diag.update({
                 "reason": "change_length_exceeds_limit",
                 "required_length_m": round(required_length, 2),
                 "max_length_m": round(max_length, 2),
             })
             return [], required_length
         length = max(min_length, required_length)
-        target_len = self.change_start_m + length + self.change_post_hold_m
+        target_len = self.change_start_m + length + max(
+            self.change_post_hold_m, 1.5*max(speed_mps, 1.0)
+        )
         divider = self._extend_local_polyline(divider, target_len)
         if len(divider) < 3:
-            self.last_rrt_diag["reason"] = "extended_divider_short"
+            self.last_trajectory_diag["reason"] = "extended_divider_short"
             return [], length
-        # Camera samples can start five metres ahead. Uniform sampling prevents
-        # that first long segment from skipping the eased steering entry.
+        # Uniform arc-length samples keep the polynomial smooth when the camera
+        # first sees the divider several metres ahead of the vehicle.
         divider_arc = polyline_arclength(divider)
         sampled = []
         j = 1
@@ -1293,166 +1303,44 @@ class HighwayLaneStrategyNode:
 
         current: List[Tuple[float, float]] = []
         target: List[Tuple[float, float]] = []
-        target_right_offset = self._bounded_lane_center_right_offset(lane_width)
         for i, (x, y) in enumerate(divider):
             tx, ty = tangent_at(divider, i)
             nx, ny = -ty, tx
             current.append((x - 0.5*lane_width*nx, y - 0.5*lane_width*ny))
-            target_shift = 0.5*lane_width-target_right_offset
             target.append((x + target_shift*nx, y + target_shift*ny))
-        self.last_rrt_diag["target_right_offset_m"] = round(
+        self.last_trajectory_diag["target_right_offset_m"] = round(
             target_right_offset, 3
         )
 
         origin_x, origin_y = current[0]
         current = [(x-origin_x, y-origin_y) for x, y in current]
+        target = [(x-origin_x, y) for x, y in target]
         arc = polyline_arclength(current)
         change_end_m = self.change_start_m + length
         start_index = min(range(len(arc)), key=lambda i: abs(arc[i]-self.change_start_m))
         goal_index = min(range(len(arc)), key=lambda i: abs(arc[i]-change_end_m))
         if goal_index <= start_index:
-            self.last_rrt_diag["reason"] = "reference_too_short"
+            self.last_trajectory_diag["reason"] = "reference_too_short"
             return [], length
 
-        start = current[start_index]
-        goal = target[goal_index]
-        current_ref = current[start_index:goal_index+1]
-        target_ref = target[start_index:goal_index+1]
-        x_min = min(start[0], goal[0])
-        x_max = max(start[0], goal[0])
-        y_values = [p[1] for p in current_ref] + [p[1] for p in target_ref]
-        y_min = min(y_values)-self.rrt_corridor_margin_m
-        y_max = max(y_values)+self.rrt_corridor_margin_m
-
-        def inside_lane_corridor(x: float, y: float) -> bool:
-            current_y = interp_y(current_ref, x)
-            target_y = interp_y(target_ref, x)
-            if current_y is None or target_y is None:
-                return False
-            low = min(current_y, target_y)-self.rrt_corridor_margin_m
-            high = max(current_y, target_y)+self.rrt_corridor_margin_m
-            return low <= y <= high
-
-        obstacles = []
-        obstacle_ids = []
-        moving_ids = []
-        for obstacle in self._map_obstacles_local():
-            # Moving traffic has a time-dependent position. Freezing its
-            # current box for the entire 60 m transition can block a gap that
-            # will be clear when ego arrives. The gap/TTC gate and sampled
-            # dynamic-path collision check below evaluate those tracks in time.
-            if math.hypot(obstacle.vx, obstacle.vy) > self.rrt_static_speed_threshold_mps:
-                moving_ids.append(obstacle.oid)
-                continue
-            # A physically rearward vehicle is handled by the target-lane gap
-            # and TTC gate. Its ego-inflated box must not cover the RRT start.
-            if obstacle.x+0.5*obstacle.length <= 0.0:
-                continue
-            half_length = (
-                0.5*obstacle.length + 0.5*self.vehicle_length_m
-                + self.collision_long_margin_m
-            )
-            half_width = (
-                0.5*obstacle.width + 0.5*self.vehicle_width_m
-                + self.collision_lat_margin_m
-            )
-            if obstacle.x+half_length < x_min or obstacle.x-half_length > x_max:
-                continue
-            if obstacle.y+half_width < y_min or obstacle.y-half_width > y_max:
-                continue
-            obstacles.append(RectObstacle(
-                obstacle.x, obstacle.y, half_length, half_width
-            ))
-            obstacle_ids.append(obstacle.oid)
-        self.last_rrt_diag["moving_obstacles_dynamic_only"] = moving_ids
-
-        seed = self.rrt_random_seed + 997*self.lane_changes_done
-        seed += sum((index+1)*oid for index, oid in enumerate(sorted(obstacle_ids)))
-        planner = RRTStarPlanner(
-            start,
-            goal,
-            obstacles,
-            x_bounds=(x_min, x_max),
-            y_bounds=(y_min, y_max),
-            state_is_valid=inside_lane_corridor,
-            step_size_m=self.rrt_step_size_m,
-            max_iterations=self.rrt_max_iterations,
-            goal_sample_rate=self.rrt_goal_sample_rate,
-            search_radius_m=self.rrt_search_radius_m,
-            goal_tolerance_m=self.rrt_goal_tolerance_m,
-            max_edge_heading_rad=self.rrt_max_heading_rad,
-            random_seed=seed,
-        )
-        try:
-            rrt_path = planner.plan()
-        except RuntimeError as error:
-            self.last_rrt_diag.update({
-                "reason":str(error), "obstacles":obstacle_ids,
-                "nodes":len(planner.nodes),
-            })
-            return [], length
-
-        # A direct RRT edge is collision-free but has abrupt heading corners
-        # where it leaves/joins the lane centres. At 15 m/s those corners fail
-        # the lateral-acceleration check and keep WAIT_GAP active forever.
-        # Use an eased one-lane diagonal when it is collision-free; retain the
-        # RRT detour for cases where a live obstacle blocks that reference.
-        eased = []
+        # Frenet longitudinal coordinate s follows the measured divider arc;
+        # its normal defines the one-lane lateral offset d(s). A quintic shift
+        # gives zero lateral slope and acceleration at both ends.
+        path = []
         start_s, end_s = arc[start_index], arc[goal_index]
         for i, source_point in enumerate(current):
-            fraction = diagonal_progress(
-                (arc[i]-start_s)/max(end_s-start_s, 1e-6),
-                self.change_ramp_ratio,
+            fraction = smoothstep5(
+                (arc[i]-start_s)/max(end_s-start_s, 1e-6)
             )
             target_point = target[i]
-            eased.append((
+            path.append((
                 (1.0-fraction)*source_point[0] + fraction*target_point[0],
                 (1.0-fraction)*source_point[1] + fraction*target_point[1],
             ))
-        selected = None
-        used_weight = None
-        if speed_mps >= 8.0 and planner.path_is_safe(eased[start_index:goal_index+1]):
-            selected = eased
-            used_weight = "eased_reference"
-
-        anchors = current[:start_index+1] + rrt_path[1:]
-        anchors.extend(target[goal_index+1:])
-        dense_anchors = resample_path(anchors, 0.5)
-        # Start with the smoothest result. If that rounds a corner too close to
-        # an obstacle, progressively retain more of the collision-free RRT path.
-        if selected is None:
-            for data_weight in (0.05, 0.08, 0.10, 0.15):
-                candidate = elastic_smooth(
-                    dense_anchors,
-                    iterations=max(50, 80*self.rrt_smooth_iterations),
-                    weight_data=data_weight,
-                )
-                transition = [p for p in candidate if x_min-1e-6 <= p[0] <= x_max+1e-6]
-                if len(transition) >= 2 and planner.path_is_safe(transition):
-                    selected = candidate
-                    used_weight = data_weight
-                    break
-        if selected is None:
-            self.last_rrt_diag.update({
-                "reason":"rrt_smoothing_collision", "obstacles":obstacle_ids,
-                "nodes":len(planner.nodes),
-            })
-            return [], length
-
-        path = resample_path(selected, 0.5)
-        if len(path) >= 2:
-            end_tx, end_ty = tangent_at(target, len(target)-1)
-            end_step = math.hypot(
-                path[-1][0]-path[-2][0], path[-1][1]-path[-2][1]
-            )
-            path[-2] = (
-                path[-1][0]-end_step*end_tx,
-                path[-1][1]-end_step*end_ty,
-            )
-        self.last_rrt_diag.update({
-            "reason":"ok", "obstacles":obstacle_ids,
-            "nodes":len(planner.nodes), "raw_points":len(rrt_path),
-            "path_points":len(path), "smooth_weight_data":used_weight,
+        self.last_trajectory_diag.update({
+            "reason":"ok", "path_points":len(path),
+            "lateral_shift_m":round(shift_m, 3),
+            "transition_length_m":round(length, 2),
         })
         return path, length
 
@@ -1711,7 +1599,7 @@ class HighwayLaneStrategyNode:
             for index in range(int(2.0*length)+1):
                 x = 0.5*float(index)
                 target_y = slope*x+smoothstep5(x/join_length)*line_intercept
-                # Begin at the current pose, then join the authorised RRT
+                # Begin at the current pose, then join the authorised lane-change
                 # target-lane centre. This corrects both lateral offset and yaw
                 # instead of preserving a boundary-hugging parallel line.
                 previous.append((x, target_y))
@@ -1946,7 +1834,7 @@ class HighwayLaneStrategyNode:
         }, reverse=True)
         if not self.highway_braking_enabled and ego_speed >= self.cruise_speed_mps:
             # Lower requested speeds cannot alter the entry trajectory while
-            # braking is disabled. Avoid solving the same RRT* problem again
+            # braking is disabled. Avoid solving the same quintic trajectory problem again
             # for each ineffective slower candidate.
             candidates = candidates[:1]
         diagnostics = {}
@@ -1961,8 +1849,8 @@ class HighwayLaneStrategyNode:
                 diagnostics[str(v)] = {
                     "divider": divider_diag,
                     "geometry_speed_mps": round(geometry_speed, 2),
-                    "reason": self.last_rrt_diag.get("reason", "lane_change_geometry_short"),
-                    "rrt": dict(self.last_rrt_diag),
+                    "reason": self.last_trajectory_diag.get("reason", "lane_change_geometry_short"),
+                    "trajectory": dict(self.last_trajectory_diag),
                 }
                 continue
             curv_ok, max_k = self._path_curvature_ok(local, geometry_speed)
@@ -1981,7 +1869,7 @@ class HighwayLaneStrategyNode:
                 "gap_reason": gap_reason,
                 "dyn": dyn_reason,
                 "divider": divider_diag,
-                "rrt":dict(self.last_rrt_diag),
+                "trajectory":dict(self.last_trajectory_diag),
             }
             if curv_ok and gap_ok and dyn_ok:
                 return path, v, length, "ok", diagnostics
@@ -2299,7 +2187,7 @@ class HighwayLaneStrategyNode:
             )
         self.stop_pub.publish(Bool(data=bool(stop)))
         # The independent safety timer is the sole publisher for these two
-        # topics. A late RRT result must not overwrite its fresher assessment.
+        # topics. A late lane-change result must not overwrite its fresher assessment.
         self.speed_pub.publish(Float64(data=float(speed_out)))
         self.active_pub.publish(Bool(data=bool(active)))
         fast_change = bool(active and (
@@ -2326,8 +2214,8 @@ class HighwayLaneStrategyNode:
                     if candidate is None:
                         candidate = next(iter(candidates.values()))
                     if isinstance(candidate, dict):
-                        detail = " rrt=%s curvature_ok=%s gap=%s dynamic=%s" % (
-                            (candidate.get("rrt") or {}).get("reason", candidate.get("reason", "unknown")),
+                        detail = " trajectory=%s curvature_ok=%s gap=%s dynamic=%s" % (
+                            (candidate.get("trajectory") or {}).get("reason", candidate.get("reason", "unknown")),
                             candidate.get("curvature_ok", "unknown"),
                             candidate.get("gap_reason", "unknown"),
                             candidate.get("dyn", "unknown"),
@@ -2396,7 +2284,7 @@ class HighwayLaneStrategyNode:
 
         # WAIT_GAP: hold the measured current-lane midpoint while looking for a
         # LiDAR gap. The global path can run across the paired entrance marking
-        # and silently move the ego into the next lane before an RRT commit.
+        # and silently move the ego into the next lane before an lane-change commit.
         if self.state == self.WAIT_GAP:
             adaptive, emergency, follow = self._adaptive_speed(self.cruise_speed_mps) if obs_fresh and (self.lane_info is not None or self.rrt_lidar_only_mode) else (self.cruise_speed_mps, False, {})
             shaping = self.cruise_speed_mps
@@ -2430,7 +2318,7 @@ class HighwayLaneStrategyNode:
                         cand_speed,
                         length,
                         len(path.poses),
-                        self.last_rrt_diag.get("target_right_offset_m", float("nan")),
+                        self.last_trajectory_diag.get("target_right_offset_m", float("nan")),
                     )
             else:
                 self.ready_since = None
@@ -2445,7 +2333,7 @@ class HighwayLaneStrategyNode:
                     if len(local_center) >= 3:
                         # A camera line normally ends near the horizon.  Give
                         # Pure Pursuit several seconds of rolling road-aligned
-                        # path even while one RRT iteration is still running.
+                        # path even while one lane-change iteration is still running.
                         local_center = self._extend_local_polyline(
                             local_center,
                             max(60.0, 4.0*ego_speed),
@@ -2577,7 +2465,7 @@ class HighwayLaneStrategyNode:
             # Do not let Pure Pursuit reach the finite path's goal-stop zone.
             # Near the endpoint, a recoverable lateral offset belongs to the
             # continuous camera-centre controller. Waiting for sub-0.45 m
-            # alignment here can park the car at the end of the RRT path and
+            # alignment here can park the car at the end of the lane-change path and
             # also prevents lane_changes_done from enabling the fast profile
             # for the following change.
             recoverable_endpoint_alignment = bool(
@@ -2610,7 +2498,7 @@ class HighwayLaneStrategyNode:
             # The final permitted lane is bounded by the nearest solid on the
             # left. If that solid and a fresh bracketing boundary pair confirm
             # that ego has reached this lane, end the committed LEFT path even
-            # when odometry-to-path alignment is noisy. Continuing the RRT path
+            # when odometry-to-path alignment is noisy. Continuing the lane-change path
             # in this situation preserves residual left yaw and can carry the
             # car across the solid into the forbidden solid-solid lane.
             final_center_ok = False
@@ -2652,7 +2540,7 @@ class HighwayLaneStrategyNode:
                     )
                     # The physical pair has already been confirmed here, so
                     # hand control to its bounded midpoint immediately rather
-                    # than carrying the remaining left-biased RRT tangent.
+                    # than carrying the remaining left-biased lane-change tangent.
                     self.inner_handover_pending = False
                     filtered, _ = self._filtered_inner_path(now, dt)
                     if filtered is not None:
@@ -2676,7 +2564,7 @@ class HighwayLaneStrategyNode:
                 self.final_lane_candidate_since = None
 
             # At high entry speed the car can reach the new lane centre before
-            # the distance-based completion timer expires. Continuing the RRT
+            # the distance-based completion timer expires. Continuing the lane-change
             # state then preserves left yaw long enough to cross another
             # divider. Capture the authorised target centre immediately and
             # roll that same target line forward. INNER_HOLD still blocks a
@@ -2705,7 +2593,7 @@ class HighwayLaneStrategyNode:
                 return
 
             # A missed change must not remain in LANE_CHANGE after the finite
-            # RRT path ends. Pure Pursuit then aims at its last point behind the
+            # lane-change path ends. Pure Pursuit then aims at its last point behind the
             # car and the highway no-brake mode lets it coast straight. Return
             # to the freshly measured current lane and plan a new attempt.
             if (
@@ -2731,7 +2619,7 @@ class HighwayLaneStrategyNode:
                         self.last_wait_center_at = now
                         rospy.logwarn(
                             "HIGHWAY lane change MISSED target; current lane "
-                            "reacquired and RRT will replan"
+                            "reacquired and lane-change will replan"
                         )
                         self._publish(
                             recovery_path, False, speed, True,
@@ -2960,7 +2848,7 @@ class HighwayLaneStrategyNode:
                 and control_heading is not None
                 and abs(float(control_heading)) <= self.next_change_heading_error_rad
                 # The measured midpoint and the actual filtered control path
-                # must both be centered. This prevents a new RRT request while
+                # must both be centered. This prevents a new lane-change request while
                 # the car is still following close to the left dashed line.
                 and control_path_y is not None
                 and abs(float(control_path_y)) <= self.next_change_center_error_m

@@ -29,7 +29,7 @@
   <arg name="lane_info_ip" default="$(arg bind_ip)" />
   <arg name="lane_info_port" default="1101" />
   <!-- Use the six-class lane checkpoint while keeping the lane-info publisher
-       that supplies fitted lane geometry to the RRT planner. -->
+       that supplies fitted lane geometry to the lane-change planner. -->
   <arg name="lane_info_checkpoint" default="$(find camera_perception)/models/best.pt" />
   <arg name="lane_info_cam_set" default="$(find camera_perception)/lane/cam_set.json" />
   <arg name="lane_info_device" default="auto" />
@@ -295,13 +295,13 @@
     <param name="merge_unavailable_topic" value="/perception/merge_gap/unavailable" />
     <param name="mission_request_bypass_sensor_merge_gate" value="true" />
     <!-- The strategy below independently validates current LiDAR front/rear
-         gap, TTC and the complete RRT* path. Avoid waiting on the older
+         gap, TTC and the complete quintic path. Avoid waiting on the older
          camera-gated merge decision as a second veto. -->
     <param name="bypass_sensor_merge_gate" value="true" />
     <!-- Arm from YOLO+dashed or a confirmed highway marking pattern,
          including the dashed-left/solid-right entrance lane. -->
     <param name="force_highway_active" value="false" />
-    <!-- Use measured lane boundaries for the RRT corridor and post-change hold. -->
+    <!-- Use measured lane boundaries for the quintic path and post-change hold. -->
     <param name="rrt_lidar_only_mode" value="false" />
     <!-- A lane change may start only from fresh measured lane geometry. The
          committed target line handles short dropouts after a change starts. -->
@@ -322,9 +322,8 @@
     <param name="lane_width_min_m" value="2.7" />
     <param name="lane_width_max_m" value="4.2" />
     <param name="nominal_lane_width_m" value="3.5" />
-    <!-- Hold 25 cm to the right of geometric centre after each LEFT merge.
-         Runtime clamping preserves the configured vehicle/line clearance. -->
-    <param name="lane_center_right_offset_m" value="0.25" />
+    <!-- Follow the midpoint of the two measured lane boundaries after each change. -->
+    <param name="lane_center_right_offset_m" value="0.0" />
     <param name="require_left_dashed" value="true" />
     <param name="left_divider_expected_tol_m" value="0.55" />
     <param name="outer_left_min_separation_m" value="2.0" />
@@ -336,7 +335,7 @@
     <param name="wait_lane_hold_grace_s" value="2.0" />
     <param name="inner_handover_confirm_s" value="0.20" />
     <param name="inner_handover_min_s" value="2.0" />
-    <!-- Compare each fresh centre with the immutable RRT target lane so
+    <!-- Compare each fresh centre with the immutable planned target lane so
          repeated camera track switches cannot slowly walk into the next lane. -->
     <param name="inner_center_switch_max_delta_m" value="0.85" />
     <param name="inner_handover_max_distance_m" value="6.0" />
@@ -350,10 +349,9 @@
     <param name="change_start_m" value="3.0" />
     <param name="change_min_length_m" value="18.0" />
     <param name="change_max_length_m" value="90.0" />
-    <param name="change_ramp_ratio" value="0.20" />
     <param name="change_max_heading_deg" value="15.0" />
-    <!-- Both the first and later merges use a decisive diagonal so the car
-         does not spend too long straddling a divider. -->
+    <!-- The first and later changes use a smooth quintic diagonal at the
+         actual speed, bounded by heading and lateral acceleration. -->
     <param name="repeat_change_min_length_m" value="18.0" />
     <param name="repeat_change_max_length_m" value="90.0" />
     <param name="repeat_change_time_s" value="3.6" />
@@ -373,7 +371,7 @@
     <param name="inner_boundary_safety_margin_m" value="0.20" />
     <param name="inner_path_deadband_m" value="0.15" />
     <!-- A repeat change starts only after both the measured midpoint and the
-         filtered path are within 25 cm of the right-biased hold target. -->
+         filtered path are within 25 cm of the lane centre. -->
     <param name="next_change_center_error_m" value="0.25" />
     <param name="next_change_heading_error_deg" value="2.5" />
     <param name="next_change_settle_confirm_s" value="0.75" />
@@ -382,15 +380,6 @@
     <param name="next_change_center_loss_grace_s" value="0.40" />
     <param name="change_time_s" value="3.6" />
     <param name="change_post_hold_m" value="10.0" />
-    <!-- Live vehicle-frame RRT*: consumes current lane/odom/LiDAR in memory. -->
-    <param name="rrt_step_size_m" value="2.0" />
-    <param name="rrt_max_iterations" value="50" />
-    <param name="rrt_goal_sample_rate" value="0.15" />
-    <param name="rrt_search_radius_m" value="6.0" />
-    <param name="rrt_goal_tolerance_m" value="2.5" />
-    <param name="rrt_max_heading_deg" value="20.0" />
-    <param name="rrt_corridor_margin_m" value="0.35" />
-    <param name="rrt_smooth_iterations" value="1" />
     <param name="change_settle_m" value="3.0" />
     <param name="repeat_change_settle_m" value="3.0" />
     <param name="change_endpoint_guard_m" value="6.0" />
