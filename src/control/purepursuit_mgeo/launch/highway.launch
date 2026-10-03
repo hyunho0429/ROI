@@ -1,0 +1,82 @@
+<launch>
+  <!-- Short public entry point for the complete highway/roundabout stack. -->
+  <arg name="morai_host_ip" default="192.168.0.161" />
+  <arg name="bind_ip" default="0.0.0.0" />
+  <arg name="path_file"
+       default="$(find morai_bringup)/../../../data/routes/2026_molit_comp_global_path.txt" />
+  <arg name="link_set_file"
+       default="$(find morai_bringup)/../../../data/mgeo/R_KR_PR_K-city_2025/link_set.json" />
+  <arg name="enable_control" default="false" />
+  <arg name="target_speed_mps" default="2.0" />
+  <arg name="managed_timeout_s" default="1.0" />
+
+  <arg name="enable_lane_info_publisher" default="true" />
+  <arg name="enable_camera_object_detection" default="true" />
+  <arg name="lane_info_topic" default="/perception/camera/lane_info" />
+  <arg name="lane_info_ip" default="$(arg bind_ip)" />
+  <arg name="lane_info_port" default="1101" />
+  <arg name="lane_info_checkpoint" default="$(find camera_perception)/models/best.pt" />
+  <arg name="lane_info_cam_set" default="$(find camera_perception)/lane/cam_set.json" />
+  <arg name="lane_info_device" default="auto" />
+  <arg name="lane_info_every" default="1" />
+  <arg name="enable_lane_debug_view" default="true" />
+  <arg name="lane_debug_scale" default="0.75" />
+
+  <arg name="yolo_port" default="1131" />
+  <arg name="yolo_base_model" default="$(find camera_perception)/models/yolov8n.pt" />
+  <arg name="yolo_custom_model" default="$(find camera_perception)/models/best0902.pt" />
+  <arg name="yolo_confidence" default="0.4" />
+  <arg name="yolo_inference_size" default="320" />
+  <arg name="highway_environment_topic" default="/perception/camera/highway_environment" />
+  <arg name="highway_require_dashed_lane" default="true" />
+  <arg name="highway_latch_once" default="true" />
+  <arg name="highway_request_topic" default="/planning/highway_lane_change_request" />
+
+  <arg name="publish_lidar_tf" default="true" />
+  <arg name="lidar_x_m" default="0.0" />
+  <arg name="lidar_y_m" default="0.0" />
+  <arg name="lidar_z_m" default="0.0" />
+  <arg name="lidar_yaw_deg" default="0.0" />
+  <arg name="merge_request_topic" default="/planning/merge_request" />
+  <arg name="enable_roundabout_merge_gate" default="true" />
+  <arg name="roundabout_override_intersection_stop" default="true" />
+
+  <include file="$(find purepursuit_mgeo)/launch/morai_avoidance_highway_roundabout_final.launch">
+    <arg name="morai_host_ip" value="$(arg morai_host_ip)" />
+    <arg name="bind_ip" value="$(arg bind_ip)" />
+    <arg name="path_file" value="$(arg path_file)" />
+    <arg name="link_set_file" value="$(arg link_set_file)" />
+    <arg name="enable_control" value="$(arg enable_control)" />
+    <arg name="target_speed_mps" value="$(arg target_speed_mps)" />
+    <arg name="managed_timeout_s" value="$(arg managed_timeout_s)" />
+    <arg name="enable_lane_info_publisher" value="$(arg enable_lane_info_publisher)" />
+    <arg name="enable_camera_object_detection" value="$(arg enable_camera_object_detection)" />
+    <arg name="lane_info_topic" value="$(arg lane_info_topic)" />
+    <arg name="lane_info_ip" value="$(arg lane_info_ip)" />
+    <arg name="lane_info_port" value="$(arg lane_info_port)" />
+    <arg name="lane_info_checkpoint" value="$(arg lane_info_checkpoint)" />
+    <arg name="lane_info_cam_set" value="$(arg lane_info_cam_set)" />
+    <arg name="lane_info_device" value="$(arg lane_info_device)" />
+    <arg name="lane_info_every" value="$(arg lane_info_every)" />
+    <arg name="enable_lane_debug_view" value="$(arg enable_lane_debug_view)" />
+    <arg name="lane_debug_scale" value="$(arg lane_debug_scale)" />
+    <arg name="yolo_port" value="$(arg yolo_port)" />
+    <arg name="yolo_base_model" value="$(arg yolo_base_model)" />
+    <arg name="yolo_custom_model" value="$(arg yolo_custom_model)" />
+    <arg name="yolo_confidence" value="$(arg yolo_confidence)" />
+    <arg name="yolo_inference_size" value="$(arg yolo_inference_size)" />
+    <arg name="highway_environment_topic" value="$(arg highway_environment_topic)" />
+    <arg name="highway_require_dashed_lane" value="$(arg highway_require_dashed_lane)" />
+    <arg name="highway_latch_once" value="$(arg highway_latch_once)" />
+    <arg name="highway_request_topic" value="$(arg highway_request_topic)" />
+    <arg name="publish_lidar_tf" value="$(arg publish_lidar_tf)" />
+    <arg name="lidar_x_m" value="$(arg lidar_x_m)" />
+    <arg name="lidar_y_m" value="$(arg lidar_y_m)" />
+    <arg name="lidar_z_m" value="$(arg lidar_z_m)" />
+    <arg name="lidar_yaw_deg" value="$(arg lidar_yaw_deg)" />
+    <arg name="merge_request_topic" value="$(arg merge_request_topic)" />
+    <arg name="enable_roundabout_merge_gate" value="$(arg enable_roundabout_merge_gate)" />
+    <arg name="roundabout_override_intersection_stop"
+         value="$(arg roundabout_override_intersection_stop)" />
+  </include>
+</launch>

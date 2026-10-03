@@ -276,6 +276,10 @@
     <param name="merge_available_topic" value="/perception/merge_gap/available" />
     <param name="merge_unavailable_topic" value="/perception/merge_gap/unavailable" />
     <param name="mission_request_bypass_sensor_merge_gate" value="true" />
+    <!-- The strategy below independently validates current LiDAR front/rear
+         gap, TTC and the complete RRT* path. Avoid waiting on the older
+         camera-gated merge decision as a second veto. -->
+    <param name="bypass_sensor_merge_gate" value="true" />
     <!-- Arm from the YOLO + dashed-lane highway-environment topic. -->
     <param name="force_highway_active" value="false" />
     <!-- Use measured lane boundaries for the RRT corridor and post-change hold. -->
@@ -293,7 +297,7 @@
          filtered control path have all settled in the new lane. -->
     <param name="min_lane_hold_before_next_change_s" value="5.0" />
     <param name="highway_confirm_s" value="0.5" />
-    <param name="ready_confirm_s" value="0.5" />
+    <param name="ready_confirm_s" value="0.25" />
 
     <param name="min_lane_confidence" value="0.45" />
     <param name="lane_width_min_m" value="2.7" />
@@ -397,6 +401,10 @@
     <!-- Once a merge is committed, only an imminent conflict can stop the car
          halfway across a divider. Longer predictions continue to be monitored. -->
     <param name="committed_stop_horizon_s" value="1.0" />
+    <!-- Once the full entry checks have committed a lane change, do not stop
+         astride a divider for side/future prediction overlap. Direct lead
+         emergency braking remains active. -->
+    <param name="post_commit_collision_stop_enabled" value="false" />
 
     <param name="release_global_d_m" value="0.55" />
     <param name="release_confirm_s" value="0.6" />

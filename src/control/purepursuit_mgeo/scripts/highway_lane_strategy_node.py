@@ -169,6 +169,14 @@ class HighwayLaneStrategyNode:
         self.mission_request_bypass_sensor_merge_gate = bool(
             rospy.get_param("~mission_request_bypass_sensor_merge_gate", True)
         )
+        # The upstream merge gate applies its own camera activation, temporal
+        # confirmation and target-lane geometry before publishing ``available``.
+        # This node repeats the decisive checks below using the current LiDAR
+        # tracks and the actual RRT* candidate.  Allow the highway stack to skip
+        # that redundant veto so a short, valid opening is not missed.
+        self.bypass_sensor_merge_gate = bool(
+            rospy.get_param("~bypass_sensor_merge_gate", False)
+        )
 
         self.min_lane_confidence = float(rospy.get_param("~min_lane_confidence", 0.45))
         self.lane_width_min_m = float(rospy.get_param("~lane_width_min_m", 2.7))
@@ -364,6 +372,13 @@ class HighwayLaneStrategyNode:
         )
         self.committed_stop_horizon_s = float(
             rospy.get_param("~committed_stop_horizon_s", 1.0)
+        )
+        # Entry remains protected by the gap/TTC and full RRT* collision checks.
+        # When disabled, a newly predicted side/future overlap is diagnostic
+        # after commitment instead of parking the vehicle over a lane divider.
+        # A true lead emergency still commands an immediate stop.
+        self.post_commit_collision_stop_enabled = bool(
+            rospy.get_param("~post_commit_collision_stop_enabled", True)
         )
         self.max_lateral_accel_mps2 = float(rospy.get_param("~max_lateral_accel_mps2", 2.5))
 
@@ -1630,8 +1645,11 @@ class HighwayLaneStrategyNode:
             self.highway_request or self.force_highway_active
         )
         use_sensor_merge_gate = not (
-            explicit_or_forced_request
-            and self.mission_request_bypass_sensor_merge_gate
+            self.bypass_sensor_merge_gate
+            or (
+                explicit_or_forced_request
+                and self.mission_request_bypass_sensor_merge_gate
+            )
         )
         if use_sensor_merge_gate:
             if not self._fresh(self.merge_at, self.merge_timeout_s, now):
@@ -2049,7 +2067,8 @@ class HighwayLaneStrategyNode:
             # trajectory is collision-free. New traffic after commitment can
             # still lower the command or force a stop through the safety guard.
             if (
-                obs_fresh and not path_safe and not emergency
+                self.post_commit_collision_stop_enabled
+                and obs_fresh and not path_safe and not emergency
                 and speed > adaptive_speed + 1e-6
             ):
                 floor_blocked = True
@@ -2059,11 +2078,14 @@ class HighwayLaneStrategyNode:
                 )
             # The long prediction horizon is useful before commitment, but a
             # transient crossing of a moving object's predicted box must not
-            # park the vehicle halfway across a divider. After commitment only
-            # an emergency lead or a collision inside the next second commands
-            # a stop; farther conflicts remain visible in diagnostics and are
-            # re-evaluated every control tick.
-            if obs_fresh and not path_safe and not emergency:
+            # park the vehicle halfway across a divider. In conservative mode,
+            # only an emergency lead or a collision inside the configured short
+            # horizon commands a stop. The competition launch monitors all
+            # non-emergency post-commit overlaps without stopping.
+            if (
+                self.post_commit_collision_stop_enabled
+                and obs_fresh and not path_safe and not emergency
+            ):
                 immediate_arc_m = (
                     self.vehicle_length_m
                     + max(speed, 0.5)*max(self.committed_stop_horizon_s, 0.25)
@@ -2077,7 +2099,15 @@ class HighwayLaneStrategyNode:
                     path_reason = "future_collision_monitored"
                 else:
                     path_reason = immediate_reason
-            stop = emergency or not path_safe
+            if (
+                not self.post_commit_collision_stop_enabled
+                and not path_safe and not emergency
+            ):
+                future_collision_reason = path_reason
+                path_reason = "post_commit_collision_monitored"
+            stop = emergency or (
+                self.post_commit_collision_stop_enabled and not path_safe
+            )
 
             lat = None if self.lane_info is None else self.lane_info.get("lateral_error_m")
             head = None if self.lane_info is None else self.lane_info.get("heading_error_rad")
@@ -2411,8 +2441,11 @@ class HighwayLaneStrategyNode:
 
             path_safe, path_reason = self._dynamic_path_safe(path, adaptive) if obs_fresh else (False, "obstacles_stale")
             if not stop and not path_safe:
-                stop = True
-                inner_reason = path_reason
+                if self.post_commit_collision_stop_enabled:
+                    stop = True
+                    inner_reason = path_reason
+                else:
+                    inner_reason = "post_commit_collision_monitored"
 
             # Follow and settle in each lane before starting a new uninterrupted
             # gap confirmation. There is no count limit; road geometry, a dashed

@@ -244,6 +244,30 @@ class HighwaySafetyTest(unittest.TestCase):
         self.assertIsNotNone(path)
         self.assertEqual(reason,"ok")
 
+    def test_automatic_highway_can_bypass_redundant_upstream_merge_gate(self):
+        n = self.node
+        n.highway_environment = True
+        n.highway_request = False
+        n.force_highway_active = False
+        n.bypass_sensor_merge_gate = True
+        n.merge_at = None
+        n.merge_available = False
+        n.merge_unavailable = True
+        n._left_dashed_ok = Mock(return_value=(True, "ok"))
+        n._left_divider_sanity = Mock(return_value=(True, "ok", {}))
+        n._generate_lane_change_local = Mock(
+            return_value=([(0.0, 0.0), (10.0, 1.0), (35.0, 3.5)], 32.0)
+        )
+        n._path_curvature_ok = Mock(return_value=(True, 0.01))
+        n._gap_safe_for_speed = Mock(return_value=(True, "ok", {}))
+        n._local_to_map = Mock(return_value=path_at(3.5))
+        n._dynamic_path_safe = Mock(return_value=(True, "ok"))
+
+        path, _, _, reason, _ = n._choose_lane_change(Stamp())
+
+        self.assertIsNotNone(path)
+        self.assertEqual(reason, "ok")
+
     def test_repeat_change_geometry_uses_actual_entry_speed(self):
         n = self.node
         n.lane_changes_done = 1
@@ -349,6 +373,25 @@ class HighwaySafetyTest(unittest.TestCase):
         n.committed_path = path_at(0.0)
         n.latest_obstacles.obstacles = [obstacle(5.0, 0.0)]
         self.assertTrue(self.tick()[1])
+
+    def test_competition_mode_monitors_post_commit_collision_without_stopping(self):
+        n = self.node
+        n.state = n.LANE_CHANGE
+        n.cruise_speed_mps = 4.0
+        n.committed_speed_mps = 4.0
+        n.post_commit_collision_stop_enabled = False
+        n._adaptive_speed = Mock(return_value=(2.0, False, {"lead": 1}))
+        n._dynamic_path_safe = Mock(
+            return_value=(False, "predicted_collision_id_1")
+        )
+
+        _, stop, speed, _, status, *_ = self.tick()
+
+        self.assertFalse(stop)
+        self.assertEqual(speed, 3.5)
+        self.assertEqual(status["reason"], "post_commit_collision_monitored")
+        self.assertEqual(status["future_collision"], "predicted_collision_id_1")
+        self.assertFalse(status["speed_floor_blocked"])
 
     def test_lane_change_does_not_commit_slow_candidate(self):
         n = self.node
