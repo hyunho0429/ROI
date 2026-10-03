@@ -33,6 +33,17 @@ class ProtocolError(ValueError):
     """MORAI UDP 패킷이 선택한 대회 프로토콜과 맞지 않을 때 발생한다."""
 
 
+def effective_brake_pedal(
+    requested_brake: float,
+    highway_active: bool,
+    highway_braking_enabled: bool,
+) -> float:
+    """Return the final brake pedal after the highway competition override."""
+    if highway_active and not highway_braking_enabled:
+        return 0.0
+    return max(0.0, min(1.0, float(requested_brake)))
+
+
 def parse_competition_vehicle_status(packet: bytes):
     """대회 전용 181/229바이트 상태 패킷을 엄격하게 해석한다."""
 

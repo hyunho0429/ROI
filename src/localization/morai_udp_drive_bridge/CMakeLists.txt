@@ -6,12 +6,13 @@ find_package(catkin REQUIRED COMPONENTS
   morai_msgs
   path_planning
   rospy
+  std_msgs
 )
 
 catkin_python_setup()
 
 catkin_package(
-  CATKIN_DEPENDS geometry_msgs morai_msgs path_planning rospy
+  CATKIN_DEPENDS geometry_msgs morai_msgs path_planning rospy std_msgs
 )
 
 catkin_install_python(PROGRAMS

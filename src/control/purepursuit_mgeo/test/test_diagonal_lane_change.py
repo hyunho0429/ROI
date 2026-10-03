@@ -3,6 +3,7 @@ import math
 import unittest
 
 from purepursuit_mgeo.motion import (
+    apply_highway_brake_policy,
     diagonal_progress,
     lateral_acceleration_steering_limit,
     SteeringRateLimiter,
@@ -23,6 +24,21 @@ def node_fixture():
 
 
 class DiagonalLaneChangeTest(unittest.TestCase):
+    def test_highway_no_brake_policy_removes_stop_and_pid_brake(self):
+        stop, accel, brake = apply_highway_brake_policy(
+            True, False, True, 0.0, 1.0
+        )
+        self.assertFalse(stop)
+        self.assertEqual(accel, 0.0)
+        self.assertEqual(brake, 0.0)
+
+    def test_highway_brake_policy_preserves_normal_driving_stop(self):
+        stop, _, brake = apply_highway_brake_policy(
+            False, False, True, 0.0, 1.0
+        )
+        self.assertTrue(stop)
+        self.assertEqual(brake, 1.0)
+
     def test_profile_is_monotone_with_constant_middle_slope(self):
         values = [diagonal_progress(i/1000) for i in range(1001)]
         self.assertEqual(values[0], 0.0)

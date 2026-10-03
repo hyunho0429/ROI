@@ -2,6 +2,19 @@
 import math
 
 
+def apply_highway_brake_policy(
+    highway_active: bool,
+    braking_enabled: bool,
+    stop: bool,
+    accel: float,
+    brake: float,
+):
+    """Suppress both logical stop and pedal brake in highway no-brake mode."""
+    if highway_active and not braking_enabled:
+        return False, float(accel), 0.0
+    return bool(stop), float(accel), float(brake)
+
+
 def diagonal_progress(u: float, ramp: float = 0.2) -> float:
     """C2 lateral shift: eased entry/exit and constant slope in the middle.
 

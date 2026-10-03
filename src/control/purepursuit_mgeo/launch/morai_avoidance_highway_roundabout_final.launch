@@ -77,7 +77,7 @@
   <param name="/purepursuit_mgeo/target_speed_override_topic"
          value="/highway_lane_strategy/target_speed_mps" />
   <param name="/purepursuit_mgeo/target_speed_override_timeout_s" value="1.0" />
-  <!-- Road-wheel command slew limit; braking/stop flags remain immediate. -->
+  <!-- Road-wheel command slew limit. -->
   <param name="/purepursuit_mgeo/steering_rate_limit_rad_s" value="0.20" />
   <param name="/purepursuit_mgeo/steering_rate_limit_active_topic" value="/highway_lane_strategy/active" />
   <!-- At 9 m/s this limits road-wheel steering to about 5.3 degrees, while
@@ -90,6 +90,14 @@
   <param name="/purepursuit_mgeo/fast_change_lookahead_speed_gain" value="0.75" />
   <param name="/purepursuit_mgeo/fast_change_steering_rate_rad_s" value="0.50" />
   <param name="/purepursuit_mgeo/fast_change_reference_speed_mps" value="4.0" />
+  <!-- Final CtrlCmd policy: in an active highway state suppress both logical
+       stop flags and the speed PID's overspeed brake output. -->
+  <param name="/purepursuit_mgeo/highway_active_topic" value="/highway_lane_strategy/active" />
+  <param name="/purepursuit_mgeo/highway_braking_enabled" value="false" />
+  <!-- Apply the same override at the UDP boundary, including the bridge's
+       command-timeout fallback packet. -->
+  <param name="/morai_udp_drive_bridge/highway_active_topic" value="/highway_lane_strategy/active" />
+  <param name="/morai_udp_drive_bridge/highway_braking_enabled" value="false" />
 
   <param name="/purepursuit_mgeo/enable_merge_gate" value="$(arg enable_roundabout_merge_gate)" />
   <param name="/purepursuit_mgeo/merge_stop_topic" value="/roundabout_merge_gate/stop_required" />

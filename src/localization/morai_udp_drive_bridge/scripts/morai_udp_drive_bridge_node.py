@@ -12,6 +12,7 @@ from typing import Optional
 import rospy
 from geometry_msgs.msg import Vector3
 from morai_msgs.msg import CtrlCmd, EgoVehicleStatus
+from std_msgs.msg import Bool
 
 from morai_udp_drive_bridge.protocol import (
     COMPETITION_STATUS_HOST_PORT,
@@ -20,6 +21,7 @@ from morai_udp_drive_bridge.protocol import (
     COMPETITION_STATUS_PORT,
     ProtocolError,
     build_ego_ctrl_cmd,
+    effective_brake_pedal,
     parse_competition_vehicle_status,
 )
 
@@ -42,6 +44,11 @@ class MoraiUdpDriveBridge:
         self.command_topic = rospy.get_param("~command_topic", "/ctrl_cmd")
         self.send_rate_hz = float(rospy.get_param("~send_rate_hz", 20.0))
         self.command_timeout_sec = float(rospy.get_param("~command_timeout_sec", 0.5))
+        self.highway_active = False
+        self.highway_braking_enabled = bool(
+            rospy.get_param("~highway_braking_enabled", True)
+        )
+        highway_active_topic = rospy.get_param("~highway_active_topic", "")
         self.max_wheel_angle_rad = float(
             rospy.get_param("~max_wheel_angle_rad", math.radians(40.0))
         )
@@ -49,6 +56,13 @@ class MoraiUdpDriveBridge:
 
         self.status_pub = rospy.Publisher(self.status_topic, EgoVehicleStatus, queue_size=20)
         rospy.Subscriber(self.command_topic, CtrlCmd, self.command_callback, queue_size=20)
+        if highway_active_topic:
+            rospy.Subscriber(
+                highway_active_topic,
+                Bool,
+                self.highway_active_callback,
+                queue_size=1,
+            )
 
         self.send_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         if self.control_bind_port > 0:
@@ -188,12 +202,27 @@ class MoraiUdpDriveBridge:
         self.last_command = message
         self.last_command_time = time.monotonic()
 
+    def highway_active_callback(self, message: Bool) -> None:
+        self.highway_active = bool(message.data)
+
     def send_timer_callback(self, _event) -> None:
         message = self.last_command
         is_fresh = message is not None and time.monotonic() - self.last_command_time <= self.command_timeout_sec
+        no_brake = self.highway_active and not self.highway_braking_enabled
 
         if not is_fresh:
-            packet = build_ego_ctrl_cmd(cmd_type=1, velocity_kmh=0.0, brake=1.0)
+            packet = build_ego_ctrl_cmd(
+                cmd_type=1,
+                velocity_kmh=0.0,
+                brake=effective_brake_pedal(
+                    1.0, self.highway_active, self.highway_braking_enabled
+                ),
+            )
+            if no_brake:
+                rospy.logwarn_throttle(
+                    1.0,
+                    "EgoCtrlCmd timeout brake suppressed in highway no-brake mode",
+                )
         else:
             requested_cmd_type = int(getattr(message, "longlCmdType", 1))
             if requested_cmd_type != 1:
@@ -209,7 +238,11 @@ class MoraiUdpDriveBridge:
                 velocity_kmh=0.0,
                 acceleration_mps2=float(getattr(message, "acceleration", 0.0)),
                 accel=float(getattr(message, "accel", 0.0)),
-                brake=float(getattr(message, "brake", 0.0)),
+                brake=effective_brake_pedal(
+                    float(getattr(message, "brake", 0.0)),
+                    self.highway_active,
+                    self.highway_braking_enabled,
+                ),
                 steer_normalized=steer_normalized,
                 ctrl_mode=2,
                 gear=4,
