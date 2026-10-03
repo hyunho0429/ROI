@@ -601,6 +601,34 @@ class HighwaySafetyTest(unittest.TestCase):
         self.assertEqual(speed, 15.0)
         self.assertGreaterEqual(length, 60.0)
 
+    def test_off_center_ego_uses_measured_boundary_pair_for_left_change(self):
+        n = self.node
+        n._boundary_local = NODE.HighwayLaneStrategyNode._boundary_local.__get__(n)
+        n.lane_info = {
+            "lane_valid": True, "output_status": "FRESH", "lane_width_m": 3.5,
+            "left_lane": {
+                "detected": True, "type": "white_dashed", "age": 3,
+                "coef": [0.0, 0.0, 2.4], "x_range_m": [5.0, 25.0],
+            },
+            "right_lane": {"detected": True, "coasted": False, "from_guide": False},
+            "left_boundary_points": [[float(x), 2.4] for x in range(5, 26)],
+            "right_boundary_points": [[float(x), -1.1] for x in range(5, 26)],
+        }
+
+        self.assertEqual(n._left_dashed_ok(), (True, "ok"))
+        valid, reason, diag = n._left_divider_sanity(3.5)
+        self.assertTrue(valid, diag)
+        self.assertEqual(reason, "measured_boundary_pair")
+        self.assertAlmostEqual(diag["measured_pair_width_m"], 3.5)
+
+        # A farther dashed line may never stand in for the adjacent divider.
+        n.lane_info["left_boundary_points"] = [
+            [float(x), 4.2] for x in range(5, 26)
+        ]
+        valid, reason, _ = n._left_divider_sanity(3.5)
+        self.assertFalse(valid)
+        self.assertEqual(reason, "left_divider_pair_invalid")
+
     def test_first_change_checks_actual_entry_speed_when_braking_is_disabled(self):
         n = self.node
         n.lane_changes_done = 0

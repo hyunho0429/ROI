@@ -677,7 +677,9 @@ class HighwayLaneStrategyNode:
         left_type = adjacent_left_lane_type(
             self.lane_info or {},
             eval_x_m=7.0,
-            max_y_m=2.6,
+            # A car can be right of the lane centre while still wholly inside
+            # a wide lane. The two-boundary check below confirms adjacency.
+            max_y_m=max(2.6, self.lane_width_max_m - 0.5*self.vehicle_width_m),
             min_track_age=2,
         )
         if left_type == "white_dashed":
@@ -965,6 +967,31 @@ class HighwayLaneStrategyNode:
                 diag["fallback_from"] = "left_divider_wrong_side"
                 return True, "nominal_lane_fallback_left_divider_wrong_side", diag
             return False, "left_divider_wrong_side", diag
+        info = self.lane_info or {}
+        right_meta = info.get("right_lane") or {}
+        right = self._boundary_local("right_boundary_points")
+        # A half-lane offset assumes the ego is already centred. During lane
+        # capture it often is not. Two measured physical boundaries are a
+        # stronger adjacency check: they must bracket the ego and be one lane
+        # width apart. Never use a guide, coasted, or nominal right edge here.
+        if (
+            not self.nominal_lane_fallback_active
+            and str(info.get("output_status", "")).upper() == "FRESH"
+            and bool(right_meta.get("detected", False))
+            and not bool(right_meta.get("from_guide", False))
+            and not bool(right_meta.get("coasted", False))
+            and len(right) >= 3
+        ):
+            right_y5 = interp_y(right, 5.0)
+            if right_y5 is not None:
+                separation = float(y5) - float(right_y5)
+                diag.update({
+                    "right_boundary_y5_m": round(float(right_y5), 3),
+                    "measured_pair_width_m": round(separation, 3),
+                })
+                if float(right_y5) < 0.0 and abs(separation - lane_width) <= self.left_divider_expected_tol_m:
+                    return True, "measured_boundary_pair", diag
+                return False, "left_divider_pair_invalid", diag
         if err > self.left_divider_expected_tol_m:
             if self._nominal_lane_fallback_allowed():
                 self.nominal_lane_fallback_active = True
@@ -1948,6 +1975,7 @@ class HighwayLaneStrategyNode:
                 "geometry_speed_mps": round(geometry_speed, 2),
                 "lane_source": lane_source,
                 "divider_source": divider_reason,
+                "curvature_ok": bool(curv_ok),
                 "curvature": round(max_k,5),
                 "gap": gap_diag,
                 "gap_reason": gap_reason,
@@ -2288,6 +2316,23 @@ class HighwayLaneStrategyNode:
             status.get("wait_path_source", "committed" if active else "base"),
             (status.get("follow") or {}).get("lead"), speed_out, bool(stop),
         )
+        if self.state == self.WAIT_GAP:
+            reason = str(status.get("reason", "unknown"))
+            detail = ""
+            if reason == "no_safe_speed_path_pair":
+                candidates = status.get("candidate_diag") or {}
+                if candidates:
+                    candidate = candidates.get(str(round(self.cruise_speed_mps, 2)))
+                    if candidate is None:
+                        candidate = next(iter(candidates.values()))
+                    if isinstance(candidate, dict):
+                        detail = " rrt=%s curvature_ok=%s gap=%s dynamic=%s" % (
+                            (candidate.get("rrt") or {}).get("reason", candidate.get("reason", "unknown")),
+                            candidate.get("curvature_ok", "unknown"),
+                            candidate.get("gap_reason", "unknown"),
+                            candidate.get("dyn", "unknown"),
+                        )
+            rospy.logwarn_throttle(1.0, "HIGHWAY WAIT_GAP reason=%s%s", reason, detail)
         if stop:
             rospy.logwarn_throttle(0.5, "HIGHWAY STOP state=%s reason=%s follow=%s", self.state, str(status.get("reason")), json.dumps(status.get("follow", {}), separators=(",", ":")))
 
