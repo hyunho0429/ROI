@@ -92,6 +92,74 @@ def adjacent_left_lane_semantics(info, **kwargs):
     }
 
 
+def multilane_highway_pattern(info, eval_x_m=7.0, min_width_m=2.7,
+                              max_width_m=4.5):
+    """Classify a fresh, measured pair of left-hand lane boundaries.
+
+    A closely paired dashed+solid marking is strong highway evidence. Two
+    dashed boundaries one full lane apart are weaker evidence. Actual permission
+    to cross still checks the nearest boundary.
+    """
+    near_type = adjacent_left_lane_type(info, eval_x_m=eval_x_m)
+    if near_type not in ("white_dashed", "white_solid"):
+        return None
+    if (info.get("straddling_lane") or {}).get("detected", False):
+        return None
+    width = _finite_float(info.get("lane_width_m"))
+    if width is None or not min_width_m <= width <= max_width_m:
+        return None
+    outer = info.get("left_outer_lane") or {}
+    if (not outer.get("detected", False) or outer.get("from_guide", False)
+            or outer.get("coasted", False)):
+        return None
+    try:
+        if int(outer.get("age", 0)) < 2:
+            return None
+    except (TypeError, ValueError):
+        return None
+    x_range = outer.get("x_range_m")
+    if isinstance(x_range, (list, tuple)) and len(x_range) >= 2:
+        lo, hi = _finite_float(x_range[0]), _finite_float(x_range[1])
+        if lo is None or hi is None or eval_x_m < lo-3.0 or eval_x_m > hi+3.0:
+            return None
+    near_y = _polyval((info.get("left_lane") or {}).get("coef") or [], eval_x_m)
+    outer_y = _polyval(outer.get("coef") or [], eval_x_m)
+    if near_y is None or outer_y is None:
+        return None
+    separation = outer_y-near_y
+    outer_type = outer.get("type")
+    if (0.08 <= separation <= 0.75
+            and {near_type, outer_type} == {"white_dashed", "white_solid"}):
+        return "paired_dashed_solid"
+    if near_type != "white_dashed" or not 2.0 <= separation <= 4.8:
+        return None
+    if outer_type == "white_dashed":
+        return "double_dashed"
+    return None
+
+
+class ConsecutiveLanePattern:
+    """Count distinct fresh camera observations, not timer ticks."""
+
+    def __init__(self, minimum_observations=3):
+        self.minimum_observations = max(1, int(minimum_observations))
+        self.last_stamp = None
+        self.pattern = None
+        self.count = 0
+
+    def observe(self, stamp, pattern):
+        if stamp is None or stamp == self.last_stamp:
+            return self.count
+        self.last_stamp = stamp
+        self.count = self.count+1 if pattern and pattern == self.pattern else (1 if pattern else 0)
+        self.pattern = pattern
+        return self.count
+
+    def ready(self, pattern):
+        return bool(pattern and pattern == self.pattern
+                    and self.count >= self.minimum_observations)
+
+
 class HighwayEnvironmentLatch:
     """Optionally keep the highway state active after its first detection."""
 

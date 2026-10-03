@@ -17,9 +17,11 @@ for path in (PACKAGE_SRC, REPOSITORY_ROOT):
 from camera_perception.highway_environment import (
     AdjacentDashedHold,
     HighwayEnvironmentLatch,
+    ConsecutiveLanePattern,
     adjacent_left_lane_semantics,
     adjacent_left_lane_type,
     exclusive_highway_active,
+    multilane_highway_pattern,
 )
 from camera_perception.highway_vehicle import highway_vehicle_detected
 
@@ -130,6 +132,54 @@ class SituationExclusionTest(unittest.TestCase):
         self.assertTrue(exclusive_highway_active(True, False))
         self.assertFalse(exclusive_highway_active(True, True))
         self.assertFalse(exclusive_highway_active(False, False))
+
+
+class MultilanePatternTest(unittest.TestCase):
+    @staticmethod
+    def info(outer_type="white_solid"):
+        info = AdjacentLeftLaneTest.lane_info()
+        info["lane_width_m"] = 3.5
+        info["left_outer_lane"] = {
+            "detected": True, "type": outer_type, "age": 3,
+            "coef": [0.0, 0.0, 5.25], "x_range_m": [5.0, 25.0],
+        }
+        return info
+
+    def test_distant_solid_is_not_the_requested_close_pair(self):
+        self.assertIsNone(multilane_highway_pattern(self.info()))
+
+    def test_close_dashed_and_solid_pair_is_highway_evidence(self):
+        info = self.info()
+        info["left_outer_lane"]["coef"] = [0, 0, 2.05]
+        self.assertEqual(multilane_highway_pattern(info), "paired_dashed_solid")
+        info["left_lane"]["type"] = "white_solid"
+        info["left_outer_lane"]["type"] = "white_dashed"
+        self.assertEqual(multilane_highway_pattern(info), "paired_dashed_solid")
+
+    def test_double_dashed_is_distinct_weaker_pattern(self):
+        self.assertEqual(multilane_highway_pattern(self.info("white_dashed")), "double_dashed")
+
+    def test_nearest_solid_and_bad_geometry_are_rejected(self):
+        info = self.info()
+        info["left_lane"]["type"] = "white_solid"
+        self.assertIsNone(multilane_highway_pattern(info))
+        info = self.info()
+        info["left_outer_lane"]["coef"] = [0, 0, 8.0]
+        self.assertIsNone(multilane_highway_pattern(info))
+        info = self.info()
+        info["output_status"] = "HELD"
+        self.assertIsNone(multilane_highway_pattern(info))
+
+    def test_pattern_requires_distinct_consecutive_frames(self):
+        state = ConsecutiveLanePattern(3)
+        state.observe(1, "paired_dashed_solid")
+        state.observe(1, "paired_dashed_solid")
+        self.assertFalse(state.ready("paired_dashed_solid"))
+        state.observe(2, "paired_dashed_solid")
+        state.observe(3, "paired_dashed_solid")
+        self.assertTrue(state.ready("paired_dashed_solid"))
+        state.observe(4, None)
+        self.assertFalse(state.ready("paired_dashed_solid"))
 
 
 if __name__ == "__main__":

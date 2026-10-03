@@ -83,6 +83,9 @@ class PurePursuitNode:
         self.highway_braking_enabled = bool(
             rospy.get_param("~highway_braking_enabled", True)
         )
+        self.highway_speed_braking_enabled = bool(
+            rospy.get_param("~highway_speed_braking_enabled", False)
+        )
         highway_active_topic = rospy.get_param("~highway_active_topic", "")
         if highway_active_topic:
             rospy.Subscriber(
@@ -485,6 +488,7 @@ class PurePursuitNode:
                     stop,
                     accel,
                     brake,
+                    allow_speed_brake=self.highway_speed_braking_enabled,
                 )
             self.command_pub.publish(self.make_command(steering, stop, accel, brake))
 

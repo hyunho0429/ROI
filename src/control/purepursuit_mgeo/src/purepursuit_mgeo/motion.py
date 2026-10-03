@@ -8,10 +8,13 @@ def apply_highway_brake_policy(
     stop: bool,
     accel: float,
     brake: float,
+    allow_speed_brake: bool = False,
 ):
-    """Suppress both logical stop and pedal brake in highway no-brake mode."""
+    """Suppress mission stops while optionally retaining cruise speed control."""
     if highway_active and not braking_enabled:
-        return False, float(accel), 0.0
+        return False, float(accel), (
+            max(0.0, float(brake)) if allow_speed_brake and not stop else 0.0
+        )
     return bool(stop), float(accel), float(brake)
 
 

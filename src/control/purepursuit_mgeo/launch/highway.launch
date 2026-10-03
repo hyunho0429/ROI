@@ -30,6 +30,8 @@
   <arg name="highway_environment_topic" default="/perception/camera/highway_environment" />
   <arg name="highway_require_dashed_lane" default="true" />
   <arg name="highway_latch_once" default="true" />
+  <arg name="highway_lane_pattern_enabled" default="true" />
+  <arg name="highway_lane_pattern_min_speed_mps" default="10.0" />
   <arg name="highway_request_topic" default="/planning/highway_lane_change_request" />
 
   <arg name="publish_lidar_tf" default="true" />
@@ -68,6 +70,8 @@
     <arg name="highway_environment_topic" value="$(arg highway_environment_topic)" />
     <arg name="highway_require_dashed_lane" value="$(arg highway_require_dashed_lane)" />
     <arg name="highway_latch_once" value="$(arg highway_latch_once)" />
+    <arg name="highway_lane_pattern_enabled" value="$(arg highway_lane_pattern_enabled)" />
+    <arg name="highway_lane_pattern_min_speed_mps" value="$(arg highway_lane_pattern_min_speed_mps)" />
     <arg name="highway_request_topic" value="$(arg highway_request_topic)" />
     <arg name="publish_lidar_tf" value="$(arg publish_lidar_tf)" />
     <arg name="lidar_x_m" value="$(arg lidar_x_m)" />

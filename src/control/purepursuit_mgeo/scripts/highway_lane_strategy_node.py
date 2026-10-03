@@ -2234,7 +2234,9 @@ class HighwayLaneStrategyNode:
             self._publish(self.latest_base_path if base_fresh else None, stop, self.cruise_speed_mps, False, {"reason":"highway_strategy_done"}, now, dt)
             return
 
-        # WAIT_GAP: stay on the existing global/avoidance path, but start adapting speed.
+        # WAIT_GAP: hold the measured current-lane midpoint while looking for a
+        # LiDAR gap. The global path can run across the paired entrance marking
+        # and silently move the ego into the next lane before an RRT commit.
         if self.state == self.WAIT_GAP:
             adaptive, emergency, follow = self._adaptive_speed(self.cruise_speed_mps) if obs_fresh and (self.lane_info is not None or self.rrt_lidar_only_mode) else (self.cruise_speed_mps, False, {})
             shaping = self.cruise_speed_mps
@@ -2262,8 +2264,19 @@ class HighwayLaneStrategyNode:
                     rospy.logwarn("HIGHWAY lane change COMMITTED speed=%.2f length=%.1f", cand_speed, length)
             else:
                 self.ready_since = None
+            wait_path = self.latest_base_path if base_fresh else None
+            lane_hold_source = "base"
+            if lane_ok_for_shape:
+                center_ok, _, _ = self._inner_center_sanity(
+                    require_two_boundaries=True
+                )
+                if center_ok:
+                    local_center = self._hold_centerline_local()
+                    if len(local_center) >= 3:
+                        wait_path = self._local_to_map(local_center, now)
+                        lane_hold_source = "camera_midpoint"
             stop = (not base_fresh) or (not base_stop_fresh) or self.base_stop or emergency
-            self._publish(self.latest_base_path if base_fresh else None, stop, wait_speed, True, {"reason":reason, "follow":follow, "gap_shaping":shaping_diag, "candidate_diag":diag}, now, dt)
+            self._publish(wait_path, stop, wait_speed, True, {"reason":reason, "follow":follow, "gap_shaping":shaping_diag, "candidate_diag":diag, "wait_path_source":lane_hold_source}, now, dt)
             return
 
         if self.state == self.LANE_CHANGE:

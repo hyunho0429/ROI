@@ -119,6 +119,29 @@ class HighwaySafetyTest(unittest.TestCase):
         self.node._tick(None)
         return self.node._publish.call_args.args
 
+    def test_wait_gap_follows_measured_lane_instead_of_global_path(self):
+        n = self.node
+        n.state = n.WAIT_GAP
+        n._choose_lane_change = Mock(return_value=(None, None, None, "gap_wait", {}))
+        n._gap_shaping_speed = Mock(return_value=(2.0, {}))
+        n._hold_centerline_local = Mock(return_value=[
+            (0.0, 0.0), (10.0, 0.4), (20.0, 0.4)
+        ])
+        path, _, _, active, status, *_ = self.tick()
+        self.assertTrue(active)
+        self.assertEqual(status["wait_path_source"], "camera_midpoint")
+        self.assertAlmostEqual(path.poses[1].pose.position.y, 0.4)
+
+    def test_wait_gap_keeps_base_path_when_lane_pair_is_unreliable(self):
+        n = self.node
+        n.state = n.WAIT_GAP
+        n._choose_lane_change = Mock(return_value=(None, None, None, "gap_wait", {}))
+        n._gap_shaping_speed = Mock(return_value=(2.0, {}))
+        n._inner_center_sanity = Mock(return_value=(False, "unreliable", None))
+        path, _, _, _, status, *_ = self.tick()
+        self.assertIs(path, n.latest_base_path)
+        self.assertEqual(status["wait_path_source"], "base")
+
     def test_closer_same_lane_obstacle_remains_emergency(self):
         for x in (7.0, 5.0):
             with self.subTest(x=x):

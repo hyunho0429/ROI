@@ -59,6 +59,9 @@
   <arg name="left_parallel_dynamic_hold_s" default="0.5" />
   <arg name="highway_latch_once" default="true" />
   <arg name="car_detection_hold_s" default="2.0" />
+  <arg name="highway_lane_pattern_enabled" default="false" />
+  <arg name="highway_lane_pattern_min_speed_mps" default="10.0" />
+  <arg name="lane_info_topic" default="/perception/camera/lane_info" />
   <arg name="enable_pedestrian_crossing" default="$(arg enable_yolo)" />
   <arg name="pedestrian_stop_topic" default="/perception/pedestrian_crossing/stop_required" />
   <arg name="pedestrian_resume_topic" default="/perception/pedestrian_crossing/resume_allowed" />
@@ -138,6 +141,9 @@
     <arg name="left_parallel_dynamic_hold_s" value="$(arg left_parallel_dynamic_hold_s)" />
     <arg name="highway_latch_once" value="$(arg highway_latch_once)" />
     <arg name="car_detection_hold_s" value="$(arg car_detection_hold_s)" />
+    <arg name="highway_lane_pattern_enabled" value="$(arg highway_lane_pattern_enabled)" />
+    <arg name="highway_lane_pattern_min_speed_mps" value="$(arg highway_lane_pattern_min_speed_mps)" />
+    <arg name="lane_info_topic" value="$(arg lane_info_topic)" />
     <arg name="enable_pedestrian_crossing" value="$(arg enable_pedestrian_crossing)" />
     <arg name="pedestrian_stop_topic" value="$(arg pedestrian_stop_topic)" />
     <arg name="pedestrian_resume_topic" value="$(arg pedestrian_resume_topic)" />

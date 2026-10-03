@@ -39,6 +39,18 @@ class DiagonalLaneChangeTest(unittest.TestCase):
         self.assertTrue(stop)
         self.assertEqual(brake, 1.0)
 
+    def test_highway_cruise_brake_does_not_restore_mission_stop(self):
+        stop, _, brake = apply_highway_brake_policy(
+            True, False, False, 0.0, 0.25, allow_speed_brake=True
+        )
+        self.assertFalse(stop)
+        self.assertEqual(brake, 0.25)
+        stop, _, brake = apply_highway_brake_policy(
+            True, False, True, 0.0, 1.0, allow_speed_brake=True
+        )
+        self.assertFalse(stop)
+        self.assertEqual(brake, 0.0)
+
     def test_profile_is_monotone_with_constant_middle_slope(self):
         values = [diagonal_progress(i/1000) for i in range(1001)]
         self.assertEqual(values[0], 0.0)
