@@ -97,7 +97,7 @@
        path-aligned LiDAR lead; an imminent conflict uses the brake pedal while
        retaining the moving-lead speed target and steering path. -->
   <param name="/purepursuit_mgeo/highway_active_topic" value="/highway_lane_strategy/active" />
-  <param name="/purepursuit_mgeo/highway_braking_enabled" value="false" />
+  <param name="/purepursuit_mgeo/highway_braking_enabled" value="true" />
   <param name="/purepursuit_mgeo/highway_speed_braking_enabled" value="true" />
   <param name="/purepursuit_mgeo/highway_lead_brake_topic" value="/highway_lane_strategy/lead_brake_required" />
   <param name="/purepursuit_mgeo/highway_lead_emergency_topic" value="/highway_lane_strategy/lead_emergency_brake" />
@@ -325,6 +325,8 @@
     <!-- Follow the midpoint of the two measured lane boundaries after each change. -->
     <param name="lane_center_right_offset_m" value="0.0" />
     <param name="require_left_dashed" value="true" />
+    <!-- Two one-lane changes reach the final permitted lane on this course. -->
+    <param name="max_left_lane_changes" value="2" />
     <param name="left_divider_expected_tol_m" value="0.55" />
     <param name="outer_left_min_separation_m" value="2.0" />
     <param name="outer_left_max_separation_m" value="4.8" />
@@ -333,6 +335,7 @@
     <param name="inner_center_max_abs_y_m" value="1.60" />
     <param name="inner_lane_invalid_grace_s" value="1.20" />
     <param name="wait_lane_hold_grace_s" value="2.0" />
+    <param name="wait_heading_hold_max_s" value="0.7" />
     <param name="inner_handover_confirm_s" value="0.20" />
     <param name="inner_handover_min_s" value="2.0" />
     <!-- Compare each fresh centre with the immutable planned target lane so
@@ -412,15 +415,10 @@
     <param name="dynamic_prediction_horizon_s" value="5.0" />
     <!-- Once a merge is committed, only an imminent conflict can stop the car
          halfway across a divider. Longer predictions continue to be monitored. -->
-    <param name="committed_stop_horizon_s" value="1.0" />
-    <!-- Once the full entry checks have committed a lane change, do not stop
-         astride a divider for side/future prediction overlap. Direct lead
-         emergency braking remains active. -->
-    <param name="post_commit_collision_stop_enabled" value="false" />
-    <!-- Competition setting: while the highway strategy has a valid path,
-         suppress every stop request and keep at least the lane-change speed
-         floor. The original reason remains in the state diagnostics. -->
-    <param name="highway_braking_enabled" value="false" />
+    <param name="committed_stop_horizon_s" value="2.0" />
+    <!-- An imminent predicted collision must stop a committed change. -->
+    <param name="post_commit_collision_stop_enabled" value="true" />
+    <param name="highway_braking_enabled" value="true" />
 
     <param name="release_global_d_m" value="0.55" />
     <param name="release_confirm_s" value="0.6" />

@@ -185,6 +185,9 @@ class HighwayLaneStrategyNode:
         )
         self.max_heading_error_rad = float(rospy.get_param("~max_heading_error_rad", math.radians(22.0)))
         self.require_left_dashed = bool(rospy.get_param("~require_left_dashed", True))
+        # This course has two permitted left changes. The count is a backstop
+        # when a solid boundary is briefly misclassified as dashed.
+        self.max_left_lane_changes = max(1, int(rospy.get_param("~max_left_lane_changes", 2)))
 
         # Geometry sanity: the detected LEFT dashed divider must really be the
         # divider immediately next to the ego lane. The lane-info publisher can
@@ -209,6 +212,9 @@ class HighwayLaneStrategyNode:
         )
         self.wait_lane_hold_grace_s = float(
             rospy.get_param("~wait_lane_hold_grace_s", 2.0)
+        )
+        self.wait_heading_hold_max_s = max(
+            0.0, float(rospy.get_param("~wait_heading_hold_max_s", 0.7))
         )
         self.inner_handover_confirm_s = float(
             rospy.get_param("~inner_handover_confirm_s", 0.20)
@@ -368,7 +374,7 @@ class HighwayLaneStrategyNode:
             rospy.get_param("~dynamic_prediction_horizon_s", 5.0)
         )
         self.committed_stop_horizon_s = float(
-            rospy.get_param("~committed_stop_horizon_s", 1.0)
+            rospy.get_param("~committed_stop_horizon_s", 2.0)
         )
         # Entry remains protected by the gap/TTC and full trajectory collision checks.
         # When disabled, a newly predicted side/future overlap is diagnostic
@@ -444,6 +450,7 @@ class HighwayLaneStrategyNode:
         self.last_inner_path: Optional[RosPath] = None
         self.last_wait_center_path: Optional[RosPath] = None
         self.last_wait_center_at: Optional[rospy.Time] = None
+        self.wait_heading_since: Optional[rospy.Time] = None
         self.lane_invalid_since: Optional[rospy.Time] = None
         self.inner_handover_pending = False
         self.last_trajectory_diag = {}
@@ -1416,7 +1423,7 @@ class HighwayLaneStrategyNode:
         self.last_inner_path = self.committed_path
         self.inner_handover_pending = True
         self.inner_lane_candidate_since = None
-        if self.committed_enters_final_lane:
+        if self.committed_enters_final_lane or self.lane_changes_done >= self.max_left_lane_changes:
             self.lane_change_locked_by_left_solid = True
             self.final_lane_candidate_since = None
         rospy.logwarn(
@@ -1544,69 +1551,43 @@ class HighwayLaneStrategyNode:
         return self._local_to_map(blended, now), "limited" if limited else "ok"
 
     def _rolling_inner_fallback(self, now: rospy.Time) -> Optional[RosPath]:
-        """Keep a receding path after the camera briefly loses the new lane.
+        """Recede along the authorized target lane, never the old diagonal.
 
-        The committed lane-change path has only a few metres left when the
-        completion hand-over occurs.  Re-expressing it from the current pose
-        and extending its final tangent prevents Pure Pursuit from reaching a
-        finite endpoint while lane perception settles after crossing a line.
+        A committed path contains points behind the car after hand-over. Its
+        full arc length therefore cannot tell whether the *remaining* diagonal
+        has expired. Always build a new path from the current pose to the
+        terminal lane-aligned segment instead of replaying those old points.
         """
         reference = self.last_inner_path or self.committed_path
-        previous = self._path_map_to_local(reference)
-        remaining_length = polyline_arclength(previous)[-1] if len(previous) >= 2 else 0.0
-        if len(previous) < 3 or remaining_length < 3.0:
-            # The old fallback used local +x here.  Local +x is the *current
-            # vehicle yaw*, so a car that finished the merge at a small left
-            # yaw kept drifting diagonally into the next lane without a new
-            # gap decision.  Continue instead along the final map heading of
-            # the already authorised path.  This also gives lead-vehicle
-            # classification a lane-aligned reference while camera hand-over
-            # settles.
-            heading_error = 0.0
-            line_intercept = 0.0
-            if reference is not None and len(reference.poses) >= 2:
-                a = reference.poses[-2].pose.position
-                b = reference.poses[-1].pose.position
-                dx = float(b.x)-float(a.x)
-                dy = float(b.y)-float(a.y)
-                if math.hypot(dx, dy) > 1e-6:
-                    ex, ey, ego_yaw, _ = self._odom_pose()
-                    target_yaw = math.atan2(dy, dx)
-                    heading_error = math.atan2(
-                        math.sin(target_yaw-ego_yaw),
-                        math.cos(target_yaw-ego_yaw),
-                    )
-                    cosine, sine = math.cos(ego_yaw), math.sin(ego_yaw)
-                    adx, ady = float(a.x)-ex, float(a.y)-ey
-                    a_local_x = cosine*adx + sine*ady
-                    a_local_y = -sine*adx + cosine*ady
-                    slope = math.tan(heading_error)
-                    line_intercept = a_local_y-slope*a_local_x
-            length = max(20.0, self.inner_fallback_path_length_m)
-            slope = math.tan(heading_error)
-            _, _, _, ego_speed = self._odom_pose()
-            heading_join = (
-                abs(line_intercept)/math.tan(self.inner_path_max_heading_rad)
-                if self.inner_path_max_heading_rad > 1e-3 else 0.0
-            )
-            join_length = max(
-                self.inner_path_join_length_m,
-                ego_speed*self.inner_path_join_time_s,
-                heading_join,
-                2.5,
-            )
-            previous = []
-            for index in range(int(2.0*length)+1):
-                x = 0.5*float(index)
-                target_y = slope*x+smoothstep5(x/join_length)*line_intercept
-                # Begin at the current pose, then join the authorised lane-change
-                # target-lane centre. This corrects both lateral offset and yaw
-                # instead of preserving a boundary-hugging parallel line.
-                previous.append((x, target_y))
-        previous = self._extend_local_polyline(
-            previous, max(20.0, self.inner_fallback_path_length_m)
+        if reference is None or len(reference.poses) < 2:
+            return None
+        a = reference.poses[-2].pose.position
+        b = reference.poses[-1].pose.position
+        dx, dy = float(b.x)-float(a.x), float(b.y)-float(a.y)
+        if math.hypot(dx, dy) < 1e-6:
+            return None
+        ex, ey, ego_yaw, ego_speed = self._odom_pose()
+        target_yaw = math.atan2(dy, dx)
+        heading_error = math.atan2(
+            math.sin(target_yaw-ego_yaw), math.cos(target_yaw-ego_yaw)
         )
-        return self._local_to_map(previous, now) if len(previous) >= 3 else None
+        c, s = math.cos(ego_yaw), math.sin(ego_yaw)
+        ax = c*(float(a.x)-ex) + s*(float(a.y)-ey)
+        ay = -s*(float(a.x)-ex) + c*(float(a.y)-ey)
+        slope = math.tan(heading_error)
+        intercept = ay-slope*ax
+        join_length = max(
+            self.inner_path_join_length_m,
+            ego_speed*self.inner_path_join_time_s,
+            abs(intercept)/max(math.tan(self.inner_path_max_heading_rad), 1e-3),
+            2.5,
+        )
+        length = max(20.0, self.inner_fallback_path_length_m, 4.0*ego_speed)
+        points = [
+            (x, slope*x + smoothstep5(x/join_length)*intercept)
+            for x in (0.5*float(i) for i in range(int(2.0*length)+1))
+        ]
+        return self._local_to_map(points, now)
 
     def _map_obstacles_local(self) -> List[LocalObstacle]:
         if self.latest_obstacles is None or self.latest_odom is None:
@@ -1633,6 +1614,7 @@ class HighwayLaneStrategyNode:
         self, lane_width: float, search_range_m: Optional[float] = None
     ) -> Tuple[Optional[LocalObstacle], Optional[LocalObstacle], List[LocalObstacle]]:
         center = self._centerline_local()
+        divider = self._boundary_local("left_boundary_points")
         obs = self._map_obstacles_local()
         search_range = self.gap_search_range_m if search_range_m is None else max(
             self.gap_search_range_m, float(search_range_m)
@@ -1643,14 +1625,20 @@ class HighwayLaneStrategyNode:
         for o in obs:
             if abs(o.x) > search_range:
                 continue
-            cy = interp_y(center, clamp(o.x, 0.0, 25.0))
-            if cy is None:
-                cy = 0.0
-            target_y = cy + lane_width
-            # Center-to-center lane membership.  The previous footprint-style
-            # allowance (~3 m for a normal lane/car) could mix current- and
-            # target-lane vehicles.
-            allowance = self.target_lane_center_gate_m
+            sample_x = clamp(o.x, 0.0, 25.0)
+            divider_y = interp_y(divider, sample_x) if len(divider) >= 3 else None
+            cy = interp_y(center, sample_x)
+            target_y = (
+                float(divider_y) + 0.5*lane_width if divider_y is not None
+                else (0.0 if cy is None else float(cy)) + lane_width
+            )
+            # Include a vehicle whose footprint overlaps the target lane even
+            # if its centre sits near the divider. A centre-only 1.5 m gate
+            # missed these side/rear conflicts in the recorded runs.
+            allowance = max(
+                self.target_lane_center_gate_m,
+                0.5*lane_width + 0.5*o.width + self.collision_lat_margin_m,
+            )
             if abs(o.y - target_y) > allowance:
                 continue
             considered.append(o)
@@ -1667,12 +1655,14 @@ class HighwayLaneStrategyNode:
             self.change_start_m + change_length
             + self.time_headway_s*candidate_speed + self.vehicle_length_m,
         )
-        front, rear, considered = self._target_lane_neighbors(
+        _, _, considered = self._target_lane_neighbors(
             lane_width, search_range
         )
         diag = {"candidate_speed": round(candidate_speed, 2), "t_change": round(t, 2), "search_range_m": round(search_range, 2), "objects": [o.oid for o in considered]}
 
-        if front is not None:
+        # Inspect every vehicle. The nearest rear may be slow while a farther,
+        # faster vehicle catches us before the lateral shift is complete.
+        for front in (o for o in considered if o.x >= 0.0):
             rel_now = front.x - (self.vehicle_center_from_base_m + 0.5*self.vehicle_length_m) - 0.5*front.length
             rel_future = rel_now + (front.vx - candidate_speed) * t
             required = max(self.front_min_gap_m, self.time_headway_s * candidate_speed)
@@ -1684,7 +1674,7 @@ class HighwayLaneStrategyNode:
             if ttc < self.min_ttc_s:
                 return False, "front_ttc", diag
 
-        if rear is not None:
+        for rear in (o for o in considered if o.x < 0.0):
             ego_rear_from_base = self.vehicle_center_from_base_m - 0.5*self.vehicle_length_m
             rel_now = -rear.x - 0.5*rear.length + ego_rear_from_base
             # Positive means separation behind ego; relative separation evolves by ego - rear speed.
@@ -1786,6 +1776,8 @@ class HighwayLaneStrategyNode:
         return True, "ok"
 
     def _choose_lane_change(self, now: rospy.Time) -> Tuple[Optional[RosPath], Optional[float], Optional[float], str, dict]:
+        if self.lane_change_locked_by_left_solid or self.lane_changes_done >= self.max_left_lane_changes:
+            return None, None, None, "final_lane_no_more_changes", {}
         ok, lane_source = self._lane_valid(now, require_measured_width=True)
         if not ok:
             return None, None, None, lane_source, {}
@@ -2322,8 +2314,10 @@ class HighwayLaneStrategyNode:
                     )
             else:
                 self.ready_since = None
-            wait_path = self.latest_base_path if base_fresh else None
-            lane_hold_source = "base"
+            # The base route can run diagonally across the entrance marking.
+            # Never hand that path to the controller while waiting for a gap.
+            wait_path = None
+            lane_hold_source = "unavailable"
             if lane_ok_for_shape:
                 center_ok, _, _ = self._inner_center_sanity(
                     require_two_boundaries=True
@@ -2343,7 +2337,7 @@ class HighwayLaneStrategyNode:
                         self.last_wait_center_at = now
                         lane_hold_source = "camera_midpoint"
             if (
-                lane_hold_source == "base"
+                lane_hold_source == "unavailable"
                 and self.last_wait_center_path is not None
                 and self._fresh(self.last_wait_center_at, self.wait_lane_hold_grace_s, now)
             ):
@@ -2355,7 +2349,21 @@ class HighwayLaneStrategyNode:
                         ), now
                     )
                     lane_hold_source = "camera_cached"
-            stop = (not base_fresh) or (not base_stop_fresh) or self.base_stop or emergency
+            if wait_path is None:
+                if self.wait_heading_since is None:
+                    self.wait_heading_since = now
+                length = max(60.0, 4.0*ego_speed)
+                wait_path = self._local_to_map(
+                    [(0.5*i, 0.0) for i in range(int(2.0*length)+1)], now
+                )
+                lane_hold_source = "heading_hold"
+            else:
+                self.wait_heading_since = None
+            heading_timeout = (
+                lane_hold_source == "heading_hold"
+                and (now-self.wait_heading_since).to_sec() > self.wait_heading_hold_max_s
+            )
+            stop = (not base_stop_fresh) or self.base_stop or emergency or heading_timeout
             self._publish(wait_path, stop, wait_speed, True, {"reason":reason, "follow":follow, "gap_shaping":shaping_diag, "candidate_diag":diag, "wait_path_source":lane_hold_source}, now, dt)
             return
 
@@ -2382,7 +2390,12 @@ class HighwayLaneStrategyNode:
             # Do not re-run the entry gap threshold after commitment, but keep
             # checking actual predicted collisions along the remaining trajectory
             # even if the camera changes lane identity or drops out.
-            path_safe, path_reason = self._dynamic_path_safe(self.committed_path, speed) if obs_fresh else (False, "obstacles_stale")
+            # At high speed the vehicle cannot instantly slow to a newly
+            # requested following speed. Predict using actual velocity until
+            # odometry confirms that deceleration has occurred.
+            _, _, _, actual_speed = self._odom_pose()
+            prediction_speed = max(speed, actual_speed)
+            path_safe, path_reason = self._dynamic_path_safe(self.committed_path, prediction_speed) if obs_fresh else (False, "obstacles_stale")
             future_collision_reason = None
             floor_blocked = False
             # Suppress a conservative following slowdown only while the faster
@@ -2396,7 +2409,7 @@ class HighwayLaneStrategyNode:
                 floor_blocked = True
                 speed = adaptive_speed
                 path_safe, path_reason = self._dynamic_path_safe(
-                    self.committed_path, speed
+                    self.committed_path, max(speed, actual_speed)
                 )
             # The long prediction horizon is useful before commitment, but a
             # transient crossing of a moving object's predicted box must not
@@ -2410,10 +2423,10 @@ class HighwayLaneStrategyNode:
             ):
                 immediate_arc_m = (
                     self.vehicle_length_m
-                    + max(speed, 0.5)*max(self.committed_stop_horizon_s, 0.25)
+                    + max(speed, actual_speed, 0.5)*max(self.committed_stop_horizon_s, 0.25)
                 )
                 immediate_safe, immediate_reason = self._dynamic_path_safe(
-                    self.committed_path, speed, immediate_arc_m
+                    self.committed_path, max(speed, actual_speed), immediate_arc_m
                 )
                 if immediate_safe:
                     future_collision_reason = path_reason
@@ -2508,9 +2521,9 @@ class HighwayLaneStrategyNode:
                 self.change_start_m
                 + self.final_lane_capture_min_ratio*self.committed_change_length_m
             )
+            observed_final_pair = self._final_lane_markings_present()
             final_lane_expected = bool(
-                self.committed_enters_final_lane
-                or self._final_lane_markings_present()
+                self.committed_enters_final_lane or observed_final_pair
             )
             if final_lane_expected:
                 final_center_ok, _, final_center_y = self._inner_center_sanity(
@@ -2525,8 +2538,11 @@ class HighwayLaneStrategyNode:
                 and final_center_heading is not None
                 and abs(float(final_center_heading))
                 <= self.change_heading_error_rad
-                and float(alignment_diag.get("path_progress_m", 0.0))
-                >= final_lane_capture_progress
+                and (
+                    observed_final_pair
+                    or float(alignment_diag.get("path_progress_m", 0.0))
+                    >= final_lane_capture_progress
+                )
             )
             if final_lane_captured and not stop:
                 if self.final_lane_candidate_since is None:
@@ -2636,6 +2652,16 @@ class HighwayLaneStrategyNode:
                 elif (now-self.complete_since).to_sec() >= self.change_complete_confirm_s:
                     why = "settled" if settled else "endpoint_guard"
                     self._enter_inner_hold(now, ex, ey, why, remaining_to_end)
+                    recovery = self._rolling_inner_fallback(now)
+                    if recovery is not None:
+                        self.last_inner_path = recovery
+                    self._publish(
+                        self.last_inner_path, False, speed, True,
+                        {"reason": "lane_change_complete", "alignment": alignment_diag,
+                         "recoverable_endpoint_alignment": recoverable_endpoint_alignment,
+                         "follow": follow}, now, dt,
+                    )
+                    return
             else:
                 self.complete_since = None
 
@@ -2804,7 +2830,9 @@ class HighwayLaneStrategyNode:
                 stop = True
                 inner_reason = lane_reason
 
-            path_safe, path_reason = self._dynamic_path_safe(path, adaptive) if obs_fresh else (False, "obstacles_stale")
+            path_safe, path_reason = self._dynamic_path_safe(
+                path, max(adaptive, ego_speed)
+            ) if obs_fresh else (False, "obstacles_stale")
             if not stop and not path_safe:
                 if self.post_commit_collision_stop_enabled:
                     stop = True
@@ -2813,8 +2841,8 @@ class HighwayLaneStrategyNode:
                     inner_reason = "post_commit_collision_monitored"
 
             # Follow and settle in each lane before starting a new uninterrupted
-            # gap confirmation. There is no count limit; road geometry, a dashed
-            # left divider and a safe adjacent-lane gap gate every attempt.
+            # gap confirmation. The course limit, a fresh dashed divider and
+            # a safe adjacent-lane gap gate each remaining attempt.
             # Use the center actually supplied to control. The publisher's EMA
             # lateral/heading fields can still describe the previous lane just
             # after hand-over and can otherwise block or reverse the next LEFT
@@ -2840,6 +2868,7 @@ class HighwayLaneStrategyNode:
             centered_for_next = (
                 not final_lane_candidate
                 and not self.lane_change_locked_by_left_solid
+                and self.lane_changes_done < self.max_left_lane_changes
                 and lane_ok and not self.inner_handover_pending and not stop
                 and boundary_clear
                 and self.inner_hold_travel_m >= self.min_lane_hold_before_next_change_m
@@ -2924,6 +2953,7 @@ class HighwayLaneStrategyNode:
             global_d = self._global_signed_d()
             can_start_rejoin = (
                 self.lane_changes_done > 0
+                and self.lane_changes_done < self.max_left_lane_changes
                 and not final_lane_candidate
                 and not self.lane_change_locked_by_left_solid
                 and not next_change_pending
@@ -2966,6 +2996,7 @@ class HighwayLaneStrategyNode:
             # merge from stopping the car forever.
             can_direct_release = (
                 self.lane_changes_done > 0
+                and self.lane_changes_done < self.max_left_lane_changes
                 and not final_lane_candidate
                 and not self.lane_change_locked_by_left_solid
                 and not next_change_pending
@@ -3024,7 +3055,10 @@ class HighwayLaneStrategyNode:
                 "lane_fallback": lane_fallback,
                 "lane_handover_pending": self.inner_handover_pending,
                 "final_lane_markings": final_lane_candidate,
-                "lane_change_enabled": not self.lane_change_locked_by_left_solid,
+                "lane_change_enabled": (
+                    not self.lane_change_locked_by_left_solid
+                    and self.lane_changes_done < self.max_left_lane_changes
+                ),
                 "double_left_solid": self._double_left_solid_present(),
                 "fast_recenter": False,
                 "follow": follow,

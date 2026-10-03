@@ -317,6 +317,11 @@ class DiagonalLaneChangeTest(unittest.TestCase):
         self.assertEqual(n.state, n.INNER_HOLD)
         self.assertEqual(n.lane_changes_done, 2)
         self.assertEqual(n._publish.call_args.args[4]['reason'], 'target_lane_capture')
+        self.assertTrue(n.lane_change_locked_by_left_solid)
+        self.assertAlmostEqual(
+            n._publish.call_args.args[0].poses[-1].pose.position.y, 3.5,
+            delta=0.05,
+        )
         self.assertLessEqual(
             abs(n._publish.call_args.args[4]['alignment']['target_lateral_error_m']),
             n.change_target_capture_m,
@@ -359,6 +364,33 @@ class DiagonalLaneChangeTest(unittest.TestCase):
         self.assertEqual(
             n._publish.call_args.args[4]['reason'],
             'solid_left_lane_capture',
+        )
+
+    def test_measured_final_solid_captures_before_distance_timer(self):
+        n = node_fixture()
+        n.state = n.LANE_CHANGE
+        n.committed_path = path_at(3.5, end=110)
+        n.committed_change_length_m = 82.0
+        n.committed_speed_mps = 22.8
+        n.committed_enters_final_lane = False
+        n._odom_pose.return_value = (30.0, 3.5, 0.0, 22.8)
+        n._final_lane_markings_present = safety.Mock(return_value=True)
+        n._inner_center_sanity.return_value = (True, 'ok', 0.0)
+        n._inner_center_heading = safety.Mock(return_value=0.0)
+        n._dynamic_path_safe = safety.Mock(return_value=(True, 'ok'))
+
+        for timestamp in (100.0, 100.3):
+            fresh = Stamp(timestamp)
+            n.base_path_at = n.base_stop_at = n.odom_at = n.obstacles_at = fresh
+            with safety.patch.object(
+                safety.NODE.rospy.Time, 'now', return_value=fresh
+            ):
+                n._tick(None)
+
+        self.assertEqual(n.state, n.INNER_HOLD)
+        self.assertTrue(n.lane_change_locked_by_left_solid)
+        self.assertEqual(
+            n._publish.call_args.args[4]['reason'], 'solid_left_lane_capture'
         )
 
     def test_target_capture_stabilizes_first_maneuver(self):
@@ -732,6 +764,20 @@ class DiagonalLaneChangeTest(unittest.TestCase):
         dx = path.poses[-1].pose.position.x-path.poses[-2].pose.position.x
         dy = path.poses[-1].pose.position.y-path.poses[-2].pose.position.y
         self.assertLess(abs(math.atan2(dy, dx)), math.radians(0.1))
+
+    def test_long_committed_path_is_not_replayed_after_lane_capture(self):
+        n = node_fixture()
+        n.committed_path = path_at(3.5, end=100)
+        n.last_inner_path = n.committed_path
+        n._odom_pose.return_value = (60.0, 4.0, math.radians(8.0), 22.8)
+
+        path = n._rolling_inner_fallback(Stamp())
+
+        self.assertAlmostEqual(path.poses[0].pose.position.y, 4.0, places=6)
+        self.assertAlmostEqual(path.poses[-1].pose.position.y, 3.5, delta=0.05)
+        self.assertLessEqual(
+            max(p.pose.position.y for p in path.poses), 4.05
+        )
 
     def test_expired_path_fallback_recenters_to_authorized_target_line(self):
         n = node_fixture()

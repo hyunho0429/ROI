@@ -77,14 +77,22 @@ class RepeatedLaneChangeTest(unittest.TestCase):
         self.assertEqual(n.state, n.LANE_CHANGE)
         self.assertEqual(n._publish.call_args.args[4]['reason'], 'next_left_lane_change')
 
-    def test_third_change_is_allowed_after_a_new_confirmation(self):
+    def test_third_change_is_blocked_at_course_limit(self):
         n = self.node
         n.lane_changes_done = 2
         self.tick(100.0)
         self.assertEqual(n.state, n.INNER_HOLD)
         self.tick(100.6)
-        self.assertEqual(n.state, n.LANE_CHANGE)
-        self.assertEqual(n._publish.call_args.args[4]['reason'], 'next_left_lane_change')
+        self.assertEqual(n.state, n.INNER_HOLD)
+        n._choose_lane_change.assert_not_called()
+
+    def test_course_limit_rejects_lane_change_even_with_dashed_input(self):
+        n = self.node
+        n.lane_changes_done = n.max_left_lane_changes
+        n._choose_lane_change = safety.NODE.HighwayLaneStrategyNode._choose_lane_change.__get__(n)
+        path, _, _, reason, _ = n._choose_lane_change(safety.Stamp(100.0))
+        self.assertIsNone(path)
+        self.assertEqual(reason, 'final_lane_no_more_changes')
 
     def test_two_left_solids_lock_further_changes_and_hold_lane(self):
         n = self.node

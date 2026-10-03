@@ -183,15 +183,16 @@ class HighwaySafetyTest(unittest.TestCase):
         self.assertTrue(n.lead_brake_pub.publish.call_args.args[0].data)
         self.assertTrue(n.lead_emergency_pub.publish.call_args.args[0].data)
 
-    def test_wait_gap_keeps_base_path_when_lane_pair_is_unreliable(self):
+    def test_wait_gap_does_not_follow_cross_lane_base_path_when_pair_unreliable(self):
         n = self.node
         n.state = n.WAIT_GAP
         n._choose_lane_change = Mock(return_value=(None, None, None, "gap_wait", {}))
         n._gap_shaping_speed = Mock(return_value=(2.0, {}))
         n._inner_center_sanity = Mock(return_value=(False, "unreliable", None))
         path, _, _, _, status, *_ = self.tick()
-        self.assertIs(path, n.latest_base_path)
-        self.assertEqual(status["wait_path_source"], "base")
+        self.assertIsNot(path, n.latest_base_path)
+        self.assertEqual(status["wait_path_source"], "heading_hold")
+        self.assertTrue(all(abs(p.pose.position.y) < 1e-6 for p in path.poses))
 
     def test_wait_gap_keeps_last_verified_lane_when_camera_pair_drops(self):
         n = self.node
@@ -204,6 +205,16 @@ class HighwaySafetyTest(unittest.TestCase):
         path, _, _, _, status, *_ = self.tick()
         self.assertEqual(status["wait_path_source"], "camera_cached")
         self.assertAlmostEqual(path.poses[10].pose.position.y, 0.4)
+
+    def test_wait_heading_hold_times_out_without_lane_observation(self):
+        n = self.node
+        n.state = n.WAIT_GAP
+        n._choose_lane_change = Mock(return_value=(None, None, None, "gap_wait", {}))
+        n._inner_center_sanity = Mock(return_value=(False, "unreliable", None))
+        n.wait_heading_since = Stamp(98.0)
+        _, stop, _, _, status, *_ = self.tick()
+        self.assertTrue(stop)
+        self.assertEqual(status["wait_path_source"], "heading_hold")
 
     def test_closer_same_lane_obstacle_remains_emergency(self):
         for x in (7.0, 5.0):
@@ -711,6 +722,44 @@ class HighwaySafetyTest(unittest.TestCase):
         self.assertEqual(reason, "rear_gap")
         self.assertEqual(diagnostics["rear"]["id"], 1)
 
+    def test_farther_fast_rear_is_not_hidden_by_nearer_slow_rear(self):
+        near = obstacle(-30.0, y=3.5, vx=8.0)
+        far = obstacle(-55.0, y=3.5, vx=25.0)
+        far.id = 2
+        self.node.latest_obstacles.obstacles = [near, far]
+
+        safe, reason, diagnostics = self.node._gap_safe_for_speed(
+            15.0, 3.5, 60.0
+        )
+
+        self.assertFalse(safe)
+        self.assertEqual(reason, "rear_gap")
+        self.assertEqual(diagnostics["rear"]["id"], 2)
+
+    def test_vehicle_footprint_near_target_lane_edge_blocks_merge(self):
+        # Its centre misses the old 1.5 m gate, but the box overlaps the
+        # target lane while closing from behind.
+        self.node.latest_obstacles.obstacles = [
+            obstacle(-20.0, y=1.1, vx=8.0)
+        ]
+        safe, reason, diagnostics = self.node._gap_safe_for_speed(
+            4.0, 3.5, 32.0
+        )
+        self.assertFalse(safe)
+        self.assertEqual(reason, "rear_gap")
+        self.assertEqual(diagnostics["rear"]["id"], 1)
+
+    def test_front_vehicle_near_target_lane_edge_blocks_merge(self):
+        self.node.latest_obstacles.obstacles = [
+            obstacle(30.0, y=5.9, vx=8.0)
+        ]
+        safe, reason, diagnostics = self.node._gap_safe_for_speed(
+            15.0, 3.5, 60.0
+        )
+        self.assertFalse(safe)
+        self.assertEqual(reason, "front_gap")
+        self.assertEqual(diagnostics["front"]["id"], 1)
+
     def test_dynamic_guard_uses_bounded_replanning_horizon(self):
         self.node.latest_obstacles.obstacles = [obstacle(30.0)]
         self.assertTrue(self.node._dynamic_path_safe(path_at(), 2.0)[0])
@@ -735,6 +784,7 @@ class HighwaySafetyTest(unittest.TestCase):
         n.state = n.LANE_CHANGE
         n._lane_valid.return_value = (False, "lane_stale")
         n.latest_obstacles.obstacles = [obstacle(12.0)]
+        n._dynamic_path_safe = Mock(return_value=(True, "ok"))
         _, stop, speed, _, status, *_ = self.tick()
         self.assertFalse(stop)
         self.assertLess(speed, n.committed_speed_mps)
@@ -775,6 +825,19 @@ class HighwaySafetyTest(unittest.TestCase):
         self.assertFalse(stop)
         self.assertEqual(status["reason"], "future_collision_monitored")
         self.assertIn("predicted_collision", status["future_collision"])
+
+    def test_committed_collision_prediction_uses_actual_ego_speed(self):
+        n = self.node
+        n.state = n.LANE_CHANGE
+        n.committed_path = path_at(3.5, end=120)
+        n.committed_speed_mps = 15.0
+        n._odom_pose.return_value = (0.0, 0.0, 0.0, 22.8)
+        n._adaptive_speed = Mock(return_value=(15.0, False, {}))
+        n._dynamic_path_safe = Mock(return_value=(True, "ok"))
+
+        self.tick()
+
+        self.assertGreaterEqual(n._dynamic_path_safe.call_args_list[0].args[1], 22.8)
 
     def test_lane_change_still_stops_for_imminent_collision(self):
         n = self.node
