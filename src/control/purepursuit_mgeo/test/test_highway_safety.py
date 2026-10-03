@@ -297,6 +297,97 @@ class HighwaySafetyTest(unittest.TestCase):
         )
         self.assertEqual(diagnostics["4.0"]["geometry_speed_mps"], 8.0)
 
+    def test_empty_lane_can_generate_curvature_safe_change_at_15_mps(self):
+        n = self.node
+        n.cruise_speed_mps = 15.0
+        n.highway_braking_enabled = False
+        n.rrt_lidar_only_mode = True
+        n.require_left_dashed = False
+        n.highway_request = True
+        n.latest_obstacles.obstacles = []
+        n._odom_pose.return_value = (0.0, 0.0, 0.0, 15.0)
+        n._lane_valid = NODE.HighwayLaneStrategyNode._lane_valid.__get__(n)
+        n._centerline_local = NODE.HighwayLaneStrategyNode._centerline_local.__get__(n)
+        n._boundary_local = NODE.HighwayLaneStrategyNode._boundary_local.__get__(n)
+        for changes_done, minimum_length in ((0, 60.0), (1, 57.0)):
+            with self.subTest(changes_done=changes_done):
+                n.lane_changes_done = changes_done
+                path, speed, length, reason, diagnostics = n._choose_lane_change(Stamp())
+                self.assertIsNotNone(path, (reason, diagnostics))
+                self.assertEqual(speed, 15.0)
+                self.assertGreaterEqual(length, minimum_length)
+                self.assertEqual(reason, "ok")
+
+    def test_faster_ego_can_merge_after_moving_npcs_clear_at_15_mps(self):
+        n = self.node
+        n.cruise_speed_mps = 15.0
+        n.highway_braking_enabled = False
+        n.rrt_lidar_only_mode = True
+        n.require_left_dashed = False
+        n.highway_request = True
+        n.gap_search_range_m = 80.0
+        n._odom_pose.return_value = (0.0, 0.0, 0.0, 15.0)
+        n._lane_valid = NODE.HighwayLaneStrategyNode._lane_valid.__get__(n)
+        n._centerline_local = NODE.HighwayLaneStrategyNode._centerline_local.__get__(n)
+        n._boundary_local = NODE.HighwayLaneStrategyNode._boundary_local.__get__(n)
+        rear = obstacle(-18.0, 3.5, vx=8.0)
+        rear.id = 2
+        n.latest_obstacles.obstacles = [
+            obstacle(60.0, 3.5, vx=8.0), rear,
+        ]
+
+        path, speed, _, reason, diag = n._choose_lane_change(Stamp())
+
+        self.assertIsNotNone(path, (reason, diag))
+        self.assertEqual(speed, 15.0)
+        self.assertEqual(diag["15.0"]["rrt"]["moving_obstacles_dynamic_only"], [1, 2])
+        self.assertEqual(diag["15.0"]["dyn"], "ok")
+
+        n.latest_obstacles.obstacles = [obstacle(25.0, 3.5, vx=8.0)]
+        blocked, _, _, reason, diag = n._choose_lane_change(Stamp())
+        self.assertIsNone(blocked)
+        self.assertEqual(reason, "no_safe_speed_path_pair")
+        self.assertEqual(diag["15.0"]["gap_reason"], "front_gap")
+
+        # A slower car farther than the old 50 m lookup must also be
+        # considered across the full four-second 15 m/s transition.
+        n.latest_obstacles.obstacles = [obstacle(60.0, 3.5, vx=5.0)]
+        blocked, _, _, _, diag = n._choose_lane_change(Stamp())
+        self.assertIsNone(blocked)
+        self.assertEqual(diag["15.0"]["gap_reason"], "front_gap")
+
+    def test_detected_dashed_lane_authorizes_15_mps_change(self):
+        n = self.node
+        n.lane_changes_done = 0
+        n.cruise_speed_mps = 15.0
+        n.highway_braking_enabled = False
+        n.bypass_sensor_merge_gate = True
+        n._odom_pose.return_value = (0.0, 0.0, 0.0, 15.0)
+        n.latest_obstacles.obstacles = []
+        n._lane_valid = NODE.HighwayLaneStrategyNode._lane_valid.__get__(n)
+        n._centerline_local = NODE.HighwayLaneStrategyNode._centerline_local.__get__(n)
+        n._boundary_local = NODE.HighwayLaneStrategyNode._boundary_local.__get__(n)
+        n.lane_info_at = Stamp()
+        n.lane_info = {
+            "lane_valid": True, "output_status": "FRESH",
+            "confidence": 0.9, "lane_width_m": 3.5,
+            "left_lane": {
+                "detected": True, "type": "white_dashed", "dashed": True,
+                "age": 3, "coef": [0.0, 0.0, 1.75],
+                "x_range_m": [5.0, 25.0],
+            },
+            "right_lane": {"detected": True, "confidence": 0.9},
+            "left_boundary_points": [[float(x), 1.75] for x in range(5, 26)],
+            "right_boundary_points": [[float(x), -1.75] for x in range(5, 26)],
+            "centerline_points": [[float(x), 0.0] for x in range(5, 26)],
+        }
+
+        path, speed, length, reason, diag = n._choose_lane_change(Stamp())
+
+        self.assertIsNotNone(path, (reason, diag))
+        self.assertEqual(speed, 15.0)
+        self.assertGreaterEqual(length, 60.0)
+
     def test_first_change_checks_actual_entry_speed_when_braking_is_disabled(self):
         n = self.node
         n.lane_changes_done = 0
@@ -655,6 +746,40 @@ class HighwaySafetyTest(unittest.TestCase):
         self.assertEqual(n._lane_valid(Stamp()),(True,"ok"))
         self.assertEqual(n._left_dashed_ok(),(True,"ok"))
         self.assertAlmostEqual(n._centerline_local()[1][1],0.0)
+
+    def test_lane_hold_rejects_camera_drift_from_committed_target(self):
+        n = self.node
+        n._inner_center_sanity = NODE.HighwayLaneStrategyNode._inner_center_sanity.__get__(n)
+        n._boundary_local = Mock(side_effect=lambda key: [
+            (float(x), 1.75 if key == "left_boundary_points" else -1.75)
+            for x in range(26)
+        ])
+        n._centerline_local.return_value = [(float(x), 1.0) for x in range(26)]
+        n.lane_info = {
+            "output_status": "FRESH", "lane_width_m": 3.5,
+            "left_lane": {"detected": True},
+            "right_lane": {"detected": True},
+        }
+        n.last_inner_path = path_at(1.0)
+        n.committed_path = path_at(0.0)
+
+        valid, reason, _ = n._inner_center_sanity(require_two_boundaries=True)
+
+        self.assertFalse(valid)
+        self.assertEqual(reason, "inner_center_wrong_lane")
+
+    def test_high_speed_handover_does_not_wait_two_seconds(self):
+        n = self.node
+        n.inner_handover_pending = True
+        n.inner_hold_started_at = Stamp(99.5)
+        n._odom_pose.return_value = (0.0, 0.0, 0.0, 15.0)
+        n._global_signed_d.return_value = 3.5
+
+        self.tick()
+
+        status = n._publish.call_args.args[4]
+        self.assertEqual(status["reason"], "lane_handover_confirming")
+        self.assertAlmostEqual(status["handover_required_s"], 0.4)
 
     def test_inner_handover_waits_for_stable_new_lane_without_slowing(self):
         n = self.node

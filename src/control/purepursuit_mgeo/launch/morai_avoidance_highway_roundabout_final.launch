@@ -1,6 +1,6 @@
 <launch>
   <!-- Final driving stack:
-       sensor-team canonical stack (UNCHANGED camera files)
+       sensor-team canonical stack with the six-class lane camera
        + F6 lane-agnostic obstacle BYPASS
        + proactive highway LEFT lane strategy with persistent inner-lane hold
        + speed adaptation using tracked front/rear vehicles
@@ -16,11 +16,11 @@
   <arg name="link_set_file"
        default="$(find morai_bringup)/../../../data/mgeo/R_KR_PR_K-city_2025/link_set.json" />
   <arg name="enable_control" default="false" />
-  <!-- First validation: 2 m/s. Raise to 6 m/s only after CONTROL-OFF + low-speed checks. -->
+  <!-- Set target_speed_mps:=15.0 for the competition speed profile. -->
   <arg name="target_speed_mps" default="2.0" />
   <arg name="managed_timeout_s" default="1.0" />
 
-  <!-- The wrapper launches the camera team's real-lane post-processing pipeline. -->
+  <!-- The wrapper launches the six-class lane inference pipeline. -->
   <!-- Camera lane geometry and YOLO highway-situation recognition. -->
   <arg name="enable_lane_info_publisher" default="true" />
   <arg name="enable_camera_object_detection" default="true" />
@@ -113,7 +113,7 @@
     <arg name="morai_host_ip" value="$(arg morai_host_ip)" />
     <arg name="target_speed_mps" value="$(arg target_speed_mps)" />
     <arg name="enable_control" value="$(arg enable_control)" />
-    <!-- One UDP consumer only: real_lane_node.py owns MORAI lane port 1101. -->
+    <!-- One UDP consumer only: the lane camera runner owns MORAI port 1101. -->
     <arg name="enable_lane" value="false" />
     <arg name="enable_yolo" value="$(arg enable_camera_object_detection)" />
     <arg name="yolo_port" value="$(arg yolo_port)" />
@@ -324,9 +324,10 @@
     <param name="inner_lane_invalid_grace_s" value="1.20" />
     <param name="inner_handover_confirm_s" value="0.20" />
     <param name="inner_handover_min_s" value="2.0" />
-    <!-- Allow a sizeable post-RRT recenter correction; the fresh two-boundary
-         bracket and absolute ego-lane checks reject an adjacent-lane jump. -->
-    <param name="inner_center_switch_max_delta_m" value="1.60" />
+    <!-- Compare each fresh centre with the immutable RRT target lane so
+         repeated camera track switches cannot slowly walk into the next lane. -->
+    <param name="inner_center_switch_max_delta_m" value="0.85" />
+    <param name="inner_handover_max_distance_m" value="6.0" />
     <param name="inner_fallback_path_length_m" value="60.0" />
     <!-- End repeated LEFT changes at the final lane, but keep following the
          midpoint between its nearest left solid and nearest right dashed line. -->
@@ -336,14 +337,14 @@
 
     <param name="change_start_m" value="3.0" />
     <param name="change_min_length_m" value="18.0" />
-    <param name="change_max_length_m" value="40.0" />
+    <param name="change_max_length_m" value="75.0" />
     <param name="change_ramp_ratio" value="0.20" />
     <param name="change_max_heading_deg" value="15.0" />
     <!-- Both the first and later merges use a decisive diagonal so the car
          does not spend too long straddling a divider. -->
     <param name="repeat_change_min_length_m" value="18.0" />
-    <param name="repeat_change_max_length_m" value="36.0" />
-    <param name="repeat_change_time_s" value="3.0" />
+    <param name="repeat_change_max_length_m" value="70.0" />
+    <param name="repeat_change_time_s" value="3.8" />
     <param name="repeat_change_max_heading_deg" value="15.0" />
     <!-- Follow the midpoint of the newly detected left/right boundaries soon
          after hand-over while retaining a smooth steering transition. -->

@@ -113,7 +113,7 @@ class DiagonalLaneChangeTest(unittest.TestCase):
 
     def test_fast_change_is_rejected_instead_of_shortened_beyond_limit(self):
         n = node_fixture()
-        points, length = n._generate_lane_change_local(3.5, 11.0)
+        points, length = n._generate_lane_change_local(3.5, 20.0)
 
         self.assertEqual(points, [])
         self.assertGreater(length, n.change_max_length_m)
@@ -504,6 +504,7 @@ class DiagonalLaneChangeTest(unittest.TestCase):
         n._path_map_to_local = safety.NODE.HighwayLaneStrategyNode._path_map_to_local.__get__(n)
         n._odom_pose.return_value = (10.0, 3.5, 0.0, 2.0)
         n.last_inner_path = path_at(3.5)
+        n.committed_path = path_at(3.5)
         n.lane_info = {
             'output_status': 'FRESH',
             'lane_width_m': 3.5,
@@ -755,6 +756,41 @@ class DiagonalLaneChangeTest(unittest.TestCase):
                 self.assertLess(peak_yaw, math.radians(13))
                 self.assertLess(abs(y-3.25), .2)
                 self.assertLess(abs(yaw), math.radians(3))
+
+    def test_bicycle_tracks_15_mps_eased_change_without_adjacent_lane_overshoot(self):
+        n = node_fixture()
+        points, length = n._generate_lane_change_local(3.5, 15.0)
+        self.assertGreaterEqual(length, 60.0)
+        valid, curvature = n._path_curvature_ok(points, 15.0)
+        self.assertTrue(valid, curvature)
+        pp = MgeoPurePursuit(
+            [PathPoint(x, y, 0) for x, y in points], 3.0, 4.0, .35, 1.5
+        )
+        limiter = SteeringRateLimiter(.2)
+        x = y = yaw = 0.0
+        peak_y = 0.0
+        for step in range(250):
+            lookahead, rate = speed_adaptive_steering_profile(
+                15.0, 3.5, .75, .50, 4.0, .20
+            )
+            raw, stop, *_ = pp.compute(x, y, yaw, 15.0, lookahead)
+            self.assertFalse(stop)
+            limit = lateral_acceleration_steering_limit(
+                15.0, 3.0, 2.5, math.radians(40.0)
+            )
+            angle = limiter.update(
+                max(-limit, min(limit, raw)), step*.05, True, rate
+            )
+            angle = max(-limit, min(limit, angle))
+            yaw += 15.0/3.0*math.tan(angle)*.05
+            x += 15.0*math.cos(yaw)*.05
+            y += 15.0*math.sin(yaw)*.05
+            peak_y = max(peak_y, y)
+            if x >= n.change_start_m+length+7.0:
+                break
+        self.assertLess(peak_y, 3.65)
+        self.assertAlmostEqual(y, 3.25, delta=.30)
+        self.assertLess(abs(yaw), math.radians(3.0))
 
 
 class SteeringLimitTest(unittest.TestCase):
