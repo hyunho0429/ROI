@@ -535,6 +535,15 @@ class PurePursuitNode:
                 )
                 if highway_no_brake and self.highway_lead_emergency_brake:
                     accel, brake = 0.0, 1.0
+            if highway_no_brake and brake > 0.01:
+                rospy.logwarn_throttle(
+                    1.0,
+                    "PP highway brake source=%s pedal=%.2f actual=%.2f target=%.2f",
+                    "lead_emergency" if self.highway_lead_emergency_brake
+                    else "lead_follow" if self.highway_lead_brake_required
+                    else "other",
+                    brake, speed, effective_target_speed,
+                )
             self.command_pub.publish(self.make_command(steering, stop, accel, brake))
 
         rospy.loginfo_throttle(

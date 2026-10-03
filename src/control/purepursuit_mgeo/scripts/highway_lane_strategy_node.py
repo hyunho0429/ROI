@@ -213,6 +213,9 @@ class HighwayLaneStrategyNode:
         self.inner_lane_invalid_grace_s = float(
             rospy.get_param("~inner_lane_invalid_grace_s", 1.20)
         )
+        self.wait_lane_hold_grace_s = float(
+            rospy.get_param("~wait_lane_hold_grace_s", 2.0)
+        )
         self.inner_handover_confirm_s = float(
             rospy.get_param("~inner_handover_confirm_s", 0.20)
         )
@@ -461,6 +464,8 @@ class HighwayLaneStrategyNode:
         self.last_output_speed = self.cruise_speed_mps
         self.last_timer_time: Optional[rospy.Time] = None
         self.last_inner_path: Optional[RosPath] = None
+        self.last_wait_center_path: Optional[RosPath] = None
+        self.last_wait_center_at: Optional[rospy.Time] = None
         self.lane_invalid_since: Optional[rospy.Time] = None
         self.inner_handover_pending = False
         self.last_rrt_diag = {}
@@ -494,6 +499,10 @@ class HighwayLaneStrategyNode:
         rospy.Subscriber(self.merge_unavailable_topic, Bool, self._merge_unavailable_cb, queue_size=1)
 
         self.timer = rospy.Timer(rospy.Duration(1.0 / max(self.rate_hz, 1.0)), self._tick)
+        # RRT* can take longer than one control cycle on the simulator VM.
+        # Keep the lead-safety channel alive independently of path planning;
+        # Pure Pursuit must not interpret a slow RRT iteration as a lost node.
+        self.lead_safety_timer = rospy.Timer(rospy.Duration(0.1), self._publish_lead_safety)
         rospy.logwarn(
             "Highway lane strategy: repeated LEFT lane changes enabled cruise=%.2f m/s; real-lane centerline enabled",
             self.cruise_speed_mps,
@@ -559,6 +568,36 @@ class HighwayLaneStrategyNode:
 
     def _fresh(self, stamp: Optional[rospy.Time], timeout: float, now: rospy.Time) -> bool:
         return stamp is not None and (now - stamp).to_sec() <= timeout
+
+    def _publish_lead_safety(self, _event) -> None:
+        now = rospy.Time.now()
+        active = self.state not in (self.OFF, self.DONE)
+        brake = emergency = False
+        if active:
+            if not self._fresh(self.odom_at, self.odom_timeout_s, now) or not self._fresh(
+                self.obstacles_at, self.obstacle_timeout_s, now
+            ):
+                # Missing pose or LiDAR is a real safety fault, unlike a slow
+                # planning cycle. Do not keep sending an old "no lead" result.
+                brake = emergency = True
+                rospy.logwarn_throttle(
+                    1.0, "HIGHWAY lead safety sensor stale: odom=%s lidar=%s",
+                    self._fresh(self.odom_at, self.odom_timeout_s, now),
+                    self._fresh(self.obstacles_at, self.obstacle_timeout_s, now),
+                )
+            else:
+                lead, gap, ttc = self._current_lane_lead()
+                if lead is not None and gap is not None:
+                    _, _, _, ego_speed = self._odom_pose()
+                    brake, emergency = lead_brake_decision({
+                        "lead": lead.oid,
+                        "gap": gap,
+                        "desired_gap": self.follow_standstill_gap_m
+                        + self.follow_time_headway_s*ego_speed,
+                        "ttc": ttc,
+                    }, self.emergency_gap_m, self.emergency_ttc_s)
+        self.lead_brake_pub.publish(Bool(data=bool(brake)))
+        self.lead_emergency_pub.publish(Bool(data=bool(emergency)))
 
     def _activation_present(self) -> bool:
         return bool(
@@ -2231,8 +2270,8 @@ class HighwayLaneStrategyNode:
                 0.0 if stop else speed, dt, upper_speed_mps=follow_cap
             )
         self.stop_pub.publish(Bool(data=bool(stop)))
-        self.lead_brake_pub.publish(Bool(data=lead_brake))
-        self.lead_emergency_pub.publish(Bool(data=lead_emergency))
+        # The independent safety timer is the sole publisher for these two
+        # topics. A late RRT result must not overwrite its fresher assessment.
         self.speed_pub.publish(Float64(data=float(speed_out)))
         self.active_pub.publish(Bool(data=bool(active)))
         fast_change = bool(active and (
@@ -2242,6 +2281,13 @@ class HighwayLaneStrategyNode:
         self.fast_change_pub.publish(Bool(data=fast_change))
         status.update({"state": self.state, "active": bool(active), "stop": bool(stop), "target_speed_mps": round(speed_out,2), "lane_changes_done": self.lane_changes_done, "fast_change_active": fast_change})
         self.state_pub.publish(String(data=json.dumps(status, separators=(",", ":"))))
+        rospy.loginfo_throttle(
+            1.0,
+            "HIGHWAY state=%s active=%s reason=%s path=%s lead=%s target=%.2f stop=%s",
+            self.state, bool(active), status.get("reason"),
+            status.get("wait_path_source", "committed" if active else "base"),
+            (status.get("follow") or {}).get("lead"), speed_out, bool(stop),
+        )
         if stop:
             rospy.logwarn_throttle(0.5, "HIGHWAY STOP state=%s reason=%s follow=%s", self.state, str(status.get("reason")), json.dumps(status.get("follow", {}), separators=(",", ":")))
 
@@ -2289,11 +2335,13 @@ class HighwayLaneStrategyNode:
                 elif (now-self.highway_true_since).to_sec() >= self.highway_confirm_s:
                     self.state = self.WAIT_GAP
                     self.ready_since = None
+                    rospy.logwarn("HIGHWAY activated: WAIT_GAP; waiting for a fresh left dashed line and safe LiDAR gap")
             else:
                 self.highway_true_since = None
-            stop = (not base_fresh) or (not base_stop_fresh) or self.base_stop
-            self._publish(self.latest_base_path if base_fresh else None, stop, self.cruise_speed_mps, False, {"reason":"base_pass"}, now, dt)
-            return
+            if self.state == self.OFF:
+                stop = (not base_fresh) or (not base_stop_fresh) or self.base_stop
+                self._publish(self.latest_base_path if base_fresh else None, stop, self.cruise_speed_mps, False, {"reason":"base_pass"}, now, dt)
+                return
 
         # DONE: do not re-arm in the same latched-highway scenario.
         if self.state == self.DONE:
@@ -2343,8 +2391,30 @@ class HighwayLaneStrategyNode:
                 if center_ok:
                     local_center = self._hold_centerline_local()
                     if len(local_center) >= 3:
+                        # A camera line normally ends near the horizon.  Give
+                        # Pure Pursuit several seconds of rolling road-aligned
+                        # path even while one RRT iteration is still running.
+                        local_center = self._extend_local_polyline(
+                            local_center,
+                            max(60.0, 4.0*ego_speed),
+                        )
                         wait_path = self._local_to_map(local_center, now)
+                        self.last_wait_center_path = wait_path
+                        self.last_wait_center_at = now
                         lane_hold_source = "camera_midpoint"
+            if (
+                lane_hold_source == "base"
+                and self.last_wait_center_path is not None
+                and self._fresh(self.last_wait_center_at, self.wait_lane_hold_grace_s, now)
+            ):
+                cached_local = self._path_map_to_local(self.last_wait_center_path)
+                if len(cached_local) >= 3:
+                    wait_path = self._local_to_map(
+                        self._extend_local_polyline(
+                            cached_local, max(60.0, 4.0*ego_speed)
+                        ), now
+                    )
+                    lane_hold_source = "camera_cached"
             stop = (not base_fresh) or (not base_stop_fresh) or self.base_stop or emergency
             self._publish(wait_path, stop, wait_speed, True, {"reason":reason, "follow":follow, "gap_shaping":shaping_diag, "candidate_diag":diag, "wait_path_source":lane_hold_source}, now, dt)
             return

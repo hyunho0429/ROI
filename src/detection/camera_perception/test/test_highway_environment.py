@@ -159,6 +159,17 @@ class MultilanePatternTest(unittest.TestCase):
     def test_double_dashed_is_distinct_weaker_pattern(self):
         self.assertEqual(multilane_highway_pattern(self.info("white_dashed")), "double_dashed")
 
+    def test_right_edge_dashed_marks_highway_entry_without_outer_lane(self):
+        info = AdjacentLeftLaneTest.lane_info()
+        info["lane_width_m"] = 3.5
+        info["right_lane"] = {
+            "detected": True, "type": "white_solid", "age": 3,
+            "coef": [0.0, 0.0, -1.75], "x_range_m": [5.0, 25.0],
+        }
+        self.assertEqual(multilane_highway_pattern(info), "right_edge_dashed")
+        info["right_lane"]["coasted"] = True
+        self.assertIsNone(multilane_highway_pattern(info))
+
     def test_nearest_solid_and_bad_geometry_are_rejected(self):
         info = self.info()
         info["left_lane"]["type"] = "white_solid"

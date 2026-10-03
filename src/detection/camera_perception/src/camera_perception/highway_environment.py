@@ -108,34 +108,61 @@ def multilane_highway_pattern(info, eval_x_m=7.0, min_width_m=2.7,
     width = _finite_float(info.get("lane_width_m"))
     if width is None or not min_width_m <= width <= max_width_m:
         return None
+    # At the highway entrance the nearest LEFT line becomes dashed while the
+    # RIGHT shoulder stays solid. The outer-left line can be outside the
+    # camera view there, so requiring it would miss the entire first gap.
+    right = info.get("right_lane") or {}
+    near_y = _polyval((info.get("left_lane") or {}).get("coef") or [], eval_x_m)
+    right_y = _polyval(right.get("coef") or [], eval_x_m)
+    right_range = right.get("x_range_m")
+    right_in_range = True
+    if isinstance(right_range, (list, tuple)) and len(right_range) >= 2:
+        right_lo = _finite_float(right_range[0])
+        right_hi = _finite_float(right_range[1])
+        right_in_range = (
+            right_lo is not None and right_hi is not None
+            and right_lo-3.0 <= eval_x_m <= right_hi+3.0
+        )
+    right_edge_dashed = (
+        near_type == "white_dashed"
+        and right.get("detected", False)
+        and right.get("type") == "white_solid"
+        and not right.get("from_guide", False)
+        and not right.get("coasted", False)
+        and _finite_float(right.get("age")) is not None
+        and _finite_float(right.get("age")) >= 2
+        and right_in_range
+        and near_y is not None and right_y is not None
+        and right_y < -0.15
+        and abs((near_y-right_y)-width) <= 0.5
+    )
     outer = info.get("left_outer_lane") or {}
     if (not outer.get("detected", False) or outer.get("from_guide", False)
             or outer.get("coasted", False)):
-        return None
+        return "right_edge_dashed" if right_edge_dashed else None
     try:
         if int(outer.get("age", 0)) < 2:
             return None
     except (TypeError, ValueError):
-        return None
+        return "right_edge_dashed" if right_edge_dashed else None
     x_range = outer.get("x_range_m")
     if isinstance(x_range, (list, tuple)) and len(x_range) >= 2:
         lo, hi = _finite_float(x_range[0]), _finite_float(x_range[1])
         if lo is None or hi is None or eval_x_m < lo-3.0 or eval_x_m > hi+3.0:
-            return None
-    near_y = _polyval((info.get("left_lane") or {}).get("coef") or [], eval_x_m)
+            return "right_edge_dashed" if right_edge_dashed else None
     outer_y = _polyval(outer.get("coef") or [], eval_x_m)
     if near_y is None or outer_y is None:
-        return None
+        return "right_edge_dashed" if right_edge_dashed else None
     separation = outer_y-near_y
     outer_type = outer.get("type")
     if (0.08 <= separation <= 0.75
             and {near_type, outer_type} == {"white_dashed", "white_solid"}):
         return "paired_dashed_solid"
     if near_type != "white_dashed" or not 2.0 <= separation <= 4.8:
-        return None
+        return "right_edge_dashed" if right_edge_dashed else None
     if outer_type == "white_dashed":
         return "double_dashed"
-    return None
+    return "right_edge_dashed" if right_edge_dashed else None
 
 
 class ConsecutiveLanePattern:

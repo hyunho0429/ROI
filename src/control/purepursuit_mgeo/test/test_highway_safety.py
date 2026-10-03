@@ -10,6 +10,7 @@ import math
 import os
 from pathlib import Path
 import sys
+import threading
 from types import ModuleType, SimpleNamespace as NS
 import unittest
 from unittest.mock import Mock, patch
@@ -132,6 +133,56 @@ class HighwaySafetyTest(unittest.TestCase):
         self.assertEqual(status["wait_path_source"], "camera_midpoint")
         self.assertAlmostEqual(path.poses[1].pose.position.y, 0.4)
 
+    def test_highway_activation_publishes_wait_path_on_same_cycle(self):
+        n = self.node
+        n.state = n.OFF
+        n.highway_environment = True
+        n.highway_true_since = Stamp(99.0)
+        n._choose_lane_change = Mock(return_value=(None, None, None, "gap_wait", {}))
+        n._gap_shaping_speed = Mock(return_value=(2.0, {}))
+        _, _, _, active, status, *_ = self.tick()
+        self.assertTrue(active)
+        self.assertEqual(n.state, n.WAIT_GAP)
+        self.assertEqual(status["wait_path_source"], "camera_midpoint")
+
+    def test_lead_safety_heartbeat_continues_during_slow_rrt_cycle(self):
+        n = self.node
+        n.state = n.WAIT_GAP
+        n.lead_brake_pub = Mock()
+        n.lead_emergency_pub = Mock()
+        n._current_lane_lead = Mock(return_value=(None, None, None))
+        n._gap_shaping_speed = Mock(return_value=(2.0, {}))
+        entered = threading.Event()
+        release = threading.Event()
+
+        def slow_plan(_now):
+            entered.set()
+            release.wait(2.0)
+            return None, None, None, "gap_wait", {}
+
+        n._choose_lane_change = slow_plan
+        worker = threading.Thread(target=n._tick, args=(None,))
+        worker.start()
+        try:
+            self.assertTrue(entered.wait(1.0))
+            n._publish_lead_safety(None)
+            self.assertFalse(n.lead_brake_pub.publish.call_args.args[0].data)
+            self.assertFalse(n.lead_emergency_pub.publish.call_args.args[0].data)
+        finally:
+            release.set()
+            worker.join(2.0)
+            self.assertFalse(worker.is_alive())
+
+    def test_lead_safety_heartbeat_reports_missing_lidar_as_safety_fault(self):
+        n = self.node
+        n.state = n.WAIT_GAP
+        n.lead_brake_pub = Mock()
+        n.lead_emergency_pub = Mock()
+        n.obstacles_at = Stamp(98.0)
+        n._publish_lead_safety(None)
+        self.assertTrue(n.lead_brake_pub.publish.call_args.args[0].data)
+        self.assertTrue(n.lead_emergency_pub.publish.call_args.args[0].data)
+
     def test_wait_gap_keeps_base_path_when_lane_pair_is_unreliable(self):
         n = self.node
         n.state = n.WAIT_GAP
@@ -141,6 +192,18 @@ class HighwaySafetyTest(unittest.TestCase):
         path, _, _, _, status, *_ = self.tick()
         self.assertIs(path, n.latest_base_path)
         self.assertEqual(status["wait_path_source"], "base")
+
+    def test_wait_gap_keeps_last_verified_lane_when_camera_pair_drops(self):
+        n = self.node
+        n.state = n.WAIT_GAP
+        n._choose_lane_change = Mock(return_value=(None, None, None, "gap_wait", {}))
+        n._gap_shaping_speed = Mock(return_value=(2.0, {}))
+        n._inner_center_sanity = Mock(return_value=(False, "unreliable", None))
+        n.last_wait_center_path = path_at(0.4)
+        n.last_wait_center_at = Stamp()
+        path, _, _, _, status, *_ = self.tick()
+        self.assertEqual(status["wait_path_source"], "camera_cached")
+        self.assertAlmostEqual(path.poses[10].pose.position.y, 0.4)
 
     def test_closer_same_lane_obstacle_remains_emergency(self):
         for x in (7.0, 5.0):
@@ -234,7 +297,7 @@ class HighwaySafetyTest(unittest.TestCase):
             n, path_at(), True, 10.0, True, status, Stamp(), 0.05
         )
         self.assertFalse(n.stop_pub.publish.call_args.args[0].data)
-        self.assertTrue(n.lead_brake_pub.publish.call_args.args[0].data)
+        self.assertTrue(status["lead_brake_required"])
         self.assertEqual(n.speed_pub.publish.call_args.args[0].data, 10.0)
 
     def test_forced_test_mode_activates_without_camera_highway_event(self):

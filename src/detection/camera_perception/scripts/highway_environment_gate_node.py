@@ -219,7 +219,7 @@ class HighwayEnvironmentGateNode:
             and (
                 self.last_lane_pattern == "paired_dashed_solid"
                 or (
-                    self.last_lane_pattern == "double_dashed"
+                    self.last_lane_pattern in ("double_dashed", "right_edge_dashed")
                     and self._recent(self.last_odom_at, 0.5, now)
                     and self.last_ego_speed_mps >= self.lane_pattern_min_speed_mps
                 )
