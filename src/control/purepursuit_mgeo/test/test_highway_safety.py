@@ -763,6 +763,48 @@ class HighwaySafetyTest(unittest.TestCase):
         }
         self.assertEqual(n._lane_valid(Stamp()), (False, "lane_straddling"))
 
+    def test_camera_observation_age_is_checked_not_just_publish_age(self):
+        n = self.node
+        n._lane_valid = NODE.HighwayLaneStrategyNode._lane_valid.__get__(n)
+        n.lane_info_at = Stamp()
+        n.lane_observed_wall_at = 99.0
+        n.lane_observed_pose = (0.0, 0.0, 0.0)
+        with patch.object(NODE.time, "time", return_value=100.0):
+            self.assertEqual(n._lane_valid(Stamp()), (False, "lane_observation_stale"))
+
+    def test_camera_points_follow_odom_pose_at_capture(self):
+        n = self.node
+        n.odom_pose_history.extend([
+            (99.8, (0.0, 0.0, 0.0)),
+            (100.0, (1.0, 0.0, 0.0)),
+        ])
+        n._odom_pose.return_value = (1.0, 0.0, 0.0, 2.0)
+        payload = {"timestamp": 99.9,
+                   "observation_time_source": "camera_receive_wall"}
+        with patch.object(NODE.time, "time", return_value=100.0):
+            n._lane_info_cb(NS(data=NODE.json.dumps(payload)))
+        self.assertAlmostEqual(n.lane_observed_pose[0], 0.5)
+        self.assertAlmostEqual(n._camera_points_current([[5.0, 1.75]])[0][0], 4.5)
+
+    def test_next_change_waits_for_actual_yaw_alignment(self):
+        n = self.node
+        n.inner_handover_pending = False
+        n.inner_hold_started_at = Stamp(90.0)
+        n.min_lane_hold_before_next_change_m = 0.0
+        n.next_change_settle_confirm_s = 0.0
+        n.lane_info["output_status"] = "FRESH"
+        n._global_signed_d.return_value = 3.5
+        n._next_change_boundary_clearance = Mock(return_value=(True, 1.75, 1.75))
+        n._choose_lane_change = Mock(return_value=(None, None, None, "no_gap", {}))
+        n._odom_pose.return_value = (0.0, 0.0, math.radians(5.0), 2.0)
+
+        self.tick()
+        n._choose_lane_change.assert_not_called()
+
+        n._odom_pose.return_value = (0.0, 0.0, 0.0, 2.0)
+        self.tick()
+        n._choose_lane_change.assert_called_once()
+
     def test_emergency_does_not_commit_rejoin(self):
         self.node.latest_obstacles.obstacles = [obstacle(7.0)]
         self.assertTrue(self.tick()[1])

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Highway-only proactive lane-change + lane-hold + longitudinal safety manager.
 
-Camera-team files are treated as read-only inputs. This node consumes:
+This node consumes camera perception results from:
   /perception/camera/highway_environment
   /perception/camera/lane_info
   /perception/merge_gap/available
@@ -27,6 +27,8 @@ from __future__ import annotations
 
 import json
 import math
+import time
+from collections import deque
 from dataclasses import dataclass
 from typing import List, Optional, Sequence, Tuple
 
@@ -37,6 +39,7 @@ from std_msgs.msg import Bool, Float64, String
 
 from lidar_perception.msg import LidarObstacleArray
 from purepursuit_mgeo.path import PathPoint, load_mgeo_path
+from purepursuit_mgeo.lane_geometry import pose_at, reproject
 from purepursuit_mgeo.rrt_star import (
     RRTStarPlanner,
     RectObstacle,
@@ -412,6 +415,9 @@ class HighwayLaneStrategyNode:
         self.obstacles_at: Optional[rospy.Time] = None
         self.lane_info = None
         self.lane_info_at: Optional[rospy.Time] = None
+        self.lane_observed_wall_at: Optional[float] = None
+        self.lane_observed_pose: Optional[Tuple[float, float, float]] = None
+        self.odom_pose_history = deque(maxlen=500)
         self.nominal_lane_fallback_active = False
         self.highway_environment = False
         self.highway_at: Optional[rospy.Time] = None
@@ -442,6 +448,8 @@ class HighwayLaneStrategyNode:
         self.inner_hold_started_at: Optional[rospy.Time] = None
         self.next_change_centered_since: Optional[rospy.Time] = None
         self.next_change_center_lost_since: Optional[rospy.Time] = None
+        self.next_change_last_observation: Optional[float] = None
+        self.next_change_center_observations = 0
 
         self.last_output_speed = self.cruise_speed_mps
         self.last_timer_time: Optional[rospy.Time] = None
@@ -489,6 +497,11 @@ class HighwayLaneStrategyNode:
     def _odom_cb(self, msg: Odometry) -> None:
         self.latest_odom = msg
         self.odom_at = rospy.Time.now()
+        pose = msg.pose.pose
+        self.odom_pose_history.append((time.time(), (
+            float(pose.position.x), float(pose.position.y),
+            yaw_from_quaternion(pose.orientation),
+        )))
 
     def _obstacles_cb(self, msg: LidarObstacleArray) -> None:
         self.latest_obstacles = msg
@@ -500,6 +513,19 @@ class HighwayLaneStrategyNode:
             if isinstance(data, dict):
                 self.lane_info = data
                 self.lane_info_at = rospy.Time.now()
+                self.lane_observed_wall_at = None
+                self.lane_observed_pose = None
+                if data.get("observation_time_source") == "camera_receive_wall":
+                    try:
+                        stamp = float(data.get("timestamp", 0.0))
+                    except (TypeError, ValueError):
+                        stamp = 0.0
+                    age = time.time()-stamp
+                    self.lane_observed_wall_at = stamp if math.isfinite(stamp) else 0.0
+                    if math.isfinite(stamp) and -0.1 <= age <= 10.0:
+                        self.lane_observed_pose = pose_at(
+                            self.odom_pose_history, stamp
+                        )
         except Exception as exc:
             rospy.logwarn_throttle(2.0, "lane_info JSON parse failed: %s", exc)
 
@@ -550,6 +576,12 @@ class HighwayLaneStrategyNode:
         self.nominal_lane_fallback_active = False
         if self.lane_info is None or not self._fresh(self.lane_info_at, self.lane_info_timeout_s, now):
             return self._lane_failure("lane_info_missing_or_stale")
+        if self.lane_observed_wall_at is not None:
+            observation_age = time.time()-self.lane_observed_wall_at
+            if observation_age < -0.1 or observation_age > self.lane_info_timeout_s:
+                return self._lane_failure("lane_observation_stale")
+            if self.lane_observed_pose is None:
+                return self._lane_failure("lane_observation_pose_missing")
         d = self.lane_info
         if not bool(d.get("lane_valid", False)):
             return self._lane_failure("lane_invalid")
@@ -574,7 +606,7 @@ class HighwayLaneStrategyNode:
         pts = self._centerline_local()
         if len(pts) < 3:
             return self._lane_failure("centerline_short")
-        heading = d.get("heading_error_rad")
+        heading = None if self.lane_observed_pose is not None else d.get("heading_error_rad")
         if heading is None:
             y_near = interp_y(pts, 5.0)
             y_far = interp_y(pts, 12.0)
@@ -616,6 +648,8 @@ class HighwayLaneStrategyNode:
     @staticmethod
     def _lane_meta_y(lane: dict, x_m: float) -> Optional[float]:
         coefficients = lane.get("coef") or []
+        if not coefficients:
+            return None
         try:
             value = 0.0
             for coefficient in coefficients:
@@ -623,6 +657,17 @@ class HighwayLaneStrategyNode:
         except (TypeError, ValueError):
             return None
         return value if math.isfinite(value) else None
+
+    def _lane_meta_y_current(self, lane: dict, x_m: float) -> Optional[float]:
+        if self.lane_observed_pose is None:
+            return self._lane_meta_y(lane, x_m)
+        samples = []
+        for observed_x in range(4, 13):
+            observed_y = self._lane_meta_y(lane, float(observed_x))
+            if observed_y is not None:
+                samples.append((float(observed_x), observed_y))
+        current = sorted(self._camera_points_current(samples))
+        return interp_y(current, x_m)
 
     def _double_left_solid_present(self) -> bool:
         """Detect two distinct fresh solid boundaries on the ego's left."""
@@ -643,8 +688,8 @@ class HighwayLaneStrategyNode:
                 or lane.get("type") not in solid_types
             ):
                 return False
-        adjacent_y = self._lane_meta_y(adjacent, 7.0)
-        outer_y = self._lane_meta_y(outer, 7.0)
+        adjacent_y = self._lane_meta_y_current(adjacent, 7.0)
+        outer_y = self._lane_meta_y_current(outer, 7.0)
         if adjacent_y is None or outer_y is None:
             return False
         separation = outer_y-adjacent_y
@@ -681,8 +726,8 @@ class HighwayLaneStrategyNode:
             or bool(outer.get("coasted", False))
         ):
             return False
-        adjacent_y = self._lane_meta_y(adjacent, 7.0)
-        outer_y = self._lane_meta_y(outer, 7.0)
+        adjacent_y = self._lane_meta_y_current(adjacent, 7.0)
+        outer_y = self._lane_meta_y_current(outer, 7.0)
         if adjacent_y is None or outer_y is None:
             return False
         separation = outer_y-adjacent_y
@@ -725,12 +770,8 @@ class HighwayLaneStrategyNode:
 
         raw = (self.lane_info or {}).get("centerline_points") or []
         reported: List[Tuple[float, float]] = [(0.0, 0.0)]
-        for p in raw:
-            try:
-                x, y = float(p[0]), float(p[1])
-            except Exception:
-                continue
-            if math.isfinite(x) and math.isfinite(y) and x > 0.5:
+        for x, y in self._camera_points_current(raw):
+            if x > 0.5:
                 reported.append((x, y))
         reported.sort(key=lambda q: q[0])
 
@@ -818,12 +859,8 @@ class HighwayLaneStrategyNode:
             return [(0.5*index, y) for index in range(121)]
         raw = (self.lane_info or {}).get(key) or []
         pts: List[Tuple[float, float]] = []
-        for q in raw:
-            try:
-                x, y = float(q[0]), float(q[1])
-            except Exception:
-                continue
-            if math.isfinite(x) and math.isfinite(y) and x > 0.2:
+        for x, y in self._camera_points_current(raw):
+            if x > 0.2:
                 pts.append((x, y))
         pts.sort(key=lambda q: q[0])
         out: List[Tuple[float, float]] = []
@@ -837,6 +874,19 @@ class HighwayLaneStrategyNode:
             slope = (y1-y0)/dx if abs(dx) > 1e-6 else 0.0
             out.insert(0, (0.0, y0 - slope*x0))
         return out
+
+    def _camera_points_current(self, raw) -> List[Tuple[float, float]]:
+        points = []
+        for q in raw:
+            try:
+                x, y = float(q[0]), float(q[1])
+            except (IndexError, TypeError, ValueError):
+                continue
+            if math.isfinite(x) and math.isfinite(y):
+                points.append((x, y))
+        if self.lane_observed_pose is None or self.latest_odom is None:
+            return points
+        return reproject(points, self.lane_observed_pose, self._odom_pose()[:3])
 
     def _left_divider_sanity(self, lane_width: float) -> Tuple[bool, str, dict]:
         divider = self._boundary_local("left_boundary_points")
@@ -1342,6 +1392,8 @@ class HighwayLaneStrategyNode:
         # as the car visually settled in the intermediate lane.
         self.next_change_centered_since = None
         self.next_change_center_lost_since = None
+        self.next_change_last_observation = None
+        self.next_change_center_observations = 0
         self.release_since = None
         self.lane_invalid_since = None
         self.ready_since = None
@@ -2565,6 +2617,9 @@ class HighwayLaneStrategyNode:
                 self._next_change_boundary_clearance() if lane_ok
                 else (False, None, None)
             )
+            _, target_alignment = self._committed_alignment()
+            target_lateral_error = target_alignment.get("target_lateral_error_m")
+            target_heading_error = target_alignment.get("target_heading_error_rad")
             control_path_local = self._path_map_to_local(path)
             control_path_y = interp_y(control_path_local, 5.0)
             centered_for_next = (
@@ -2582,12 +2637,23 @@ class HighwayLaneStrategyNode:
                 # the car is still following close to the left dashed line.
                 and control_path_y is not None
                 and abs(float(control_path_y)) <= self.next_change_center_error_m
+                # Camera lane identity can jump while the car is still yawed
+                # across the divider. The original committed target line is a
+                # separate map-frame reference for physical settling.
+                and target_lateral_error is not None
+                and abs(float(target_lateral_error)) <= self.next_change_center_error_m
+                and target_heading_error is not None
+                and abs(float(target_heading_error)) <= self.next_change_heading_error_rad
                 and (self.lane_info or {}).get("output_status", "FRESH") == "FRESH"
             )
             if centered_for_next:
                 self.next_change_center_lost_since = None
                 if self.next_change_centered_since is None:
                     self.next_change_centered_since = now
+                observation = self.lane_observed_wall_at
+                if observation is not None and observation != self.next_change_last_observation:
+                    self.next_change_last_observation = observation
+                    self.next_change_center_observations += 1
             else:
                 if self.next_change_center_lost_since is None:
                     self.next_change_center_lost_since = now
@@ -2595,6 +2661,8 @@ class HighwayLaneStrategyNode:
                     now-self.next_change_center_lost_since
                 ).to_sec() > self.next_change_center_loss_grace_s:
                     self.next_change_centered_since = None
+                    self.next_change_last_observation = None
+                    self.next_change_center_observations = 0
             centered_hold_time_s = (
                 0.0 if self.next_change_centered_since is None
                 else max(0.0, (now-self.next_change_centered_since).to_sec())
@@ -2608,6 +2676,8 @@ class HighwayLaneStrategyNode:
                 centered_for_next
                 and hold_time_s >= self.min_lane_hold_before_next_change_s
                 and centered_hold_time_s >= self.next_change_settle_confirm_s
+                and (self.lane_observed_wall_at is None
+                     or self.next_change_center_observations >= 3)
             )
             next_change_pending = False
             if settled_for_next:
@@ -2726,6 +2796,9 @@ class HighwayLaneStrategyNode:
                 "center_target_error_m": None if control_center_error is None else round(control_center_error,3),
                 "control_path_y5_m": None if control_path_y is None else round(control_path_y,3),
                 "control_heading_deg": None if control_heading is None else round(math.degrees(control_heading),2),
+                "target_lateral_error_m": target_lateral_error,
+                "target_heading_error_deg": None if target_heading_error is None else round(math.degrees(target_heading_error),2),
+                "centered_camera_observations": self.next_change_center_observations,
                 "left_clearance_m": None if left_clearance is None else round(left_clearance,3),
                 "right_clearance_m": None if right_clearance is None else round(right_clearance,3),
                 "next_change_centered": centered_for_next,

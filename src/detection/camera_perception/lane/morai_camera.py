@@ -39,6 +39,7 @@ class CameraStream:
         self.ip, self.port = ip, port
         self._frame = None
         self._seq = -1
+        self._received_at = 0.0
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread = None
@@ -52,10 +53,12 @@ class CameraStream:
     def stop(self):
         self._stop.set()
 
-    def latest(self):
+    def latest(self, with_stamp=False):
         with self._lock:
             if self._frame is None:
-                return None, -1
+                return (None, -1, 0.0) if with_stamp else (None, -1)
+            if with_stamp:
+                return self._frame.copy(), self._seq, self._received_at
             return self._frame.copy(), self._seq
 
     def wait_first(self, timeout=10.0):
@@ -74,6 +77,7 @@ class CameraStream:
                 frame = receiver.wait_for_latest(sequence, timeout=0.1)
                 if frame is None:
                     continue
+                received_at = time.time()
                 sequence = frame.sequence
                 buf = np.frombuffer(frame.jpeg_data, dtype=np.uint8)
                 image = cv2.imdecode(buf, cv2.IMREAD_COLOR)
@@ -83,6 +87,7 @@ class CameraStream:
                 with self._lock:
                     self._frame = image
                     self._seq = sequence
+                    self._received_at = received_at
         except (AttributeError, ValueError, OSError, cv2.error) as ex:
             print(f"[camera] 복구 가능한 오류: {ex}")
         finally:

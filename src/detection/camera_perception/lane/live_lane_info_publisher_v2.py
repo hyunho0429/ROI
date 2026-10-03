@@ -549,6 +549,7 @@ class LaneOutputStabilizer:
             else:
                 out = {
                     "timestamp": now,
+                    "observation_time_source": "camera_receive_wall",
 
                     # 좌표계
                     "frame_id": FRAME_ID,
@@ -570,6 +571,15 @@ class LaneOutputStabilizer:
 
                     # 우측 차선
                     "right_lane": _lane_meta(res.ego_right),
+                    "left_outer_lane": _lane_meta(next(
+                        (lane for lane in res.lanes if lane.lane_id == -2), None
+                    )),
+                    "straddling_lane": _lane_meta(next(
+                        (lane for lane in res.lanes
+                         if lane.lane_id in (-1, 1)
+                         and lane.x_range[0] <= 8.0
+                         and abs(float(np.polyval(lane.coef, 1.0))) < 0.45), None
+                    )),
 
                     # 차로 폭
                     "lane_width_m": (
@@ -624,7 +634,7 @@ class LaneOutputStabilizer:
             out = dict(self.last_good)
 
             out.update({
-                "timestamp": now,
+                "published_timestamp": now,
                 "lane_valid": True,
                 "output_status": "HELD",
                 "raw_lane_state": lane_state,
@@ -780,7 +790,7 @@ def main(argv=None):
 
     try:
         while not rospy.is_shutdown():
-            frame, seq = cam.latest()
+            frame, seq, observed_at = cam.latest(with_stamp=True)
 
             if frame is None or seq == last_seq:
                 time.sleep(0.001)
@@ -795,7 +805,7 @@ def main(argv=None):
             n_since = 0
 
             res = pipe.run(frame)
-            out = stabilizer.update(res)
+            out = stabilizer.update(res, now=observed_at)
 
             msg = String()
             msg.data = json.dumps(

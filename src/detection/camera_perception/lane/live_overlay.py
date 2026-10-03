@@ -175,7 +175,7 @@ def main(argv=None):
     try:
         while rospy is None or not rospy.is_shutdown():
             if not paused:
-                f, seq = cam.latest()
+                f, seq, observed_at = cam.latest(with_stamp=True)
                 if f is not None and seq != last_seq:
                     last_seq = seq
                     n_since += 1
@@ -235,7 +235,7 @@ def main(argv=None):
                         if lane_info_publisher is not None:
                             from std_msgs.msg import String
                             lane_info_publisher.publish(String(data=json.dumps(
-                                lane_info_stabilizer.update(res),
+                                lane_info_stabilizer.update(res, now=observed_at),
                                 ensure_ascii=False,
                                 separators=(",", ":"),
                             )))
