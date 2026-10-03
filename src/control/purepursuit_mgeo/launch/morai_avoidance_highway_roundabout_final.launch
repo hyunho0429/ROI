@@ -19,6 +19,7 @@
   <!-- Set target_speed_mps:=15.0 for the competition speed profile. -->
   <arg name="target_speed_mps" default="2.0" />
   <arg name="managed_timeout_s" default="1.0" />
+  <arg name="lidar_forward_range_m" default="80.0" />
 
   <!-- The wrapper launches the six-class lane inference pipeline. -->
   <!-- Camera lane geometry and YOLO highway-situation recognition. -->
@@ -92,12 +93,15 @@
   <param name="/purepursuit_mgeo/fast_change_lookahead_speed_gain" value="0.75" />
   <param name="/purepursuit_mgeo/fast_change_steering_rate_rad_s" value="0.50" />
   <param name="/purepursuit_mgeo/fast_change_reference_speed_mps" value="4.0" />
-  <!-- Suppress mission stop flags, but retain the speed PID's ordinary brake
-       when actual speed exceeds the requested 15 m/s competition profile. -->
+  <!-- Preserve highway cruise. Permit speed-PID braking only for a confirmed
+       path-aligned LiDAR lead; an imminent conflict uses the brake pedal while
+       retaining the moving-lead speed target and steering path. -->
   <param name="/purepursuit_mgeo/highway_active_topic" value="/highway_lane_strategy/active" />
   <param name="/purepursuit_mgeo/highway_braking_enabled" value="false" />
   <param name="/purepursuit_mgeo/highway_speed_braking_enabled" value="true" />
-  <!-- Let the bridge pass through speed regulation and brake on command timeout. -->
+  <param name="/purepursuit_mgeo/highway_lead_brake_topic" value="/highway_lane_strategy/lead_brake_required" />
+  <param name="/purepursuit_mgeo/highway_lead_emergency_topic" value="/highway_lane_strategy/lead_emergency_brake" />
+  <!-- Let the bridge pass through confirmed-lead braking and brake on timeout. -->
   <param name="/morai_udp_drive_bridge/highway_active_topic" value="/highway_lane_strategy/active" />
   <param name="/morai_udp_drive_bridge/highway_braking_enabled" value="true" />
 
@@ -114,6 +118,7 @@
     <arg name="bind_ip" value="$(arg bind_ip)" />
     <arg name="morai_host_ip" value="$(arg morai_host_ip)" />
     <arg name="target_speed_mps" value="$(arg target_speed_mps)" />
+    <arg name="lidar_forward_range_m" value="$(arg lidar_forward_range_m)" />
     <arg name="enable_control" value="$(arg enable_control)" />
     <!-- One UDP consumer only: the lane camera runner owns MORAI port 1101. -->
     <arg name="enable_lane" value="false" />
@@ -293,7 +298,7 @@
          gap, TTC and the complete RRT* path. Avoid waiting on the older
          camera-gated merge decision as a second veto. -->
     <param name="bypass_sensor_merge_gate" value="true" />
-    <!-- Arm from the YOLO + dashed-lane highway-environment topic. -->
+    <!-- Arm from YOLO+dashed or confirmed paired lane markings. -->
     <param name="force_highway_active" value="false" />
     <!-- Use measured lane boundaries for the RRT corridor and post-change hold. -->
     <param name="rrt_lidar_only_mode" value="false" />
@@ -342,14 +347,14 @@
 
     <param name="change_start_m" value="3.0" />
     <param name="change_min_length_m" value="18.0" />
-    <param name="change_max_length_m" value="75.0" />
+    <param name="change_max_length_m" value="90.0" />
     <param name="change_ramp_ratio" value="0.20" />
     <param name="change_max_heading_deg" value="15.0" />
     <!-- Both the first and later merges use a decisive diagonal so the car
          does not spend too long straddling a divider. -->
     <param name="repeat_change_min_length_m" value="18.0" />
-    <param name="repeat_change_max_length_m" value="70.0" />
-    <param name="repeat_change_time_s" value="3.8" />
+    <param name="repeat_change_max_length_m" value="90.0" />
+    <param name="repeat_change_time_s" value="3.6" />
     <param name="repeat_change_max_heading_deg" value="15.0" />
     <!-- Follow the midpoint of the newly detected left/right boundaries soon
          after hand-over while retaining a smooth steering transition. -->
@@ -373,7 +378,7 @@
     <!-- Preserve the centred-lane timer across one or two missed camera
          frames, but never commit a new change on a stale frame. -->
     <param name="next_change_center_loss_grace_s" value="0.40" />
-    <param name="change_time_s" value="4.0" />
+    <param name="change_time_s" value="3.6" />
     <param name="change_post_hold_m" value="10.0" />
     <!-- Live vehicle-frame RRT*: consumes current lane/odom/LiDAR in memory. -->
     <param name="rrt_step_size_m" value="2.0" />
@@ -402,7 +407,7 @@
     <param name="follow_standstill_gap_m" value="4.0" />
     <param name="follow_time_headway_s" value="1.6" />
     <param name="follow_gain" value="0.35" />
-    <param name="follow_search_m" value="60.0" />
+    <param name="follow_search_m" value="80.0" />
     <param name="current_lane_center_gate_m" value="1.15" />
     <param name="target_lane_center_gate_m" value="1.50" />
     <param name="emergency_gap_m" value="1.5" />

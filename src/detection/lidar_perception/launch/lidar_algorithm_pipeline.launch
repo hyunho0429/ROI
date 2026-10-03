@@ -31,6 +31,7 @@
     <arg name="odometry_topic" value="$(arg odometry_topic)" />
     <arg name="deskew_enabled" value="$(arg deskew_enabled)" />
     <arg name="cluster_enabled" value="$(arg udp_cluster_enabled)" />
+    <arg name="x_max_m" value="$(arg x_max_m)" />
   </include>
 
   <node pkg="lidar_perception"

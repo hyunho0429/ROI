@@ -86,6 +86,25 @@ class PurePursuitNode:
         self.highway_speed_braking_enabled = bool(
             rospy.get_param("~highway_speed_braking_enabled", False)
         )
+        self.highway_lead_brake_required = False
+        self.highway_lead_emergency_brake = False
+        self.highway_lead_status_at: Optional[rospy.Time] = None
+        self.highway_lead_brake_topic = rospy.get_param(
+            "~highway_lead_brake_topic", ""
+        )
+        self.highway_lead_emergency_topic = rospy.get_param(
+            "~highway_lead_emergency_topic", ""
+        )
+        if self.highway_lead_brake_topic:
+            rospy.Subscriber(
+                self.highway_lead_brake_topic, Bool,
+                self.highway_lead_brake_callback, queue_size=1,
+            )
+        if self.highway_lead_emergency_topic:
+            rospy.Subscriber(
+                self.highway_lead_emergency_topic, Bool,
+                self.highway_lead_emergency_callback, queue_size=1,
+            )
         highway_active_topic = rospy.get_param("~highway_active_topic", "")
         if highway_active_topic:
             rospy.Subscriber(
@@ -288,6 +307,13 @@ class PurePursuitNode:
     def highway_active_callback(self, msg: Bool) -> None:
         self.highway_active = bool(msg.data)
 
+    def highway_lead_brake_callback(self, msg: Bool) -> None:
+        self.highway_lead_brake_required = bool(msg.data)
+        self.highway_lead_status_at = rospy.Time.now()
+
+    def highway_lead_emergency_callback(self, msg: Bool) -> None:
+        self.highway_lead_emergency_brake = bool(msg.data)
+
     def merge_stop_callback(self, msg: Bool) -> None:
         self.merge_stop_required = bool(msg.data)
         self.merge_gate_at = rospy.Time.now()
@@ -336,6 +362,20 @@ class PurePursuitNode:
         highway_no_brake = (
             self.highway_active and not self.highway_braking_enabled
         )
+        lead_status_stale = (
+            highway_no_brake and self.highway_lead_brake_topic
+            and (
+                self.highway_lead_status_at is None
+                or (now-self.highway_lead_status_at).to_sec() > 0.5
+            )
+        )
+        if lead_status_stale:
+            self.steering_limiter.reset(now.to_sec())
+            if self.enable_control:
+                self.speed_controller.reset()
+                self.command_pub.publish(self.make_command(0.0, True, 0.0, 1.0))
+            rospy.logwarn_throttle(1.0, "PP highway lead-safety status stale")
+            return
         if (managed_fault is not None or not merge_fresh) and not highway_no_brake:
             self.steering_limiter.reset(now.to_sec())
             if self.enable_control:
@@ -488,8 +528,13 @@ class PurePursuitNode:
                     stop,
                     accel,
                     brake,
-                    allow_speed_brake=self.highway_speed_braking_enabled,
+                    allow_speed_brake=(
+                        self.highway_speed_braking_enabled
+                        and self.highway_lead_brake_required
+                    ),
                 )
+                if highway_no_brake and self.highway_lead_emergency_brake:
+                    accel, brake = 0.0, 1.0
             self.command_pub.publish(self.make_command(steering, stop, accel, brake))
 
         rospy.loginfo_throttle(

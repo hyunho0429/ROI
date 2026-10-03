@@ -2,6 +2,26 @@
 import math
 
 
+def lead_brake_decision(follow, emergency_gap_m=1.5,
+                        emergency_ttc_s=1.0, approach_ttc_s=7.0,
+                        gap_margin_m=10.0):
+    """Separate confirmed path-aligned lead traffic from adjacent vehicles."""
+    if not isinstance(follow, dict) or follow.get("lead") is None:
+        return False, False
+    try:
+        gap = float(follow["gap"])
+        desired = float(follow["desired_gap"])
+        ttc_value = follow.get("ttc")
+        ttc = float("inf") if ttc_value is None else float(ttc_value)
+    except (KeyError, TypeError, ValueError):
+        return False, False
+    if not math.isfinite(gap) or not math.isfinite(desired):
+        return False, False
+    emergency = gap < emergency_gap_m or ttc < emergency_ttc_s
+    approach = gap <= desired+gap_margin_m or ttc < approach_ttc_s
+    return bool(approach or emergency), bool(emergency)
+
+
 def apply_highway_brake_policy(
     highway_active: bool,
     braking_enabled: bool,

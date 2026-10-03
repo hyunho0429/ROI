@@ -157,6 +157,86 @@ class HighwaySafetyTest(unittest.TestCase):
         self.assertEqual(speed, 2.0)
         self.assertTrue(self.node._dynamic_path_safe(path_at(), 2.0)[0])
 
+    def test_offset_vehicle_whose_box_overlaps_path_is_a_lead(self):
+        n = self.node
+        n.latest_obstacles.obstacles = [obstacle(20.0, 1.7)]
+        lead, gap, _ = n._current_lane_lead()
+        self.assertIsNotNone(lead)
+        self.assertGreater(gap, 0.0)
+
+    def test_long_range_lead_is_not_projected_onto_short_path_endpoint(self):
+        n = self.node
+        n.follow_search_m = 80.0
+        n.last_inner_path = path_at(end=40)
+        n.latest_obstacles.obstacles = [obstacle(75.0, 0.0)]
+        lead, gap, _ = n._current_lane_lead()
+        self.assertIsNotNone(lead)
+        self.assertGreater(gap, 60.0)
+
+    def test_fast_highway_ego_matches_moving_lead_without_zero_target(self):
+        n = self.node
+        n.highway_braking_enabled = False
+        n.cruise_speed_mps = 15.0
+        n._odom_pose.return_value = (0.0, 0.0, 0.0, 22.8)
+        desired = n.follow_standstill_gap_m+n.follow_time_headway_s*22.8
+        n._current_lane_lead = Mock(return_value=(NS(oid=7, vx=19.0), desired, 6.0))
+        target, emergency, follow = n._adaptive_speed(15.0)
+        self.assertAlmostEqual(target, 19.0)
+        self.assertFalse(emergency)
+        self.assertEqual(follow["lead"], 7)
+
+    def test_follow_speed_uses_path_direction_during_ego_yaw(self):
+        n = self.node
+        n.highway_braking_enabled = False
+        n.cruise_speed_mps = 15.0
+        n._odom_pose.return_value = (0.0, 0.0, math.radians(20.0), 22.8)
+        desired = n.follow_standstill_gap_m+n.follow_time_headway_s*22.8
+        front = n.vehicle_center_from_base_m+0.5*n.vehicle_length_m
+        n.latest_obstacles.obstacles = [obstacle(
+            desired+front+0.5*n.vehicle_length_m, 0.0, vx=19.0
+        )]
+        target, _, follow = n._adaptive_speed(15.0)
+        self.assertAlmostEqual(follow["lead_v"], 19.0)
+        self.assertAlmostEqual(target, 19.0, places=1)
+
+    def test_committed_change_keeps_moving_lead_speed_target(self):
+        n = self.node
+        n.state = n.LANE_CHANGE
+        n.committed_speed_mps = 15.0
+        n.cruise_speed_mps = 15.0
+        n._odom_pose.return_value = (0.0, 0.0, 0.0, 22.8)
+        n._adaptive_speed = Mock(return_value=(
+            19.0, False,
+            {"lead": 7, "gap": 40.0, "desired_gap": 40.0, "ttc": 6.0},
+        ))
+        n._dynamic_path_safe = Mock(return_value=(True, "ok"))
+        _, _, speed, _, status, *_ = self.tick()
+        self.assertEqual(speed, 19.0)
+        self.assertEqual(status["follow"]["lead"], 7)
+
+    def test_confirmed_moving_lead_bypasses_no_brake_speed_floor(self):
+        n = self.node
+        n.cruise_speed_mps = 15.0
+        n.highway_braking_enabled = False
+        n._odom_pose.return_value = (0.0, 0.0, 0.0, 22.8)
+        n.last_output_speed = 15.0
+        n.path_pub = Mock()
+        n.stop_pub = Mock()
+        n.speed_pub = Mock()
+        n.active_pub = Mock()
+        n.fast_change_pub = Mock()
+        n.lead_brake_pub = Mock()
+        n.lead_emergency_pub = Mock()
+        n.state_pub = Mock()
+        follow = {"lead": 7, "gap": 20.0, "desired_gap": 40.0, "ttc": 4.0}
+        status = {"reason": "lead_emergency", "follow": follow}
+        NODE.HighwayLaneStrategyNode._publish(
+            n, path_at(), True, 10.0, True, status, Stamp(), 0.05
+        )
+        self.assertFalse(n.stop_pub.publish.call_args.args[0].data)
+        self.assertTrue(n.lead_brake_pub.publish.call_args.args[0].data)
+        self.assertEqual(n.speed_pub.publish.call_args.args[0].data, 10.0)
+
     def test_forced_test_mode_activates_without_camera_highway_event(self):
         n = self.node
         n.force_highway_active = True
@@ -341,6 +421,53 @@ class HighwaySafetyTest(unittest.TestCase):
                 self.assertGreaterEqual(length, minimum_length)
                 self.assertEqual(reason, "ok")
 
+    def test_empty_lane_change_is_curvature_safe_at_82_kph(self):
+        n = self.node
+        n.change_max_length_m = 90.0
+        n.repeat_change_max_length_m = 90.0
+        n.change_time_s = 3.6
+        n.repeat_change_time_s = 3.6
+        n.cruise_speed_mps = 22.8
+        n.highway_braking_enabled = False
+        n.rrt_lidar_only_mode = True
+        n.require_left_dashed = False
+        n.highway_request = True
+        n.latest_obstacles.obstacles = []
+        n._odom_pose.return_value = (0.0, 0.0, 0.0, 22.8)
+        n._lane_valid = NODE.HighwayLaneStrategyNode._lane_valid.__get__(n)
+        n._centerline_local = NODE.HighwayLaneStrategyNode._centerline_local.__get__(n)
+        n._boundary_local = NODE.HighwayLaneStrategyNode._boundary_local.__get__(n)
+        for changes_done in (0, 1):
+            with self.subTest(changes_done=changes_done):
+                n.lane_changes_done = changes_done
+                path, speed, length, reason, diagnostics = n._choose_lane_change(Stamp())
+                self.assertIsNotNone(path, (reason, diagnostics))
+                self.assertEqual(speed, 22.8)
+                self.assertLessEqual(length, 90.0)
+                self.assertEqual(reason, "ok")
+
+    def test_nominal_15_mps_request_does_not_block_actual_82_kph_change(self):
+        n = self.node
+        n.change_max_length_m = 90.0
+        n.repeat_change_max_length_m = 90.0
+        n.change_time_s = 3.6
+        n.repeat_change_time_s = 3.6
+        n.cruise_speed_mps = 15.0
+        n.highway_braking_enabled = False
+        n.rrt_lidar_only_mode = True
+        n.require_left_dashed = False
+        n.highway_request = True
+        n.latest_obstacles.obstacles = []
+        n._odom_pose.return_value = (0.0, 0.0, 0.0, 22.8)
+        n._lane_valid = NODE.HighwayLaneStrategyNode._lane_valid.__get__(n)
+        n._centerline_local = NODE.HighwayLaneStrategyNode._centerline_local.__get__(n)
+        n._boundary_local = NODE.HighwayLaneStrategyNode._boundary_local.__get__(n)
+        path, speed, length, reason, diag = n._choose_lane_change(Stamp())
+        self.assertIsNotNone(path, (reason, diag))
+        self.assertEqual(speed, 15.0)
+        self.assertAlmostEqual(length, 82.08)
+        self.assertEqual(diag["15.0"]["geometry_speed_mps"], 22.8)
+
     def test_faster_ego_can_merge_after_moving_npcs_clear_at_15_mps(self):
         n = self.node
         n.cruise_speed_mps = 15.0
@@ -512,12 +639,15 @@ class HighwaySafetyTest(unittest.TestCase):
         self.node.latest_obstacles.obstacles = [obstacle(28.0, 8.0, vy=-2.0)]
         self.assertFalse(self.node._dynamic_path_safe(path_at(), 2.0)[0])
 
-    def test_lane_change_checks_collision_when_camera_is_stale(self):
+    def test_lane_change_follows_lead_when_camera_is_stale(self):
         n = self.node
         n.state = n.LANE_CHANGE
         n._lane_valid.return_value = (False, "lane_stale")
         n.latest_obstacles.obstacles = [obstacle(12.0)]
-        self.assertTrue(self.tick()[1])
+        _, stop, speed, _, status, *_ = self.tick()
+        self.assertFalse(stop)
+        self.assertLess(speed, n.committed_speed_mps)
+        self.assertEqual(status["follow"]["lead"], 1)
 
     def test_lane_change_checks_future_target_lane_collision(self):
         n = self.node

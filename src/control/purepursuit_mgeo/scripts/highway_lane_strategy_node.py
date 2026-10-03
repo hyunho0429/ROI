@@ -10,7 +10,7 @@ and LiDAR tracked obstacles / odometry.
 
 Outside the highway scenario, it simply republishes the existing avoidance
 PathManager path/stop and the cruise speed. During the highway scenario it:
-  1) waits for a safe LEFT merge gap while staying on the base path;
+  1) waits for a safe LEFT merge gap while holding the measured lane centre;
   2) plans a live RRT* path from the current lane into the left lane;
   3) keeps following the camera-reported current lane centerline after the
      change, so the vehicle does NOT get pulled back to the original outer
@@ -40,7 +40,7 @@ from std_msgs.msg import Bool, Float64, String
 from lidar_perception.msg import LidarObstacleArray
 from purepursuit_mgeo.path import PathPoint, load_mgeo_path
 from purepursuit_mgeo.lane_geometry import pose_at, reproject
-from purepursuit_mgeo.motion import diagonal_progress
+from purepursuit_mgeo.motion import diagonal_progress, lead_brake_decision
 from purepursuit_mgeo.rrt_star import (
     RRTStarPlanner,
     RectObstacle,
@@ -474,6 +474,12 @@ class HighwayLaneStrategyNode:
         self.active_pub = rospy.Publisher("~active", Bool, queue_size=1)
         self.fast_change_pub = rospy.Publisher(
             "~fast_change_active", Bool, queue_size=1
+        )
+        self.lead_brake_pub = rospy.Publisher(
+            "~lead_brake_required", Bool, queue_size=1
+        )
+        self.lead_emergency_pub = rospy.Publisher(
+            "~lead_emergency_brake", Bool, queue_size=1
         )
         self.state_pub = rospy.Publisher("~state", String, queue_size=1)
 
@@ -1930,6 +1936,17 @@ class HighwayLaneStrategyNode:
             (float(ps.pose.position.x), float(ps.pose.position.y))
             for ps in path.poses
         ]
+        tail_dx = source[-1][0]-source[-2][0]
+        tail_dy = source[-1][1]-source[-2][1]
+        tail_length = math.hypot(tail_dx, tail_dy)
+        if tail_length > 1e-6:
+            # The rolling camera path is only ~40 m long. Extrapolate its
+            # final tangent for long-range lead classification, otherwise a
+            # car at 80 m projects onto its 40 m endpoint and looks imminent.
+            source.append((
+                source[-1][0]+tail_dx/tail_length*self.follow_search_m,
+                source[-1][1]+tail_dy/tail_length*self.follow_search_m,
+            ))
         nearest = min(
             range(len(source)),
             key=lambda i: (source[i][0]-ex)**2 + (source[i][1]-ey)**2,
@@ -1986,6 +2003,7 @@ class HighwayLaneStrategyNode:
         best = None
         best_gap = None
         best_ttc = None
+        best_path_speed = None
         _, _, _, ego_speed = self._odom_pose()
         for o in self._map_obstacles_local():
             path_speed = o.vx
@@ -1996,7 +2014,14 @@ class HighwayLaneStrategyNode:
                 forward, lateral, path_speed = projected
                 if forward <= 0.0 or forward > self.follow_search_m:
                     continue
-                if abs(lateral) > self.current_lane_center_gate_m:
+                # Include a vehicle whose box overlaps the driven path even
+                # when its centre is offset from it. Adjacent-lane centres
+                # remain outside this footprint-sized gate.
+                footprint_gate = (
+                    0.5*self.vehicle_width_m + 0.5*o.width
+                    + self.collision_lat_margin_m
+                )
+                if abs(lateral) > max(self.current_lane_center_gate_m, footprint_gate):
                     continue
                 longitudinal = forward
             else:
@@ -2021,6 +2046,8 @@ class HighwayLaneStrategyNode:
                 closing = ego_speed - path_speed
                 ttc = max(gap, 0.0)/closing if closing > 0.05 else float("inf")
                 best, best_gap, best_ttc = o, gap, ttc
+                best_path_speed = path_speed
+        self.last_lead_path_speed_mps = best_path_speed
         return best, best_gap, best_ttc
 
     def _lane_change_speed_floor(self) -> float:
@@ -2095,7 +2122,23 @@ class HighwayLaneStrategyNode:
                 ) else "camera_lane",
             }
         desired = self.follow_standstill_gap_m + self.follow_time_headway_s * ego_speed
-        target = min(cruise, max(0.0, lead.vx + self.follow_gain*(gap-desired)))
+        # When highway braking is normally suppressed, the ego may cruise
+        # faster than the configured nominal speed. Match the actual moving
+        # leader instead of forcing the nominal speed or zero. The gap error
+        # temporarily commands a lower speed to restore spacing.
+        lead_speed = getattr(self, "last_lead_path_speed_mps", None)
+        if lead_speed is None:
+            lead_speed = lead.vx
+        free_speed = (
+            max(cruise, ego_speed)
+            if self.state != self.OFF and not self.highway_braking_enabled
+            else cruise
+        )
+        moving_lead_floor = max(0.0, lead_speed-5.0)
+        target = min(free_speed, max(
+            moving_lead_floor,
+            lead_speed + self.follow_gain*(gap-desired),
+        ))
         emergency = gap < self.emergency_gap_m or (ttc is not None and math.isfinite(ttc) and ttc < self.emergency_ttc_s)
         return target, emergency, {
             "lead": lead.oid,
@@ -2103,13 +2146,17 @@ class HighwayLaneStrategyNode:
                 self.LANE_CHANGE, self.INNER_HOLD, self.REJOIN
             ) else "camera_lane",
             "gap": round(gap,2),
-            "lead_v": round(lead.vx,2),
+            "lead_v": round(lead_speed,2),
             "ttc": None if ttc is None or not math.isfinite(ttc) else round(ttc,2),
             "desired_gap": round(desired,2),
         }
 
-    def _limit_speed_rate(self, target: float, dt: float) -> float:
-        target = clamp(target, 0.0, self.cruise_speed_mps)
+    def _limit_speed_rate(self, target: float, dt: float,
+                          upper_speed_mps: Optional[float] = None) -> float:
+        cap = self.cruise_speed_mps if upper_speed_mps is None else max(
+            self.cruise_speed_mps, float(upper_speed_mps)
+        )
+        target = clamp(target, 0.0, cap)
         if target > self.last_output_speed:
             out = min(target, self.last_output_speed + self.speed_rise_mps2*dt)
         else:
@@ -2144,6 +2191,13 @@ class HighwayLaneStrategyNode:
         return best_signed
 
     def _publish(self, path: Optional[RosPath], stop: bool, speed: float, active: bool, status: dict, now: rospy.Time, dt: float) -> None:
+        lead_brake, lead_emergency = lead_brake_decision(
+            status.get("follow"), self.emergency_gap_m, self.emergency_ttc_s
+        )
+        lead_brake = bool(active and lead_brake)
+        lead_emergency = bool(active and lead_emergency)
+        status["lead_brake_required"] = lead_brake
+        status["lead_emergency_brake"] = lead_emergency
         if path is not None:
             path.header.stamp = now
             if not path.header.frame_id:
@@ -2159,13 +2213,26 @@ class HighwayLaneStrategyNode:
             if stop:
                 status["suppressed_stop"] = True
                 status["suppressed_stop_reason"] = status.get("reason", "unknown")
-            stop = False
-            # Avoid replacing a suppressed brake with a zero-speed command.
-            # This also prevents the sharp post-merge speed collapse observed in
-            # the simulator while respecting the configured cruise-speed cap.
-            speed = max(speed, self._lane_change_speed_floor())
-        speed_out = self._limit_speed_rate(0.0 if stop else speed, dt)
+                stop = False
+            if not lead_brake:
+                # Do not lift a real moving-lead follow command to the
+                # lane-change speed floor.
+                speed = max(speed, self._lane_change_speed_floor())
+        follow_cap = None
+        if lead_brake and self.latest_odom is not None:
+            follow_cap = self._odom_pose()[3]
+        if lead_brake and not stop:
+            # Following needs to react within the available TTC, not wait for
+            # the ordinary cruise ramp (1.8 m/s per second by default).
+            speed_out = clamp(float(speed), 0.0, follow_cap)
+            self.last_output_speed = speed_out
+        else:
+            speed_out = self._limit_speed_rate(
+                0.0 if stop else speed, dt, upper_speed_mps=follow_cap
+            )
         self.stop_pub.publish(Bool(data=bool(stop)))
+        self.lead_brake_pub.publish(Bool(data=lead_brake))
+        self.lead_emergency_pub.publish(Bool(data=lead_emergency))
         self.speed_pub.publish(Float64(data=float(speed_out)))
         self.active_pub.publish(Bool(data=bool(active)))
         fast_change = bool(active and (
@@ -2244,7 +2311,10 @@ class HighwayLaneStrategyNode:
             lane_ok_for_shape, _ = self._lane_valid(now, require_measured_width=True)
             if obs_fresh and lane_ok_for_shape:
                 shaping, shaping_diag = self._gap_shaping_speed(self._active_lane_width())
-            wait_speed = min(adaptive, shaping)
+            lead_following, _ = lead_brake_decision(
+                follow, self.emergency_gap_m, self.emergency_ttc_s
+            )
+            wait_speed = adaptive if lead_following else min(adaptive, shaping)
             path, cand_speed, length, reason, diag = self._choose_lane_change(now)
             if path is not None:
                 if self.ready_since is None:
@@ -2283,10 +2353,21 @@ class HighwayLaneStrategyNode:
             # Geometry remains committed. Do not regenerate from camera because the
             # camera's ego-lane identity can switch midway through the maneuver.
             lane_ok, lane_reason = self._lane_valid(now)
-            adaptive, emergency, follow = self._adaptive_speed(self.committed_speed_mps) if obs_fresh and lane_ok else (self.committed_speed_mps, False, {})
-            adaptive_speed = min(self.committed_speed_mps, adaptive)
+            # A committed path supplies the traffic reference even while the
+            # camera temporarily loses lane markings during the crossing.
+            adaptive, emergency, follow = self._adaptive_speed(self.committed_speed_mps) if obs_fresh else (self.committed_speed_mps, False, {})
+            lead_following, _ = lead_brake_decision(
+                follow, self.emergency_gap_m, self.emergency_ttc_s
+            )
+            adaptive_speed = (
+                adaptive if lead_following
+                else min(self.committed_speed_mps, adaptive)
+            )
             speed_floor = min(self.committed_speed_mps, self._lane_change_speed_floor())
-            speed = adaptive_speed if emergency else max(adaptive_speed, speed_floor)
+            speed = (
+                adaptive_speed if lead_following or emergency
+                else max(adaptive_speed, speed_floor)
+            )
 
             # Do not re-run the entry gap threshold after commitment, but keep
             # checking actual predicted collisions along the remaining trajectory
@@ -2903,7 +2984,7 @@ class HighwayLaneStrategyNode:
             return
 
         if self.state == self.REJOIN:
-            adaptive, emergency, follow = self._adaptive_speed(self.cruise_speed_mps) if obs_fresh and self.lane_info is not None else (self.cruise_speed_mps, False, {})
+            adaptive, emergency, follow = self._adaptive_speed(self.cruise_speed_mps) if obs_fresh else (self.cruise_speed_mps, False, {})
             global_d = self._global_signed_d()
             path_safe, path_reason = self._dynamic_path_safe(self.committed_rejoin_path, adaptive) if obs_fresh else (False, "obstacles_stale")
             stop = emergency or not path_safe or not base_stop_fresh or self.base_stop

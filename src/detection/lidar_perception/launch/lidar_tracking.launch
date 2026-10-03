@@ -3,6 +3,7 @@
   <arg name="bind_ip" default="0.0.0.0" />
   <arg name="host_port" default="2000" />
   <arg name="destination_port" default="2001" />
+  <arg name="x_max_m" default="40.0" />
   <arg name="odometry_topic" default="/localization/odometry" />
   <arg name="map_obstacle_topic" default="/perception/lidar/tracked_obstacles_map" />
   <arg name="obstacle_state_enabled" default="true" />
@@ -51,6 +52,7 @@
     <arg name="lidar_y_m" value="$(arg lidar_y_m)" />
     <arg name="lidar_yaw_deg" value="$(arg lidar_yaw_deg)" />
     <arg name="min_hits" value="$(arg min_hits)" />
+    <arg name="x_max_m" value="$(arg x_max_m)" />
   </include>
 
   <!-- State classification consumes the existing map tracker. It does not

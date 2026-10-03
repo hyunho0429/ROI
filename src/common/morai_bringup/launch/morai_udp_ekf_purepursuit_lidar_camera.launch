@@ -59,6 +59,7 @@
   <arg name="left_parallel_dynamic_hold_s" default="0.5" />
   <arg name="highway_latch_once" default="true" />
   <arg name="car_detection_hold_s" default="2.0" />
+  <arg name="lidar_forward_range_m" default="40.0" />
   <arg name="highway_lane_pattern_enabled" default="false" />
   <arg name="highway_lane_pattern_min_speed_mps" default="10.0" />
   <arg name="lane_info_topic" default="/perception/camera/lane_info" />
@@ -87,6 +88,7 @@
     <arg name="morai_host_ip" value="$(arg morai_host_ip)" />
     <arg name="control_remote_port" value="$(arg control_remote_port)" />
     <arg name="target_speed_mps" value="$(arg target_speed_mps)" />
+    <arg name="lidar_forward_range_m" value="$(arg lidar_forward_range_m)" />
     <arg name="lidar_x_m" value="$(arg lidar_x_m)" />
     <arg name="lidar_y_m" value="$(arg lidar_y_m)" />
     <arg name="lidar_yaw_deg" value="$(arg lidar_yaw_deg)" />

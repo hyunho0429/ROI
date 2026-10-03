@@ -4,6 +4,7 @@ import unittest
 
 from purepursuit_mgeo.motion import (
     apply_highway_brake_policy,
+    lead_brake_decision,
     diagonal_progress,
     lateral_acceleration_steering_limit,
     SteeringRateLimiter,
@@ -24,6 +25,18 @@ def node_fixture():
 
 
 class DiagonalLaneChangeTest(unittest.TestCase):
+    def test_only_same_path_lead_enables_follow_brake(self):
+        self.assertEqual(lead_brake_decision({"lead": None}), (False, False))
+        self.assertEqual(lead_brake_decision({
+            "lead": 5, "gap": 60.0, "desired_gap": 40.0, "ttc": 12.0,
+        }), (False, False))
+        self.assertEqual(lead_brake_decision({
+            "lead": 5, "gap": 35.0, "desired_gap": 40.0, "ttc": 6.0,
+        }), (True, False))
+        self.assertEqual(lead_brake_decision({
+            "lead": 5, "gap": 3.0, "desired_gap": 40.0, "ttc": 0.8,
+        }), (True, True))
+
     def test_highway_no_brake_policy_removes_stop_and_pid_brake(self):
         stop, accel, brake = apply_highway_brake_policy(
             True, False, True, 0.0, 1.0
