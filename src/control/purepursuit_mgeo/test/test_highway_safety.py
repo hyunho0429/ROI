@@ -113,6 +113,7 @@ class HighwaySafetyTest(unittest.TestCase):
         n.committed_path = path_at()
         n.committed_rejoin_path = path_at()
         n._generate_rejoin_path = Mock(return_value=path_at())
+        n._path_within_current_lane = Mock(return_value=True)
 
     def tick(self):
         self.node._tick(None)
@@ -795,6 +796,34 @@ class HighwaySafetyTest(unittest.TestCase):
     def test_clear_rejoin_still_commits(self):
         self.assertFalse(self.tick()[1])
         self.assertEqual(self.node.state, self.node.REJOIN)
+
+    def test_global_rejoin_cannot_cross_measured_solid_boundary(self):
+        n = self.node
+        n._path_within_current_lane = NODE.HighwayLaneStrategyNode._path_within_current_lane.__get__(n)
+        n._boundary_local = Mock(side_effect=lambda key: [
+            (float(x), 1.75 if key == 'left_boundary_points' else -1.75)
+            for x in range(31)
+        ])
+        n._generate_rejoin_path.return_value = path_at(2.0)
+
+        self.tick()
+
+        self.assertEqual(n.state, n.INNER_HOLD)
+        self.assertFalse(n._publish.call_args.args[1])
+        self.assertEqual(n._publish.call_args.args[4]['reason'], 'rejoin_path_crosses_lane_boundary')
+        self.assertFalse(n.completed_once)
+
+    def test_direct_release_requires_base_path_to_match_held_lane(self):
+        n = self.node
+        n._lane_valid.return_value = (False, 'lane_stale')
+        n._global_signed_d.return_value = 0.2
+        n.release_since = Stamp(98.0)
+        n.latest_base_path = path_at(1.2)
+
+        self.tick()
+
+        self.assertEqual(n.state, n.INNER_HOLD)
+        self.assertFalse(n.completed_once)
 
     def test_inner_hold_continues_after_camera_grace_expires(self):
         n = self.node

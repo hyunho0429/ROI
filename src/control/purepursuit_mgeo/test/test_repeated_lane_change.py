@@ -17,6 +17,10 @@ class RepeatedLaneChangeTest(unittest.TestCase):
         n.inner_hold_started_at = safety.Stamp(90.0)
         n.next_change_centered_since = safety.Stamp(90.0)
         n._global_signed_d.return_value = 3.5
+        n._boundary_local = Mock(side_effect=lambda key: [
+            (float(x), 1.75 if key == 'left_boundary_points' else -1.75)
+            for x in range(21)
+        ])
         n._choose_lane_change = Mock(return_value=(safety.path_at(3.5), 2.0, 32.0, 'ok', {}))
 
     def tick(self, now=100.0):
@@ -246,7 +250,7 @@ class RepeatedLaneChangeTest(unittest.TestCase):
 
     def test_control_center_or_heading_error_delays_second_change(self):
         n = self.node
-        for center_y, heading in ((0.6, 0), (0, math.radians(15))):
+        for center_y, heading in ((0.6, 0), (0, math.radians(5)), (0, math.radians(15))):
             with self.subTest(center_y=center_y, heading=heading):
                 n.state = n.INNER_HOLD
                 n._inner_center_sanity.return_value = (True, 'ok', center_y)
@@ -265,6 +269,21 @@ class RepeatedLaneChangeTest(unittest.TestCase):
                 n._choose_lane_change.assert_not_called()
                 self.tick(100.5)
                 self.assertIsNone(n.next_change_centered_since)
+
+    def test_straddling_previous_divider_blocks_next_change(self):
+        n = self.node
+        n._boundary_local = Mock(side_effect=lambda key: [
+            (float(x), 0.8 if key == 'left_boundary_points' else -2.7)
+            for x in range(21)
+        ])
+        n.ready_since = safety.Stamp(95.0)
+
+        self.tick()
+
+        self.assertEqual(n.state, n.INNER_HOLD)
+        self.assertIsNone(n.ready_since)
+        n._choose_lane_change.assert_not_called()
+        self.assertLess(n._publish.call_args.args[4]['left_clearance_m'], 1.0)
 
     def test_offset_filtered_path_delays_second_change(self):
         n = self.node

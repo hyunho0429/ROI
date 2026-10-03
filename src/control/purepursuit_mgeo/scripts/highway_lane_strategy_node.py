@@ -276,7 +276,7 @@ class HighwayLaneStrategyNode:
         )
         self.inner_path_force_recenter_error_m = max(
             0.10,
-            float(rospy.get_param("~inner_path_force_recenter_error_m", 0.30)),
+            float(rospy.get_param("~inner_path_force_recenter_error_m", 0.18)),
         )
         self.inner_boundary_bracket_margin_m = max(
             0.0, float(rospy.get_param("~inner_boundary_bracket_margin_m", 0.10))
@@ -289,6 +289,12 @@ class HighwayLaneStrategyNode:
         )
         self.next_change_center_error_m = max(
             0.05, float(rospy.get_param("~next_change_center_error_m", 0.25))
+        )
+        self.next_change_heading_error_rad = math.radians(max(
+            0.5, float(rospy.get_param("~next_change_heading_error_deg", 2.5))
+        ))
+        self.next_change_settle_confirm_s = max(
+            0.0, float(rospy.get_param("~next_change_settle_confirm_s", 0.75))
         )
         self.next_change_center_loss_grace_s = max(
             0.0,
@@ -941,6 +947,57 @@ class HighwayLaneStrategyNode:
             return None
         return math.atan2(float(y_far)-float(y_near), 7.0)
 
+    def _next_change_boundary_clearance(self) -> Tuple[bool, Optional[float], Optional[float]]:
+        """Do not re-arm while a tyre can still be on the crossed divider."""
+        left = self._boundary_local("left_boundary_points")
+        right = self._boundary_local("right_boundary_points")
+        if len(left) < 3 or len(right) < 3:
+            return False, None, None
+        left_clearance = []
+        right_clearance = []
+        for x in (1.0, 5.0):
+            ly, ry = interp_y(left, x), interp_y(right, x)
+            if ly is None or ry is None:
+                return False, None, None
+            left_clearance.append(float(ly))
+            right_clearance.append(-float(ry))
+        minimum_left = min(left_clearance)
+        minimum_right = min(right_clearance)
+        needed = 0.5*self.vehicle_width_m + self.inner_boundary_safety_margin_m
+        return minimum_left >= needed and minimum_right >= needed, minimum_left, minimum_right
+
+    def _path_within_current_lane(self, path: Optional[RosPath]) -> bool:
+        """Keep a global-path handoff inside the measured current lane."""
+        if path is None:
+            return False
+        local = self._path_map_to_local(path)
+        left = self._boundary_local("left_boundary_points")
+        right = self._boundary_local("right_boundary_points")
+        if len(local) < 3 or len(left) < 3 or len(right) < 3:
+            return False
+        clearance = 0.5*self.vehicle_width_m + self.inner_boundary_safety_margin_m
+        for x in range(2, 19, 2):
+            y, ly, ry = interp_y(local, float(x)), interp_y(left, float(x)), interp_y(right, float(x))
+            if y is None or ly is None or ry is None:
+                return False
+            if not (float(ry)+clearance <= float(y) <= float(ly)-clearance):
+                return False
+        return True
+
+    def _base_path_matches_hold_lane(self) -> bool:
+        """Permit camera-dropout release only onto the lane already followed."""
+        if self.latest_base_path is None or self.last_inner_path is None:
+            return False
+        base = self._path_map_to_local(self.latest_base_path)
+        held = self._path_map_to_local(self.last_inner_path)
+        if len(base) < 3 or len(held) < 3:
+            return False
+        for x in range(2, 19, 2):
+            by, hy = interp_y(base, float(x)), interp_y(held, float(x))
+            if by is None or hy is None or abs(float(by)-float(hy)) > 0.35:
+                return False
+        return True
+
     def _odom_pose(self) -> Tuple[float, float, float, float]:
         odom = self.latest_odom
         pose = odom.pose.pose
@@ -1325,6 +1382,7 @@ class HighwayLaneStrategyNode:
             0.5*self.vehicle_width_m + self.inner_boundary_safety_margin_m
         )
         limited = False
+        recovery_applied = False
         blended = []
         for x, camera_y in camera:
             previous_y = interp_y(previous, x)
@@ -1379,7 +1437,7 @@ class HighwayLaneStrategyNode:
                         previous_y < safe_low or previous_y > safe_high
                     )
                     # Even before the old path violates the hard footprint
-                    # margin, a sustained midpoint more than 30 cm to the right
+                    # margin, a meaningful midpoint correction to the right
                     # means the vehicle is visibly hugging the crossed LEFT
                     # divider.  Follow that verified midpoint immediately at
                     # the normal heading limit instead of waiting for the slow
@@ -1389,6 +1447,7 @@ class HighwayLaneStrategyNode:
                         < float(previous_y)-self.inner_path_force_recenter_error_m
                     )
                     if previous_outside or right_recenter_needed:
+                        recovery_applied = True
                         safe_target = clamp(camera_y, safe_low, safe_high)
                         heading_envelope = math.tan(
                             self.inner_path_max_heading_rad
@@ -1404,6 +1463,16 @@ class HighwayLaneStrategyNode:
                             blended_y = min(blended_y, recovery_y)
                         limited = True
             blended.append((x, blended_y))
+        if recovery_applied:
+            # A late recovery can otherwise create a sharp kink between
+            # adjacent samples even when each sample is inside the
+            # ego-relative heading envelope.
+            max_slope = math.tan(self.inner_path_max_heading_rad)
+            for i in range(1, len(blended)):
+                px, py = blended[i-1]
+                x, y = blended[i]
+                max_step = max_slope*max(0.0, x-px)
+                blended[i] = (x, clamp(y, py-max_step, py+max_step))
         return self._local_to_map(blended, now), "limited" if limited else "ok"
 
     def _rolling_inner_fallback(self, now: rospy.Time) -> Optional[RosPath]:
@@ -2492,17 +2561,22 @@ class HighwayLaneStrategyNode:
                 else float(control_center_y)-desired_center_y
             )
             control_heading = self._inner_center_heading() if lane_ok else None
+            boundary_clear, left_clearance, right_clearance = (
+                self._next_change_boundary_clearance() if lane_ok
+                else (False, None, None)
+            )
             control_path_local = self._path_map_to_local(path)
             control_path_y = interp_y(control_path_local, 5.0)
             centered_for_next = (
                 not final_lane_candidate
                 and not self.lane_change_locked_by_left_solid
                 and lane_ok and not self.inner_handover_pending and not stop
+                and boundary_clear
                 and self.inner_hold_travel_m >= self.min_lane_hold_before_next_change_m
                 and control_center_error is not None
                 and abs(float(control_center_error)) <= self.next_change_center_error_m
                 and control_heading is not None
-                and abs(float(control_heading)) <= self.change_heading_error_rad
+                and abs(float(control_heading)) <= self.next_change_heading_error_rad
                 # The measured midpoint and the actual filtered control path
                 # must both be centered. This prevents a new RRT request while
                 # the car is still following close to the left dashed line.
@@ -2533,7 +2607,7 @@ class HighwayLaneStrategyNode:
             settled_for_next = bool(
                 centered_for_next
                 and hold_time_s >= self.min_lane_hold_before_next_change_s
-                and centered_hold_time_s >= self.ready_confirm_s
+                and centered_hold_time_s >= self.next_change_settle_confirm_s
             )
             next_change_pending = False
             if settled_for_next:
@@ -2580,7 +2654,11 @@ class HighwayLaneStrategyNode:
             rejoin_blocked = False
             if can_start_rejoin:
                 rejoin = self._generate_rejoin_path(now)
-                rejoin_safe, rejoin_reason = self._dynamic_path_safe(rejoin, adaptive)
+                within_lane = self._path_within_current_lane(rejoin)
+                rejoin_safe, rejoin_reason = (
+                    self._dynamic_path_safe(rejoin, adaptive)
+                    if within_lane else (False, "path_crosses_lane_boundary")
+                )
                 if rejoin_safe:
                     self.committed_rejoin_path = rejoin
                     self.rejoin_travel_m = 0.0
@@ -2590,9 +2668,11 @@ class HighwayLaneStrategyNode:
                     rospy.logwarn("HIGHWAY REJOIN COMMITTED global_d=%.2f length=%.1f", global_d, self.rejoin_length_m)
                     self._publish(rejoin, False, adaptive, True, {"reason":"rejoin_committed", "global_d":round(global_d,2), "follow":follow}, now, dt)
                     return
-                # Keep the current lane and stop until the proposed merge is
-                # clear. Do not fall through to the direct-release shortcut.
-                stop = True
+                # An out-of-lane global path is not a reason to brake in a
+                # clear current lane; keep following its camera centre. A
+                # collision on an otherwise valid rejoin still requests stop.
+                if within_lane:
+                    stop = True
                 inner_reason = "rejoin_" + rejoin_reason
                 rejoin_blocked = True
 
@@ -2616,6 +2696,7 @@ class HighwayLaneStrategyNode:
                 and not emergency
                 and path_safe
                 and not rejoin_blocked
+                and self._base_path_matches_hold_lane()
             )
             if can_direct_release:
                 release_safe, release_reason = self._dynamic_path_safe(self.latest_base_path, adaptive)
@@ -2644,6 +2725,10 @@ class HighwayLaneStrategyNode:
                 "desired_center_y_m": round(desired_center_y,3),
                 "center_target_error_m": None if control_center_error is None else round(control_center_error,3),
                 "control_path_y5_m": None if control_path_y is None else round(control_path_y,3),
+                "control_heading_deg": None if control_heading is None else round(math.degrees(control_heading),2),
+                "left_clearance_m": None if left_clearance is None else round(left_clearance,3),
+                "right_clearance_m": None if right_clearance is None else round(right_clearance,3),
+                "next_change_centered": centered_for_next,
                 "lane_center_source": (self.lane_info or {}).get("center_source"),
                 "lane_straddling": bool(((self.lane_info or {}).get("straddling_lane") or {}).get("detected", False)),
                 "lane_grace": lane_grace,

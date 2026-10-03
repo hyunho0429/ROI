@@ -627,6 +627,28 @@ class DiagonalLaneChangeTest(unittest.TestCase):
         # measured midpoint proves that ego is 45 cm left of lane centre.
         self.assertLess(path.poses[5].pose.position.y, -0.25)
 
+    def test_right_offset_is_applied_promptly_without_sharp_path_kink(self):
+        n = node_fixture()
+        n.last_inner_path = path_at()
+        n._boundary_local = lambda key: [
+            (float(x), 1.75 if key == 'left_boundary_points' else -1.75)
+            for x in range(41)
+        ]
+        n._centerline_local.return_value = [
+            (float(x), 0.0) for x in range(41)
+        ]
+
+        path, reason = n._filtered_inner_path(Stamp(), 0.05)
+        ys = [p.pose.position.y for p in path.poses]
+
+        self.assertEqual(reason, 'limited')
+        self.assertLess(ys[7], -0.20)
+        self.assertGreater(ys[7], -0.30)
+        for a, b in zip(path.poses, path.poses[1:]):
+            dx = b.pose.position.x-a.pose.position.x
+            dy = b.pose.position.y-a.pose.position.y
+            self.assertLessEqual(abs(math.atan2(dy, dx)), n.inner_path_max_heading_rad + 1e-6)
+
     def test_straddling_line_is_not_used_as_lane_center(self):
         n = node_fixture()
         n._centerline_local = safety.NODE.HighwayLaneStrategyNode._centerline_local.__get__(n)
