@@ -37,20 +37,22 @@ class RepeatedLaneChangeTest(unittest.TestCase):
 
     def test_no_second_change_before_five_seconds(self):
         n = self.node
-        n.next_change_centered_since = safety.Stamp(98.0)
+        n.inner_hold_started_at = safety.Stamp(97.0)
+        n.next_change_centered_since = safety.Stamp(95.0)
         n.ready_since = safety.Stamp(95.0)
         self.tick(100.0)
         self.assertEqual(n.state, n.INNER_HOLD)
         self.assertIsNone(n.ready_since)
         n._choose_lane_change.assert_not_called()
 
-    def test_five_second_hold_starts_after_lane_center_is_stable(self):
+    def test_five_second_hold_does_not_restart_after_lane_center_settles(self):
         n = self.node
+        n.inner_hold_started_at = safety.Stamp(100.0)
         n.next_change_centered_since = None
 
-        self.tick(100.0)
+        self.tick(103.0)
         self.assertEqual(n.state, n.INNER_HOLD)
-        self.assertEqual(n.next_change_centered_since.seconds, 100.0)
+        self.assertEqual(n.next_change_centered_since.seconds, 103.0)
         n._choose_lane_change.assert_not_called()
 
         self.tick(104.9)

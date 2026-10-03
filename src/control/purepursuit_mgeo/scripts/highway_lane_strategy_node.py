@@ -240,14 +240,14 @@ class HighwayLaneStrategyNode:
 
         self.change_start_m = float(rospy.get_param("~change_start_m", 3.0))
         self.change_min_length_m = float(rospy.get_param("~change_min_length_m", 18.0))
-        self.change_max_length_m = float(rospy.get_param("~change_max_length_m", 24.0))
+        self.change_max_length_m = float(rospy.get_param("~change_max_length_m", 40.0))
         self.change_ramp_ratio = float(rospy.get_param("~change_ramp_ratio", 0.2))
         self.change_max_heading_rad = math.radians(float(rospy.get_param("~change_max_heading_deg", 15.0)))
         self.repeat_change_min_length_m = float(
             rospy.get_param("~repeat_change_min_length_m", 18.0)
         )
         self.repeat_change_max_length_m = float(
-            rospy.get_param("~repeat_change_max_length_m", 30.0)
+            rospy.get_param("~repeat_change_max_length_m", 36.0)
         )
         self.repeat_change_time_s = float(
             rospy.get_param("~repeat_change_time_s", 3.0)
@@ -1059,14 +1059,15 @@ class HighwayLaneStrategyNode:
         shift_m = max(lane_width, math.hypot(
             divider[0][0]-0.5*lane_width*ty, divider[0][1]+0.5*lane_width*tx))
         heading_length = shift_m / ((1.0-self.change_ramp_ratio) * math.tan(max_heading))
-        if heading_length > max_length:
-            self.last_rrt_diag.update({"reason":"heading_length", "heading_length_m":round(heading_length,2)})
-            return [], heading_length
-        length = clamp(
-            max(max(speed_mps, 1.0) * change_time, heading_length),
-            min_length,
-            max_length,
-        )
+        required_length = max(max(speed_mps, 1.0) * change_time, heading_length)
+        if required_length > max_length:
+            self.last_rrt_diag.update({
+                "reason": "change_length_exceeds_limit",
+                "required_length_m": round(required_length, 2),
+                "max_length_m": round(max_length, 2),
+            })
+            return [], required_length
+        length = max(min_length, required_length)
         target_len = self.change_start_m + length + self.change_post_hold_m
         divider = self._extend_local_polyline(divider, target_len)
         if len(divider) < 3:
@@ -1682,21 +1683,29 @@ class HighwayLaneStrategyNode:
         candidates = sorted({
             round(v, 2) for v in raw_candidates if v >= speed_floor - 1e-6
         }, reverse=True)
+        if not self.highway_braking_enabled and ego_speed >= self.cruise_speed_mps:
+            # Lower requested speeds cannot alter the entry trajectory while
+            # braking is disabled. Avoid solving the same RRT* problem again
+            # for each ineffective slower candidate.
+            candidates = candidates[:1]
         diagnostics = {}
         for v in candidates:
-            # A repeat change starts while the vehicle may still be travelling
-            # faster than the new target speed.  Planning its geometry from the
-            # target alone produced a 12 m transition at an observed ~8 m/s,
-            # followed by a hard opposite correction.  Preserve the proven
-            # first-change profile, but size subsequent paths from actual entry
-            # speed until the longitudinal controller has caught up.
-            geometry_speed = max(v, ego_speed) if self.lane_changes_done > 0 else v
+            # Braking may be disabled during this mission. In that mode the
+            # actual entry speed can stay well above the requested cruise speed
+            # on the FIRST change too. Plan and check the transition at the
+            # speed the car will actually carry into the gap.
+            geometry_speed = max(v, ego_speed)
             local, length = self._generate_lane_change_local(width, geometry_speed)
             if len(local) < 3:
-                diagnostics[str(v)] = {"divider": divider_diag, "reason": "lane_change_geometry_short"}
+                diagnostics[str(v)] = {
+                    "divider": divider_diag,
+                    "geometry_speed_mps": round(geometry_speed, 2),
+                    "reason": self.last_rrt_diag.get("reason", "lane_change_geometry_short"),
+                    "rrt": dict(self.last_rrt_diag),
+                }
                 continue
             curv_ok, max_k = self._path_curvature_ok(local, geometry_speed)
-            gap_ok, gap_reason, gap_diag = self._gap_safe_for_speed(v, width, length)
+            gap_ok, gap_reason, gap_diag = self._gap_safe_for_speed(geometry_speed, width, length)
             path = self._local_to_map(local, now)
             dyn_ok, dyn_reason = self._dynamic_path_safe(
                 path, geometry_speed, self.change_start_m + length + 4.0
@@ -2516,10 +2525,15 @@ class HighwayLaneStrategyNode:
                 0.0 if self.next_change_centered_since is None
                 else max(0.0, (now-self.next_change_centered_since).to_sec())
             )
+            # The required five seconds are measured from completion of the
+            # preceding change. Requiring a second five-second countdown after
+            # camera hand-over made an already-safe adjacent gap appear ignored.
+            # A short uninterrupted centered observation still protects against
+            # starting the next change while the car is crossing the divider.
             settled_for_next = bool(
                 centered_for_next
                 and hold_time_s >= self.min_lane_hold_before_next_change_s
-                and centered_hold_time_s >= self.min_lane_hold_before_next_change_s
+                and centered_hold_time_s >= self.ready_confirm_s
             )
             next_change_pending = False
             if settled_for_next:

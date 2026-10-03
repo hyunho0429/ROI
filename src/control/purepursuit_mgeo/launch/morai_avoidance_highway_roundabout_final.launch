@@ -301,8 +301,8 @@
     <param name="lane_change_min_speed_ratio" value="0.875" />
     <param name="lane_change_min_speed_mps" value="2.5" />
     <param name="min_lane_hold_before_next_change_m" value="8.0" />
-    <!-- Count this dwell only after the detected midpoint, heading and actual
-         filtered control path have all settled in the new lane. -->
+    <!-- Keep each newly reached lane for five seconds. The next change also
+         requires a fresh, centered camera path and a safe adjacent gap. -->
     <param name="min_lane_hold_before_next_change_s" value="5.0" />
     <param name="highway_confirm_s" value="0.5" />
     <param name="ready_confirm_s" value="0.25" />
@@ -336,13 +336,13 @@
 
     <param name="change_start_m" value="3.0" />
     <param name="change_min_length_m" value="18.0" />
-    <param name="change_max_length_m" value="24.0" />
+    <param name="change_max_length_m" value="40.0" />
     <param name="change_ramp_ratio" value="0.20" />
     <param name="change_max_heading_deg" value="15.0" />
     <!-- Both the first and later merges use a decisive diagonal so the car
          does not spend too long straddling a divider. -->
     <param name="repeat_change_min_length_m" value="18.0" />
-    <param name="repeat_change_max_length_m" value="30.0" />
+    <param name="repeat_change_max_length_m" value="36.0" />
     <param name="repeat_change_time_s" value="3.0" />
     <param name="repeat_change_max_heading_deg" value="15.0" />
     <!-- Follow the midpoint of the newly detected left/right boundaries soon

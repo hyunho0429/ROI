@@ -296,6 +296,54 @@ class HighwaySafetyTest(unittest.TestCase):
         )
         self.assertEqual(diagnostics["4.0"]["geometry_speed_mps"], 8.0)
 
+    def test_first_change_checks_actual_entry_speed_when_braking_is_disabled(self):
+        n = self.node
+        n.lane_changes_done = 0
+        n.cruise_speed_mps = 4.0
+        n._odom_pose.return_value = (0.0, 0.0, 0.0, 8.0)
+        n.highway_request = True
+        n._left_dashed_ok = Mock(return_value=(True, "ok"))
+        n._left_divider_sanity = Mock(return_value=(True, "ok", {}))
+        n._generate_lane_change_local = Mock(
+            return_value=([(0.0, 0.0), (16.0, 1.0), (35.0, 3.5)], 32.0)
+        )
+        n._path_curvature_ok = Mock(return_value=(True, 0.01))
+        n._gap_safe_for_speed = Mock(return_value=(True, "ok", {}))
+        n._local_to_map = Mock(return_value=path_at(3.5))
+        n._dynamic_path_safe = Mock(return_value=(True, "ok"))
+
+        path, speed, _, reason, diagnostics = n._choose_lane_change(Stamp())
+
+        self.assertIsNotNone(path)
+        self.assertEqual(speed, 4.0)
+        self.assertEqual(reason, "ok")
+        n._generate_lane_change_local.assert_called_once_with(3.5, 8.0)
+        n._gap_safe_for_speed.assert_called_once_with(8.0, 3.5, 32.0)
+        self.assertEqual(diagnostics["4.0"]["geometry_speed_mps"], 8.0)
+
+    def test_no_brake_mode_does_not_retry_same_unsafe_gap_at_lower_targets(self):
+        n = self.node
+        n.cruise_speed_mps = 4.0
+        n.highway_braking_enabled = False
+        n._odom_pose.return_value = (0.0, 0.0, 0.0, 8.0)
+        n.highway_request = True
+        n._left_dashed_ok = Mock(return_value=(True, "ok"))
+        n._left_divider_sanity = Mock(return_value=(True, "ok", {}))
+        n._generate_lane_change_local = Mock(
+            return_value=([(0.0, 0.0), (16.0, 1.0), (35.0, 3.5)], 32.0)
+        )
+        n._path_curvature_ok = Mock(return_value=(True, 0.01))
+        n._gap_safe_for_speed = Mock(return_value=(False, "rear_gap", {}))
+        n._local_to_map = Mock(return_value=path_at(3.5))
+        n._dynamic_path_safe = Mock(return_value=(True, "ok"))
+
+        path, _, _, reason, diagnostics = n._choose_lane_change(Stamp())
+
+        self.assertIsNone(path)
+        self.assertEqual(reason, "no_safe_speed_path_pair")
+        n._generate_lane_change_local.assert_called_once_with(3.5, 8.0)
+        self.assertEqual(list(diagnostics), ["4.0"])
+
     def test_rear_vehicle_does_not_stop_completed_merge(self):
         self.node.latest_obstacles.obstacles = [obstacle(-6.0, vx=12.0)]
         safe, reason = self.node._dynamic_path_safe(path_at(), 2.0)

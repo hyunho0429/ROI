@@ -70,6 +70,55 @@ class DiagonalLaneChangeTest(unittest.TestCase):
         points, _ = n._generate_lane_change_local(3.5, 2.0)
         self.assertEqual(points, [])
 
+    def test_fast_first_change_uses_full_speed_distance_and_stays_in_adjacent_lane(self):
+        n = node_fixture()
+        points, length = n._generate_lane_change_local(3.5, 8.0)
+
+        self.assertAlmostEqual(length, 32.0)
+        self.assertGreater(len(points), 3)
+        self.assertAlmostEqual(points[-1][1], 3.25, delta=0.05)
+        self.assertLessEqual(max(y for _, y in points), 3.60)
+
+        controller = MgeoPurePursuit(
+            [PathPoint(x, y, 0.0) for x, y in points],
+            wheelbase_m=3.0,
+            lookahead_min_m=4.0,
+            lookahead_gain=0.35,
+            goal_tolerance_m=1.5,
+        )
+        limiter = SteeringRateLimiter(0.20, 0.05)
+        x = y = yaw = peak_y = 0.0
+        for step in range(150):
+            lookahead, rate = speed_adaptive_steering_profile(
+                8.0, 3.5, 0.75, 0.50, 4.0, 0.20
+            )
+            raw, _, *_ = controller.compute(x, y, yaw, 8.0, lookahead)
+            limit = lateral_acceleration_steering_limit(
+                8.0, 3.0, 2.5, math.radians(40)
+            )
+            steering = limiter.update(
+                max(-limit, min(limit, raw)), step*0.05, True, rate
+            )
+            steering = max(-limit, min(limit, steering))
+            yaw += 8.0/3.0*math.tan(steering)*0.05
+            x += 8.0*math.cos(yaw)*0.05
+            y += 8.0*math.sin(yaw)*0.05
+            peak_y = max(peak_y, y)
+            if x >= length + 10.0:
+                break
+        self.assertGreaterEqual(x, length + 10.0)
+        self.assertLessEqual(peak_y, 3.60)
+        self.assertAlmostEqual(y, 3.25, delta=0.15)
+        self.assertLess(abs(yaw), math.radians(3.0))
+
+    def test_fast_change_is_rejected_instead_of_shortened_beyond_limit(self):
+        n = node_fixture()
+        points, length = n._generate_lane_change_local(3.5, 11.0)
+
+        self.assertEqual(points, [])
+        self.assertGreater(length, n.change_max_length_m)
+        self.assertEqual(n.last_rrt_diag['reason'], 'change_length_exceeds_limit')
+
     def test_second_change_is_not_shorter_than_stable_first_profile(self):
         n = node_fixture()
         n.cruise_speed_mps = 4.0
