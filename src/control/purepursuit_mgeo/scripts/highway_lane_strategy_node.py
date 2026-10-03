@@ -380,6 +380,13 @@ class HighwayLaneStrategyNode:
         self.post_commit_collision_stop_enabled = bool(
             rospy.get_param("~post_commit_collision_stop_enabled", True)
         )
+        # Competition-only override: when disabled, an active highway state
+        # never publishes a brake/stop request while it still has a path to
+        # follow.  Pre-commit gap/TTC/RRT* checks continue to decide whether a
+        # lane change may start.  The suppressed reason remains in diagnostics.
+        self.highway_braking_enabled = bool(
+            rospy.get_param("~highway_braking_enabled", True)
+        )
         self.max_lateral_accel_mps2 = float(rospy.get_param("~max_lateral_accel_mps2", 2.5))
 
         self.release_global_d_m = float(rospy.get_param("~release_global_d_m", 0.55))
@@ -1946,6 +1953,19 @@ class HighwayLaneStrategyNode:
             self.path_pub.publish(path)
         else:
             stop = True
+        if (
+            path is not None
+            and active
+            and not self.highway_braking_enabled
+        ):
+            if stop:
+                status["suppressed_stop"] = True
+                status["suppressed_stop_reason"] = status.get("reason", "unknown")
+            stop = False
+            # Avoid replacing a suppressed brake with a zero-speed command.
+            # This also prevents the sharp post-merge speed collapse observed in
+            # the simulator while respecting the configured cruise-speed cap.
+            speed = max(speed, self._lane_change_speed_floor())
         speed_out = self._limit_speed_rate(0.0 if stop else speed, dt)
         self.stop_pub.publish(Bool(data=bool(stop)))
         self.speed_pub.publish(Float64(data=float(speed_out)))

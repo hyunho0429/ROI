@@ -393,6 +393,44 @@ class HighwaySafetyTest(unittest.TestCase):
         self.assertEqual(status["future_collision"], "predicted_collision_id_1")
         self.assertFalse(status["speed_floor_blocked"])
 
+    def test_highway_no_brake_mode_suppresses_every_active_stop_request(self):
+        n = self.node
+        n.cruise_speed_mps = 4.0
+        n.highway_braking_enabled = False
+        n.last_output_speed = 4.0
+        n.path_pub = Mock()
+        n.stop_pub = Mock()
+        n.speed_pub = Mock()
+        n.active_pub = Mock()
+        n.fast_change_pub = Mock()
+        n.state_pub = Mock()
+        status = {"reason": "lead_emergency"}
+
+        NODE.HighwayLaneStrategyNode._publish(
+            n, path_at(), True, 0.0, True, status, Stamp(), 0.05
+        )
+
+        self.assertFalse(n.stop_pub.publish.call_args.args[0].data)
+        self.assertGreater(n.speed_pub.publish.call_args.args[0].data, 0.0)
+        self.assertTrue(status["suppressed_stop"])
+        self.assertEqual(status["suppressed_stop_reason"], "lead_emergency")
+
+    def test_highway_no_brake_mode_does_not_override_off_state(self):
+        n = self.node
+        n.highway_braking_enabled = False
+        n.path_pub = Mock()
+        n.stop_pub = Mock()
+        n.speed_pub = Mock()
+        n.active_pub = Mock()
+        n.fast_change_pub = Mock()
+        n.state_pub = Mock()
+
+        NODE.HighwayLaneStrategyNode._publish(
+            n, path_at(), True, 0.0, False, {"reason": "base_stop"}, Stamp(), 0.05
+        )
+
+        self.assertTrue(n.stop_pub.publish.call_args.args[0].data)
+
     def test_lane_change_does_not_commit_slow_candidate(self):
         n = self.node
         n.cruise_speed_mps = 4.0

@@ -405,6 +405,10 @@
          astride a divider for side/future prediction overlap. Direct lead
          emergency braking remains active. -->
     <param name="post_commit_collision_stop_enabled" value="false" />
+    <!-- Competition setting: while the highway strategy has a valid path,
+         suppress every stop request and keep at least the lane-change speed
+         floor. The original reason remains in the state diagnostics. -->
+    <param name="highway_braking_enabled" value="false" />
 
     <param name="release_global_d_m" value="0.55" />
     <param name="release_confirm_s" value="0.6" />
