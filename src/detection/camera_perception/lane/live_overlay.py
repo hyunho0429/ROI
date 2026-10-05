@@ -24,8 +24,12 @@ live_output.py 와 **완전히 같은 코드**다.
 찍는다 (횡오차 / 방위오차 / 정지선 / 자차 좌우 차선 종류). 같은
 LaneResult 에서 뽑으므로 "눈으로 본 값"과 "제어가 받은 값"이 갈리지 않는다.
 
+--path-topic 을 주면 플래너가 만든 경로(nav_msgs/Path, map 좌표)를 노면에
+투영해서 같은 창에 겹쳐 그린다 (path_overlay.py). 점 하나하나가 경로 점이고,
+빨간 X 는 경로의 끝점이다.
+
     키:  q/ESC 종료   m 마스크 토글   l 차선 토글   b 조감도 토글
-         v 값 HUD 토글   p 일시정지
+         v 값 HUD 토글   n 경로 토글   p 일시정지
 """
 
 import argparse
@@ -41,7 +45,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))), "src"))
 
-from lane_detection import LaneDetector, default_checkpoint
+from lane_detection import ROAD_Z_EGO, LaneDetector, default_checkpoint
 from lane_viz import draw, draw_bev
 from morai_camera import DEFAULT_IP, DEFAULT_PORT, CameraStream
 
@@ -102,6 +106,14 @@ def build_arg_parser():
                     default="/perception/camera/stopline_detected")
     ap.add_argument("--stopline-distance-topic",
                     default="/perception/camera/stopline_distance_m")
+    ap.add_argument("--path-topic", default="",
+                    help="설정하면 이 nav_msgs/Path 를 영상에 겹쳐 그린다 "
+                         "(예: /highway_lane_strategy/active_path)")
+    ap.add_argument("--ref-path-topic", default="",
+                    help="비교용 경로 (회색, 예: /avoidance_path_manager/active_path)")
+    ap.add_argument("--path-state-topic", default="",
+                    help="플래너 상태 JSON (예: /highway_lane_strategy/state)")
+    ap.add_argument("--odom-topic", default="/localization/odometry")
     return ap
 
 
@@ -117,7 +129,8 @@ def main(argv=None):
     stopline_distance_publisher = None
     lane_info_publisher = None
     lane_info_stabilizer = None
-    if args.ros_publish or args.lane_info_topic:
+    path_overlay = None
+    if args.ros_publish or args.lane_info_topic or args.path_topic:
         import rospy as rospy_module
         from std_msgs.msg import Bool, Float64, String
 
@@ -148,6 +161,13 @@ def main(argv=None):
                 args.lane_info_topic, String, queue_size=1
             )
             lane_info_stabilizer = LaneOutputStabilizer()
+        if args.path_topic:
+            from path_overlay import PathOverlay
+            path_overlay = PathOverlay(
+                rospy, args.path_topic, args.odom_topic,
+                ref_path_topic=args.ref_path_topic,
+                state_topic=args.path_state_topic,
+            )
 
     pipe = LaneDetector(args.checkpoint, cam_set=args.cam_set,
                         bonnet_mask=False if args.no_bonnet else args.bonnet,
@@ -166,9 +186,10 @@ def main(argv=None):
     show_mask = show_lanes = True
     show_values = not args.no_values
     show_bev = args.bev
+    show_path = True
     bev_open = False
     paused = False
-    last_seq, res, frame = -1, None, None
+    last_seq, res, frame, frame_at = -1, None, None, None
     t_prev, fps = time.time(), 0.0
     n_since = 0
 
@@ -181,7 +202,7 @@ def main(argv=None):
                     n_since += 1
                     if n_since >= args.every:
                         n_since = 0
-                        frame = f
+                        frame, frame_at = f, observed_at
                         res = pipe.run(frame)
                         if args.ros_publish:
                             adjacent_left = res.ego_left
@@ -250,6 +271,8 @@ def main(argv=None):
                            show_lanes=show_lanes)
                 if show_values:
                     draw_values(vis, res)
+                if path_overlay is not None and show_path:
+                    path_overlay.draw(vis, pipe.cam, ROAD_Z_EGO, frame_at)
                 cv2.putText(vis, f"{fps:.1f} FPS" + ("  [PAUSED]" if paused else ""),
                             (vis.shape[1] - 190, 18), cv2.FONT_HERSHEY_SIMPLEX,
                             0.55, (0, 255, 255), 1)
@@ -278,6 +301,8 @@ def main(argv=None):
                 show_bev = not show_bev
             elif k == ord("v"):
                 show_values = not show_values
+            elif k == ord("n"):
+                show_path = not show_path
             elif k == ord("p"):
                 paused = not paused
     except KeyboardInterrupt:

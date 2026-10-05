@@ -37,6 +37,11 @@
   <!-- Show the six-class segmentation and fitted lane boundaries in one window. -->
   <arg name="enable_lane_debug_view" default="true" />
   <arg name="lane_debug_scale" default="0.75" />
+  <!-- Draw the planner path on the lane camera window (magenta dots = path
+       points, red X = path end, grey = base path). Set "" to disable. -->
+  <arg name="lane_overlay_path_topic" default="/highway_lane_strategy/active_path" />
+  <arg name="lane_overlay_ref_path_topic" default="/avoidance_path_manager/active_path" />
+  <arg name="lane_overlay_state_topic" default="/highway_lane_strategy/state" />
   <arg name="yolo_port" default="1131" />
   <arg name="yolo_base_model" default="$(find camera_perception)/models/yolov8n.pt" />
   <arg name="yolo_custom_model" default="$(find camera_perception)/models/best0902.pt" />
@@ -147,7 +152,7 @@
         type="camera_feature_runner.py"
         name="lane_camera"
         output="screen"
-        args="--mode lane --cam-ip $(arg lane_info_ip) --cam-port $(arg lane_info_port) --lane-checkpoint $(arg lane_info_checkpoint) --lane-cam-set $(arg lane_info_cam_set) --lane-device $(arg lane_info_device) --lane-every $(arg lane_info_every) --lane-scale $(arg lane_debug_scale) --lane-info-topic $(arg lane_info_topic)" />
+        args="--mode lane --cam-ip $(arg lane_info_ip) --cam-port $(arg lane_info_port) --lane-checkpoint $(arg lane_info_checkpoint) --lane-cam-set $(arg lane_info_cam_set) --lane-device $(arg lane_info_device) --lane-every $(arg lane_info_every) --lane-scale $(arg lane_debug_scale) --lane-info-topic $(arg lane_info_topic) --lane-path-topic '$(arg lane_overlay_path_topic)' --lane-ref-path-topic '$(arg lane_overlay_ref_path_topic)' --lane-path-state-topic '$(arg lane_overlay_state_topic)'" />
 
   <!-- Republish the camera team's semantic lane topics from lane_info JSON.
        This replaces the second live_overlay inference process without changing camera-team source files. -->
