@@ -32,16 +32,9 @@
   <arg name="stopline_detected_topic" default="/perception/camera/stopline_detected" />
   <arg name="stopline_distance_topic" default="/perception/camera/stopline_distance_m" />
   <arg name="highway_environment_topic" default="/perception/camera/highway_environment" />
-  <arg name="enable_highway_gate" default="$(arg enable_yolo)" />
-  <!-- 고속도로 환경 = unified Car AND 왼쪽 점선. -->
-  <arg name="require_dashed_lane" default="true" />
-  <arg name="left_parallel_dynamic_topic" default="/perception/lidar/left_lane_parallel_dynamic_detected" />
-  <arg name="require_left_parallel_dynamic" default="false" />
-  <arg name="left_parallel_dynamic_hold_s" default="0.5" />
+  <!-- Highway detection uses the lane camera, independently of YOLO. -->
+  <arg name="enable_highway_gate" default="$(arg enable_lane)" />
   <arg name="highway_latch_once" default="true" />
-  <arg name="car_detection_hold_s" default="2.0" />
-  <arg name="highway_lane_pattern_enabled" default="false" />
-  <arg name="highway_lane_pattern_min_speed_mps" default="10.0" />
   <arg name="lane_info_topic" default="/perception/camera/lane_info" />
   <arg name="enable_pedestrian_crossing" default="$(arg enable_yolo)" />
   <arg name="pedestrian_stop_topic" default="/perception/pedestrian_crossing/stop_required" />
@@ -92,22 +85,12 @@
         type="highway_environment_gate_node.py"
         name="highway_environment_gate"
         output="screen">
-    <param name="car_detected_topic" value="$(arg car_detected_topic)" />
-    <param name="dashed_lane_topic" value="$(arg dashed_lane_topic)" />
-    <param name="left_solid_lane_topic" value="$(arg left_solid_lane_topic)" />
     <param name="output_topic" value="$(arg highway_environment_topic)" />
     <param name="intersection_detected_topic" value="$(arg intersection_detected_topic)" />
-    <param name="require_dashed_lane" value="$(arg require_dashed_lane)" />
-    <param name="left_parallel_dynamic_topic" value="$(arg left_parallel_dynamic_topic)" />
-    <param name="require_left_parallel_dynamic" value="$(arg require_left_parallel_dynamic)" />
-    <param name="left_parallel_dynamic_hold_s" value="$(arg left_parallel_dynamic_hold_s)" />
     <param name="latch_once" value="$(arg highway_latch_once)" />
-    <param name="car_hold_s" value="$(arg car_detection_hold_s)" />
     <param name="lane_info_topic" value="$(arg lane_info_topic)" />
-    <param name="odom_topic" value="/localization/odometry" />
-    <param name="lane_pattern_enabled" value="$(arg highway_lane_pattern_enabled)" />
-    <param name="lane_pattern_min_speed_mps" value="$(arg highway_lane_pattern_min_speed_mps)" />
-    <param name="dashed_lane_hold_s" value="2.0" />
+    <param name="lane_pattern_confirm_frames" value="3" />
+    <param name="lane_pattern_timeout_s" value="0.6" />
     <param name="publish_rate_hz" value="10.0" />
   </node>
 

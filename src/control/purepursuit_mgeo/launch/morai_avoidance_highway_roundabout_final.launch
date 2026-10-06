@@ -22,7 +22,7 @@
   <arg name="lidar_forward_range_m" default="80.0" />
 
   <!-- The wrapper launches the six-class lane inference pipeline. -->
-  <!-- Camera lane geometry and YOLO highway-situation recognition. -->
+  <!-- Camera lane geometry determines highway entry; YOLO serves other missions. -->
   <arg name="enable_lane_info_publisher" default="true" />
   <arg name="enable_camera_object_detection" default="true" />
   <arg name="lane_info_topic" default="/perception/camera/lane_info" />
@@ -43,10 +43,7 @@
   <arg name="yolo_confidence" default="0.4" />
   <arg name="yolo_inference_size" default="320" />
   <arg name="highway_environment_topic" default="/perception/camera/highway_environment" />
-  <!-- Highway gate: YOLO car+dashed OR confirmed multilane geometry. -->
-  <arg name="highway_require_dashed_lane" default="true" />
-  <arg name="highway_lane_pattern_enabled" default="true" />
-  <arg name="highway_lane_pattern_min_speed_mps" default="10.0" />
+  <!-- Highway gate: adjacent-left overlapping white dashed+solid only. -->
   <arg name="highway_latch_once" default="true" />
   <arg name="highway_request_topic" default="/planning/highway_lane_change_request" />
   <!-- Upper bound, not a requirement to change twice. -->
@@ -133,10 +130,7 @@
          confirmed the highway environment. -->
     <arg name="merge_highway_gate_required" value="true" />
     <arg name="highway_environment_topic" value="$(arg highway_environment_topic)" />
-    <arg name="require_dashed_lane" value="$(arg highway_require_dashed_lane)" />
     <arg name="highway_latch_once" value="$(arg highway_latch_once)" />
-    <arg name="highway_lane_pattern_enabled" value="$(arg highway_lane_pattern_enabled)" />
-    <arg name="highway_lane_pattern_min_speed_mps" value="$(arg highway_lane_pattern_min_speed_mps)" />
     <arg name="lane_info_topic" value="$(arg lane_info_topic)" />
   </include>
 
@@ -298,8 +292,7 @@
          gap, TTC and the complete quintic path. Avoid waiting on the older
          camera-gated merge decision as a second veto. -->
     <param name="bypass_sensor_merge_gate" value="true" />
-    <!-- Arm from YOLO+dashed or a confirmed highway marking pattern,
-         including the dashed-left/solid-right entrance lane. -->
+    <!-- Arm only after the adjacent-left dashed+solid pair is confirmed. -->
     <param name="force_highway_active" value="false" />
     <!-- Use measured lane boundaries for the quintic path and post-change hold. -->
     <param name="rrt_lidar_only_mode" value="false" />

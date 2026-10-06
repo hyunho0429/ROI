@@ -18,6 +18,7 @@ from camera_perception.highway_environment import (
     AdjacentDashedHold,
     HighwayEnvironmentLatch,
     ConsecutiveLanePattern,
+    adjacent_left_composite_detected,
     adjacent_left_lane_semantics,
     adjacent_left_lane_type,
     exclusive_highway_active,
@@ -150,11 +151,38 @@ class MultilanePatternTest(unittest.TestCase):
 
     def test_close_dashed_and_solid_pair_is_highway_evidence(self):
         info = self.info()
-        info["left_outer_lane"]["coef"] = [0, 0, 2.05]
+        info["left_outer_lane"]["coef"] = [0, 0, 1.90]
         self.assertEqual(multilane_highway_pattern(info), "paired_dashed_solid")
+        self.assertTrue(adjacent_left_composite_detected(info))
         info["left_lane"]["type"] = "white_solid"
         info["left_outer_lane"]["type"] = "white_dashed"
         self.assertEqual(multilane_highway_pattern(info), "paired_dashed_solid")
+        self.assertTrue(adjacent_left_composite_detected(info))
+        info["left_outer_lane"]["coef"] = [0, 0, 1.75]
+        self.assertTrue(adjacent_left_composite_detected(info))
+
+    def test_nearby_but_separate_or_diverging_lines_are_not_overlap(self):
+        info = self.info()
+        info["left_outer_lane"]["coef"] = [0.0, 0.0, 2.10]
+        self.assertFalse(adjacent_left_composite_detected(info))
+        info["left_outer_lane"]["coef"] = [0.0, 0.02, 1.76]
+        self.assertFalse(adjacent_left_composite_detected(info))
+        info["left_outer_lane"]["coef"] = [0.0, 0.0, 1.76]
+        info["left_outer_lane"]["x_range_m"] = [21.0, 25.0]
+        self.assertFalse(adjacent_left_composite_detected(info))
+
+    def test_vehicle_or_other_lane_patterns_do_not_start_highway(self):
+        info = self.info()
+        info["car_detected"] = True
+        self.assertFalse(adjacent_left_composite_detected(info))
+        info["left_outer_lane"]["type"] = "white_dashed"
+        self.assertFalse(adjacent_left_composite_detected(info))
+        info.pop("left_outer_lane")
+        info["right_lane"] = {
+            "detected": True, "type": "white_solid", "age": 3,
+            "coef": [0.0, 0.0, -1.75], "x_range_m": [5.0, 25.0],
+        }
+        self.assertFalse(adjacent_left_composite_detected(info))
 
     def test_double_dashed_is_distinct_weaker_pattern(self):
         self.assertEqual(multilane_highway_pattern(self.info("white_dashed")), "double_dashed")

@@ -632,7 +632,7 @@ roslaunch path_planning kcity_2025_dijkstra.launch \
 - YOLO person 단독 인식 기반 보행자 즉시 정지 및 재출발
 - YOLO 통합 `Car`, 왼쪽 노란 실선, 오른쪽 실선을 결합한 교차로 판정 및 제동
 - LiDAR가 전방 좌→우 횡단 차량을 확인하는 즉시 주행 재개
-- YOLO 통합 `Car`와 왼쪽 점선을 결합한 고속도로·끼어들기 환경 판정
+- 자차 바로 왼쪽 같은 경계에 겹친 흰색 실선·점선을 연속 검출하는 고속도로·끼어들기 환경 판정
 - 교차로 우선 상호 배제로 고속도로·끼어들기 동시 활성화 방지
 - 카메라 정지선 검출 결과 발행(표시·확인용)
 - LiDAR/RViz, 차선 인식, YOLO 화면을 하나의 `roslaunch`로 실행
@@ -822,12 +822,8 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch \
 | `camera_display_fps` | `0.0` | `0`은 MORAI 카메라 수신 속도를 그대로 사용 |
 | `show_raw_camera_preview` | `0` | `0`은 원본 창을 숨기고 YOLO 결과 창만 표시 |
 | `yolo_cpu_threads` | `1` | YOLO에 사용하는 PyTorch CPU 스레드 수 |
-| `enable_highway_gate` | `true` | 카메라 기반 고속도로 환경 게이트 실행 |
-| `require_dashed_lane` | `true` | YOLO 통합 `Car`와 왼쪽 점선이 모두 탐지되어야 활성화 |
-| `require_left_parallel_dynamic` | `false` | 기존 평행 주행 LiDAR 고속도로 조건은 사용하지 않음 |
-| `left_parallel_dynamic_hold_s` | `0.5` | 일시적인 LiDAR 추적 누락 허용시간 |
+| `enable_highway_gate` | `enable_lane` | 자차 바로 왼쪽 같은 경계의 흰색 실선·점선 중첩을 3개 연속 차선 관측에서 확인하면 고속도로 환경 활성화 |
 | `highway_latch_once` | `true` | 고속도로 상태가 한 번 활성화되면 노드 종료 전까지 유지 |
-| `car_detection_hold_s` | `2.0` | 일시적인 YOLO 누락 시 car 조건 유지시간 |
 | `enable_pedestrian_crossing` | `true` | YOLO person 기반 정지·재출발 제어 |
 | `person_clear_confirmation_s` | `0.5` | person 미검출 후 재출발까지 연속 확인 시간 |
 | `traffic_light_stop_topic` | `/perception/traffic_light/stop_required` | GREEN을 최우선으로 적용하고, GREEN이 없을 때 YOLO 단독 RED 또는 Yellow/Amber 계열 신호등 정지 요청 |

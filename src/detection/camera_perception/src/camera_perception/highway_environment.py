@@ -3,6 +3,10 @@
 import math
 
 
+# Allow only fitting/projection noise around one physical left-hand boundary.
+MAX_COMPOSITE_SEPARATION_M = 0.20
+
+
 def _finite_float(value):
     try:
         value = float(value)
@@ -96,7 +100,7 @@ def multilane_highway_pattern(info, eval_x_m=7.0, min_width_m=2.7,
                               max_width_m=4.5):
     """Classify a fresh, measured pair of left-hand lane boundaries.
 
-    A closely paired dashed+solid marking is strong highway evidence. Two
+    A co-located dashed+solid marking is strong highway evidence. Two
     dashed boundaries one full lane apart are weaker evidence. Actual permission
     to cross still checks the nearest boundary.
     """
@@ -155,14 +159,43 @@ def multilane_highway_pattern(info, eval_x_m=7.0, min_width_m=2.7,
         return "right_edge_dashed" if right_edge_dashed else None
     separation = outer_y-near_y
     outer_type = outer.get("type")
-    if (0.08 <= separation <= 0.75
-            and {near_type, outer_type} == {"white_dashed", "white_solid"}):
-        return "paired_dashed_solid"
+    if {near_type, outer_type} == {"white_dashed", "white_solid"}:
+        # These must be the two paint classes at the same left boundary,
+        # not two distinct markings that happen to be within 0.75 m at x=7.
+        near_range = (info.get("left_lane") or {}).get("x_range_m")
+        if (isinstance(near_range, (list, tuple)) and len(near_range) >= 2
+                and isinstance(x_range, (list, tuple)) and len(x_range) >= 2):
+            near_lo, near_hi = _finite_float(near_range[0]), _finite_float(near_range[1])
+            outer_lo, outer_hi = _finite_float(x_range[0]), _finite_float(x_range[1])
+            if None not in (near_lo, near_hi, outer_lo, outer_hi):
+                shared_lo = max(near_lo, outer_lo)
+                shared_hi = min(near_hi, outer_hi)
+                if (shared_hi - shared_lo >= 1.5
+                        and shared_lo - 1.0 <= eval_x_m <= shared_hi + 1.0):
+                    samples = (shared_lo, (shared_lo + shared_hi) / 2.0, shared_hi)
+                    coincident = True
+                    for x in samples:
+                        near_sample = _polyval(
+                            (info.get("left_lane") or {}).get("coef") or [], x
+                        )
+                        outer_sample = _polyval(outer.get("coef") or [], x)
+                        if (near_sample is None or outer_sample is None
+                                or abs(outer_sample - near_sample)
+                                > MAX_COMPOSITE_SEPARATION_M):
+                            coincident = False
+                            break
+                    if coincident:
+                        return "paired_dashed_solid"
     if near_type != "white_dashed" or not 2.0 <= separation <= 4.8:
         return "right_edge_dashed" if right_edge_dashed else None
     if outer_type == "white_dashed":
         return "double_dashed"
     return "right_edge_dashed" if right_edge_dashed else None
+
+
+def adjacent_left_composite_detected(info):
+    """Only the close dashed+solid pair beside the ego lane starts highway mode."""
+    return multilane_highway_pattern(info) == "paired_dashed_solid"
 
 
 class ConsecutiveLanePattern:
