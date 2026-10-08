@@ -133,6 +133,24 @@ class HighwaySafetyTest(unittest.TestCase):
         self.assertEqual(status["wait_path_source"], "camera_midpoint")
         self.assertAlmostEqual(path.poses[1].pose.position.y, 0.4)
 
+    def test_wait_gap_smooths_single_frame_camera_center_jump(self):
+        n = self.node
+        n.state = n.WAIT_GAP
+        n._choose_lane_change = Mock(return_value=(None, None, None, "gap_wait", {}))
+        n._gap_shaping_speed = Mock(return_value=(2.0, {}))
+        n._hold_centerline_local = Mock(return_value=[
+            (0.0, 0.0), (5.0, 0.6), (10.0, 0.6), (20.0, 0.6)
+        ])
+        n.last_wait_center_path = path_at(0.0)
+        n.last_wait_center_at = Stamp()
+
+        path, stop, _, _, status, *_ = self.tick()
+
+        self.assertFalse(stop)
+        self.assertEqual(status["wait_path_source"], "camera_midpoint")
+        self.assertGreater(path.poses[10].pose.position.y, 0.0)
+        self.assertLess(path.poses[10].pose.position.y, 0.3)
+
     def test_highway_activation_publishes_wait_path_on_same_cycle(self):
         n = self.node
         n.state = n.OFF

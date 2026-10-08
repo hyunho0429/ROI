@@ -213,6 +213,9 @@ class HighwayLaneStrategyNode:
         self.wait_lane_hold_grace_s = float(
             rospy.get_param("~wait_lane_hold_grace_s", 2.0)
         )
+        self.wait_center_blend_time_s = max(
+            0.05, float(rospy.get_param("~wait_center_blend_time_s", 0.20))
+        )
         self.wait_heading_hold_max_s = max(
             0.0, float(rospy.get_param("~wait_heading_hold_max_s", 0.7))
         )
@@ -903,6 +906,32 @@ class HighwayLaneStrategyNode:
             (x, y-offset*smoothstep5(max(0.0, float(x))/5.0))
             for x, y in center
         ]
+
+    def _stable_wait_centerline_local(
+        self, center: Sequence[Tuple[float, float]], now: rospy.Time, dt: float
+    ) -> List[Tuple[float, float]]:
+        """Smooth fresh camera jitter in the same map-frame lane reference."""
+        if (
+            self.last_wait_center_path is None
+            or not self._fresh(self.last_wait_center_at, self.wait_lane_hold_grace_s, now)
+        ):
+            return list(center)
+        previous = self._path_map_to_local(self.last_wait_center_path)
+        if len(previous) < 3:
+            return list(center)
+        alpha = 1.0-math.exp(-max(dt, 0.0)/self.wait_center_blend_time_s)
+        stable = []
+        for x, y in center:
+            old_y = interp_y(previous, x)
+            if old_y is None or x <= 0.5:
+                stable.append((x, y))
+                continue
+            # A single mis-associated camera frame must not abruptly reverse
+            # the steering command at highway speed. Repeated observations
+            # still move the path toward the measured midpoint.
+            delta = clamp(y-old_y, -0.6, 0.6)
+            stable.append((x, old_y+alpha*delta))
+        return stable
 
     def _boundary_local(self, key: str) -> List[Tuple[float, float]]:
         """Return a lane boundary in base_link and extrapolate it back to x=0."""
@@ -2325,6 +2354,9 @@ class HighwayLaneStrategyNode:
                 if center_ok:
                     local_center = self._hold_centerline_local()
                     if len(local_center) >= 3:
+                        local_center = self._stable_wait_centerline_local(
+                            local_center, now, dt
+                        )
                         # A camera line normally ends near the horizon.  Give
                         # Pure Pursuit several seconds of rolling road-aligned
                         # path even while one lane-change iteration is still running.
