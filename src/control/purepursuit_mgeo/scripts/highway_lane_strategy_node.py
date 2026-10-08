@@ -2983,12 +2983,10 @@ class HighwayLaneStrategyNode:
                     rospy.logwarn("HIGHWAY REJOIN COMMITTED global_d=%.2f length=%.1f", global_d, self.rejoin_length_m)
                     self._publish(rejoin, False, adaptive, True, {"reason":"rejoin_committed", "global_d":round(global_d,2), "follow":follow}, now, dt)
                     return
-                # An out-of-lane global path is not a reason to brake in a
-                # clear current lane; keep following its camera centre. A
-                # collision on an otherwise valid rejoin still requests stop.
-                if within_lane:
-                    stop = True
-                inner_reason = "rejoin_" + rejoin_reason
+                # A rejected *candidate* does not make the currently driven
+                # lane unsafe. Keep its verified center path and retry later.
+                self.release_since = None
+                inner_reason = "rejoin_deferred_" + rejoin_reason
                 rejoin_blocked = True
 
             # Failsafe direct release only when the two paths are already almost
@@ -3018,8 +3016,7 @@ class HighwayLaneStrategyNode:
                 release_safe, release_reason = self._dynamic_path_safe(self.latest_base_path, adaptive)
                 if not release_safe:
                     self.release_since = None
-                    stop = True
-                    inner_reason = "release_" + release_reason
+                    inner_reason = "release_deferred_" + release_reason
                 elif self.release_since is None:
                     self.release_since = now
                 elif (now-self.release_since).to_sec() >= self.release_confirm_s:
@@ -3069,15 +3066,23 @@ class HighwayLaneStrategyNode:
             adaptive, emergency, follow = self._adaptive_speed(self.cruise_speed_mps) if obs_fresh else (self.cruise_speed_mps, False, {})
             global_d = self._global_signed_d()
             path_safe, path_reason = self._dynamic_path_safe(self.committed_rejoin_path, adaptive) if obs_fresh else (False, "obstacles_stale")
-            stop = emergency or not path_safe or not base_stop_fresh or self.base_stop
+            # The base planner is an alternative route while this committed
+            # rejoin path is being driven. Its stop/status gates the hand-off,
+            # but must not brake a safe current path.
+            stop = emergency or not obs_fresh or not path_safe
             close_enough = global_d is not None and abs(global_d) <= self.rejoin_complete_global_d_m
             progressed = self.rejoin_travel_m >= 0.65*self.rejoin_length_m
-            if (progressed or close_enough) and base_fresh and not stop:
+            release_blocked = not base_stop_fresh or self.base_stop
+            if (
+                (progressed or close_enough)
+                and base_fresh and base_stop_fresh and not self.base_stop
+                and not stop
+            ):
                 release_safe, release_reason = self._dynamic_path_safe(self.latest_base_path, adaptive)
                 if not release_safe:
                     self.release_since = None
-                    stop = True
-                    path_reason = "release_" + release_reason
+                    path_reason = "release_deferred_" + release_reason
+                    release_blocked = True
                 elif self.release_since is None:
                     self.release_since = now
                 elif (now-self.release_since).to_sec() >= self.release_confirm_s:
@@ -3088,7 +3093,32 @@ class HighwayLaneStrategyNode:
                     return
             else:
                 self.release_since = None
-            reason = "lead_emergency" if emergency else ("base_stop" if self.base_stop else ("base_stop_stale" if not base_stop_fresh else (path_reason if stop else "rejoining")))
+            if release_blocked and not stop:
+                # A rejoin trajectory is finite. If its destination cannot
+                # accept the hand-off, resume rolling camera-lane tracking
+                # before Pure Pursuit reaches the trajectory endpoint.
+                self.state = self.INNER_HOLD
+                self.last_inner_path = self.committed_rejoin_path
+                self.inner_handover_pending = False
+                self.inner_hold_started_at = now
+                self.inner_hold_travel_m = 0.0
+                self.last_hold_xy = (ex, ey)
+                self.release_since = None
+                reason = (
+                    path_reason if path_reason.startswith("release_deferred_")
+                    else "base_release_deferred"
+                )
+                self._publish(self.committed_rejoin_path, False, adaptive, True, {
+                    "reason": reason, "global_d": global_d, "follow": follow,
+                }, now, dt)
+                return
+            reason = "lead_emergency" if emergency else (
+                "obstacles_stale" if not obs_fresh else (
+                    path_reason if stop or path_reason.startswith("release_deferred_") else (
+                        "base_release_deferred" if not base_stop_fresh or self.base_stop else "rejoining"
+                    )
+                )
+            )
             self._publish(self.committed_rejoin_path, stop, adaptive, True, {"reason":reason, "global_d":None if global_d is None else round(global_d,2), "travel_m":round(self.rejoin_travel_m,2), "progressed":progressed, "follow":follow}, now, dt)
             return
 

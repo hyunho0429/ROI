@@ -211,6 +211,13 @@ class MoraiUdpDriveBridge:
         no_brake = self.highway_active and not self.highway_braking_enabled
 
         if not is_fresh:
+            rospy.logwarn_throttle(
+                1.0,
+                "EgoCtrlCmd command timeout: age=%.2fs limit=%.2fs highway=%s brake_enabled=%s",
+                -1.0 if message is None else time.monotonic()-self.last_command_time,
+                self.command_timeout_sec, self.highway_active,
+                self.highway_braking_enabled,
+            )
             packet = build_ego_ctrl_cmd(
                 cmd_type=1,
                 velocity_kmh=0.0,

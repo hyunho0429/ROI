@@ -1288,9 +1288,12 @@ class HighwaySafetyTest(unittest.TestCase):
         # Current path is clear, but the proposed return intersects another car.
         n._generate_rejoin_path.return_value = path_at(3.5)
         n.latest_obstacles.obstacles = [obstacle(16.0, 3.5)]
-        self.assertTrue(self.tick()[1])
+        _, stop, _, _, status, *_ = self.tick()
+        self.assertFalse(stop)
+        self.assertEqual(status["reason"], "rejoin_deferred_predicted_collision_id_1")
         self.assertEqual(n.state, n.INNER_HOLD)
         self.assertFalse(n.completed_once)
+        self.assertIsNone(n.release_since)
 
     def test_clear_rejoin_still_commits(self):
         self.assertFalse(self.tick()[1])
@@ -1309,8 +1312,24 @@ class HighwaySafetyTest(unittest.TestCase):
 
         self.assertEqual(n.state, n.INNER_HOLD)
         self.assertFalse(n._publish.call_args.args[1])
-        self.assertEqual(n._publish.call_args.args[4]['reason'], 'rejoin_path_crosses_lane_boundary')
+        self.assertEqual(n._publish.call_args.args[4]['reason'], 'rejoin_deferred_path_crosses_lane_boundary')
         self.assertFalse(n.completed_once)
+
+    def test_unsafe_direct_release_keeps_following_safe_hold_path(self):
+        n = self.node
+        n._lane_valid.return_value = (False, "lane_stale")
+        n._global_signed_d.return_value = 0.2
+        n.release_since = Stamp(98.0)
+        n._dynamic_path_safe = Mock(side_effect=[
+            (True, "ok"), (False, "predicted_collision_id_7")
+        ])
+
+        _, stop, _, _, status, *_ = self.tick()
+
+        self.assertFalse(stop)
+        self.assertEqual(n.state, n.INNER_HOLD)
+        self.assertIsNone(n.release_since)
+        self.assertEqual(status["reason"], "release_deferred_predicted_collision_id_7")
 
     def test_direct_release_requires_base_path_to_match_held_lane(self):
         n = self.node
@@ -1437,6 +1456,59 @@ class HighwaySafetyTest(unittest.TestCase):
         n.obstacles_at = Stamp(90.0)
         self.assertTrue(self.tick()[1])
         self.assertFalse(n.completed_once)
+
+    def test_rejoin_base_stop_defers_release_without_braking_current_path(self):
+        n = self.node
+        n.state = n.REJOIN
+        n.rejoin_travel_m = 20.0
+        n.release_since = Stamp(98.0)
+        n.base_stop = True
+
+        _, stop, _, active, status, *_ = self.tick()
+
+        self.assertFalse(stop)
+        self.assertTrue(active)
+        self.assertEqual(n.state, n.INNER_HOLD)
+        self.assertFalse(n.completed_once)
+        self.assertIsNone(n.release_since)
+        self.assertIs(n.last_inner_path, n.committed_rejoin_path)
+        self.assertEqual(status["reason"], "base_release_deferred")
+
+    def test_rejoin_stale_base_stop_defers_release_without_braking(self):
+        n = self.node
+        n.state = n.REJOIN
+        n.rejoin_travel_m = 20.0
+        n.release_since = Stamp(98.0)
+        n.base_stop_at = Stamp(90.0)
+
+        _, stop, _, active, status, *_ = self.tick()
+
+        self.assertFalse(stop)
+        self.assertTrue(active)
+        self.assertEqual(n.state, n.INNER_HOLD)
+        self.assertFalse(n.completed_once)
+        self.assertIsNone(n.release_since)
+        self.assertIs(n.last_inner_path, n.committed_rejoin_path)
+        self.assertEqual(status["reason"], "base_release_deferred")
+
+    def test_unsafe_rejoin_release_keeps_driving_safe_rejoin_path(self):
+        n = self.node
+        n.state = n.REJOIN
+        n.rejoin_travel_m = 20.0
+        n.release_since = Stamp(98.0)
+        n._dynamic_path_safe = Mock(side_effect=[
+            (True, "ok"), (False, "predicted_collision_id_7")
+        ])
+
+        _, stop, _, active, status, *_ = self.tick()
+
+        self.assertFalse(stop)
+        self.assertTrue(active)
+        self.assertEqual(n.state, n.INNER_HOLD)
+        self.assertFalse(n.completed_once)
+        self.assertIsNone(n.release_since)
+        self.assertIs(n.last_inner_path, n.committed_rejoin_path)
+        self.assertEqual(status["reason"], "release_deferred_predicted_collision_id_7")
 
     def test_clear_rejoin_can_complete(self):
         n = self.node

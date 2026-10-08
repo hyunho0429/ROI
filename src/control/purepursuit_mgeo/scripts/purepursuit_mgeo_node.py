@@ -561,6 +561,16 @@ class PurePursuitNode:
                     else "other",
                     brake, speed, effective_target_speed,
                 )
+            if self.highway_active and (stop or brake > 0.1):
+                rospy.logwarn_throttle(
+                    1.0,
+                    "PP HIGHWAY BRAKE stop=%s brake=%.2f speed=%.2f target=%.2f "
+                    "path=%s ped=%s tl=%s intersection=%s strategy=%s merge=%s lead=%s",
+                    stop, brake, speed, effective_target_speed, path_stop,
+                    self.pedestrian_stop_required, self.traffic_light_stop_required,
+                    intersection_effective_stop, avoidance_stop, merge_stop,
+                    self.highway_lead_brake_required,
+                )
             self.command_pub.publish(self.make_command(steering, stop, accel, brake))
 
         rospy.loginfo_throttle(
