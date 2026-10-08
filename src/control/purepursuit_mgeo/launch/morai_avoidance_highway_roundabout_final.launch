@@ -8,6 +8,11 @@
        + sensor-team Pure Pursuit geometry / longlCmdType=1.
   -->
 
+  <!-- Highway planner feeding Pure Pursuit.  morai_highway_overtake.launch sets
+       highway_ns:=highway_overtake and turns the legacy strategy node off. -->
+  <arg name="highway_ns" default="highway_lane_strategy" />
+  <arg name="enable_highway_lane_strategy" default="true" />
+
   <!-- MORAI host/source and this algorithm PC destination. -->
   <arg name="morai_host_ip" default="192.168.0.161" />
   <arg name="bind_ip" default="0.0.0.0" />
@@ -39,9 +44,9 @@
   <arg name="lane_debug_scale" default="0.75" />
   <!-- Draw the planner path on the lane camera window (magenta dots = path
        points, red X = path end, grey = base path). Set "" to disable. -->
-  <arg name="lane_overlay_path_topic" default="/highway_lane_strategy/active_path" />
+  <arg name="lane_overlay_path_topic" default="/$(arg highway_ns)/active_path" />
   <arg name="lane_overlay_ref_path_topic" default="/avoidance_path_manager/active_path" />
-  <arg name="lane_overlay_state_topic" default="/highway_lane_strategy/state" />
+  <arg name="lane_overlay_state_topic" default="/$(arg highway_ns)/state" />
   <arg name="yolo_port" default="1131" />
   <arg name="yolo_base_model" default="$(find camera_perception)/models/yolov8n.pt" />
   <arg name="yolo_custom_model" default="$(find camera_perception)/models/best0902.pt" />
@@ -76,24 +81,24 @@
        mode the highway node transparently republishes the normal PathManager path. -->
   <param name="/purepursuit_mgeo/use_active_path" value="true" />
   <param name="/purepursuit_mgeo/active_path_topic"
-         value="/highway_lane_strategy/active_path" />
+         value="/$(arg highway_ns)/active_path" />
   <param name="/purepursuit_mgeo/require_path_manager_status" value="true" />
   <param name="/purepursuit_mgeo/stop_required_topic"
-         value="/highway_lane_strategy/stop_required" />
+         value="/$(arg highway_ns)/stop_required" />
   <param name="/purepursuit_mgeo/managed_timeout_s" value="$(arg managed_timeout_s)" />
   <param name="/purepursuit_mgeo/use_target_speed_override" value="true" />
   <param name="/purepursuit_mgeo/target_speed_override_topic"
-         value="/highway_lane_strategy/target_speed_mps" />
+         value="/$(arg highway_ns)/target_speed_mps" />
   <param name="/purepursuit_mgeo/target_speed_override_timeout_s" value="1.0" />
   <!-- Road-wheel command slew limit. -->
   <param name="/purepursuit_mgeo/steering_rate_limit_rad_s" value="0.20" />
-  <param name="/purepursuit_mgeo/steering_rate_limit_active_topic" value="/highway_lane_strategy/active" />
+  <param name="/purepursuit_mgeo/steering_rate_limit_active_topic" value="/$(arg highway_ns)/active" />
   <!-- At 9 m/s this limits road-wheel steering to about 5.3 degrees, while
        leaving the intended 4 m/s lane-change command effectively untouched. -->
   <param name="/purepursuit_mgeo/highway_max_lateral_accel_mps2" value="2.5" />
   <!-- Use a short preview at the intended 4 m/s, but grow it with actual speed
        and reduce steering slew so an overspeed entry cannot oscillate. -->
-  <param name="/purepursuit_mgeo/fast_change_active_topic" value="/highway_lane_strategy/fast_change_active" />
+  <param name="/purepursuit_mgeo/fast_change_active_topic" value="/$(arg highway_ns)/fast_change_active" />
   <param name="/purepursuit_mgeo/fast_change_lookahead_m" value="3.5" />
   <param name="/purepursuit_mgeo/fast_change_lookahead_speed_gain" value="0.75" />
   <param name="/purepursuit_mgeo/fast_change_steering_rate_rad_s" value="0.50" />
@@ -101,13 +106,13 @@
   <!-- Preserve highway cruise. Permit speed-PID braking only for a confirmed
        path-aligned LiDAR lead; an imminent conflict uses the brake pedal while
        retaining the moving-lead speed target and steering path. -->
-  <param name="/purepursuit_mgeo/highway_active_topic" value="/highway_lane_strategy/active" />
+  <param name="/purepursuit_mgeo/highway_active_topic" value="/$(arg highway_ns)/active" />
   <param name="/purepursuit_mgeo/highway_braking_enabled" value="true" />
   <param name="/purepursuit_mgeo/highway_speed_braking_enabled" value="true" />
-  <param name="/purepursuit_mgeo/highway_lead_brake_topic" value="/highway_lane_strategy/lead_brake_required" />
-  <param name="/purepursuit_mgeo/highway_lead_emergency_topic" value="/highway_lane_strategy/lead_emergency_brake" />
+  <param name="/purepursuit_mgeo/highway_lead_brake_topic" value="/$(arg highway_ns)/lead_brake_required" />
+  <param name="/purepursuit_mgeo/highway_lead_emergency_topic" value="/$(arg highway_ns)/lead_emergency_brake" />
   <!-- Let the bridge pass through confirmed-lead braking and brake on timeout. -->
-  <param name="/morai_udp_drive_bridge/highway_active_topic" value="/highway_lane_strategy/active" />
+  <param name="/morai_udp_drive_bridge/highway_active_topic" value="/$(arg highway_ns)/active" />
   <param name="/morai_udp_drive_bridge/highway_braking_enabled" value="true" />
 
   <param name="/purepursuit_mgeo/enable_merge_gate" value="$(arg enable_roundabout_merge_gate)" />
@@ -283,7 +288,8 @@
        highway detected -> wait for sensor-team LEFT merge gap -> commit local
        eased diagonal lane change -> blended camera lane-hold -> release only after
        the inner lane physically converges back to the global route. -->
-  <node pkg="purepursuit_mgeo"
+  <node if="$(arg enable_highway_lane_strategy)"
+        pkg="purepursuit_mgeo"
         type="highway_lane_strategy_node.py"
         name="highway_lane_strategy"
         output="screen">

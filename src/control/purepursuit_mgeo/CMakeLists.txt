@@ -24,6 +24,7 @@ catkin_install_python(PROGRAMS
   scripts/avoidance_path_manager_node.py
   scripts/bypass_lane_guard_node.py
   scripts/highway_lane_strategy_node.py
+  scripts/highway_overtake_node.py
   scripts/lane_info_runner.py
   scripts/lane_info_semantic_adapter.py
   scripts/roundabout_merge_gate_node.py
@@ -38,6 +39,6 @@ foreach(helper frenet_path frenet_sampling_planner trajectory_safety)
   install(FILES scripts/${helper}.py DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
 endforeach()
 
-install(DIRECTORY launch
+install(DIRECTORY launch config
   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
 )

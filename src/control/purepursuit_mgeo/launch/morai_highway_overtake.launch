@@ -1,0 +1,50 @@
+<launch>
+  <!-- Highway overtaking test stack.
+
+       The final driving stack (morai_avoidance_highway_roundabout_final.launch:
+       localization, LiDAR, lane camera, obstacle avoidance, Pure Pursuit, ...)
+       with highway_overtake_node instead of highway_lane_strategy_node.  Pure
+       Pursuit follows /highway_overtake/active_path; outside the highway zone
+       that is the normal avoidance-manager path passed through unchanged.
+
+       roslaunch purepursuit_mgeo morai_highway_overtake.launch morai_host_ip:=<MORAI PC IP>
+  -->
+  <arg name="morai_host_ip" default="192.168.0.161" />
+  <arg name="bind_ip" default="0.0.0.0" />
+  <arg name="enable_control" default="true" />
+  <!-- Speed outside the highway zone; keep it below 16.6 m/s (60 km/h). -->
+  <arg name="target_speed_mps" default="15.0" />
+  <!-- Speed limit inside the highway zone. -->
+  <arg name="overtake_max_speed_mps" default="22.0" />
+  <arg name="path_file"
+       default="$(find morai_bringup)/../../../data/routes/2026_molit_comp_global_path.txt" />
+  <arg name="lane_info_topic" default="/perception/camera/lane_info" />
+  <arg name="enable_lane_debug_view" default="true" />
+
+  <include file="$(find purepursuit_mgeo)/launch/morai_avoidance_highway_roundabout_final.launch">
+    <arg name="morai_host_ip" value="$(arg morai_host_ip)" />
+    <arg name="bind_ip" value="$(arg bind_ip)" />
+    <arg name="enable_control" value="$(arg enable_control)" />
+    <arg name="target_speed_mps" value="$(arg target_speed_mps)" />
+    <arg name="path_file" value="$(arg path_file)" />
+    <arg name="lane_info_topic" value="$(arg lane_info_topic)" />
+    <arg name="enable_lane_debug_view" value="$(arg enable_lane_debug_view)" />
+    <arg name="highway_ns" value="highway_overtake" />
+    <arg name="enable_highway_lane_strategy" value="false" />
+  </include>
+
+  <node pkg="purepursuit_mgeo"
+        type="highway_overtake_node.py"
+        name="highway_overtake"
+        output="screen">
+    <rosparam command="load" file="$(find purepursuit_mgeo)/config/highway_overtake.yaml" />
+    <param name="path_file" value="$(arg path_file)" />
+    <param name="cruise_speed_mps" value="$(arg target_speed_mps)" />
+    <param name="max_speed_mps" value="$(arg overtake_max_speed_mps)" />
+    <param name="lane_info_topic" value="$(arg lane_info_topic)" />
+    <param name="odom_topic" value="/localization/odometry" />
+    <param name="obstacle_topic" value="/perception/lidar/tracked_obstacles_map" />
+    <param name="base_path_topic" value="/avoidance_path_manager/active_path" />
+    <param name="base_stop_topic" value="/avoidance_path_manager/stop_required" />
+  </node>
+</launch>
