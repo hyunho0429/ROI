@@ -194,7 +194,6 @@ class HighwayLaneStrategyNode:
         self.inner_spatial_window = int(rospy.get_param("~inner_spatial_window", 3))
         self.inner_spatial_max_dy_per_m = float(rospy.get_param("~inner_spatial_max_dy_per_m", 0.22))
         self.inner_recovery_timeout_s = float(rospy.get_param("~inner_recovery_timeout_s", 3.0))
-        self.inner_hold_speed_cap_mps = max(0.5, float(rospy.get_param("~inner_hold_speed_cap_mps", 2.5)))
         self.center_sample_xs = (5.0, 7.5, 10.0, 12.5, 15.0, 17.5, 20.0, 22.5, 25.0)
 
         self.vehicle_length_m = float(rospy.get_param("~vehicle_length_m", 4.635))
@@ -1348,10 +1347,6 @@ class HighwayLaneStrategyNode:
             else:
                 stop = True
                 inner_reason = "lane_recovery_timeout_" + lane_reason
-
-            # Laboratory tuning: limit speed only during camera-only lane hold.
-            # Keep emergency STOP and dynamic-obstacle speed restrictions intact.
-            adaptive = min(adaptive, self.inner_hold_speed_cap_mps)
 
             # Event-based re-arm: do not count lane changes.  Once the ego has
             # settled in the new lane, the *current ego-left boundary* decides
