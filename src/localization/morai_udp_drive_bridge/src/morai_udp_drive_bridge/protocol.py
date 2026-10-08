@@ -38,9 +38,11 @@ def effective_brake_pedal(
     highway_active: bool,
     highway_braking_enabled: bool,
 ) -> float:
-    """Return the final brake pedal after the highway competition override."""
-    if highway_active and not highway_braking_enabled:
-        return 0.0
+    """Clamp the requested pedal. Legacy mode flags never suppress braking.
+
+    Keep the old signature for callers, but remove the highway no-brake override
+    so both front-follow control and the command watchdog reach the actuator.
+    """
     return max(0.0, min(1.0, float(requested_brake)))
 
 

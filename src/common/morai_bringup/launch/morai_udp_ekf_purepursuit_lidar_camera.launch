@@ -55,6 +55,8 @@
   <!-- Highway entry starts from the first YOLO road-vehicle detection. -->
   <arg name="highway_latch_once" default="true" />
   <arg name="lidar_forward_range_m" default="40.0" />
+  <arg name="lidar_rear_min_m" default="-40.0" />
+  <arg name="lidar_lateral_range_m" default="8.0" />
   <arg name="lane_info_topic" default="/perception/camera/lane_info" />
   <arg name="enable_pedestrian_crossing" default="$(arg enable_yolo)" />
   <arg name="pedestrian_stop_topic" default="/perception/pedestrian_crossing/stop_required" />
@@ -82,6 +84,8 @@
     <arg name="control_remote_port" value="$(arg control_remote_port)" />
     <arg name="target_speed_mps" value="$(arg target_speed_mps)" />
     <arg name="lidar_forward_range_m" value="$(arg lidar_forward_range_m)" />
+    <arg name="lidar_rear_min_m" value="$(arg lidar_rear_min_m)" />
+    <arg name="lidar_lateral_range_m" value="$(arg lidar_lateral_range_m)" />
     <arg name="lidar_x_m" value="$(arg lidar_x_m)" />
     <arg name="lidar_y_m" value="$(arg lidar_y_m)" />
     <arg name="lidar_yaw_deg" value="$(arg lidar_yaw_deg)" />

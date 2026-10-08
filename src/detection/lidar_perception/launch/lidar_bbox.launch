@@ -4,6 +4,8 @@
   <arg name="host_port" default="2000" />
   <arg name="destination_port" default="2001" />
   <arg name="x_max_m" default="40.0" />
+  <arg name="x_min_m" default="-40.0" />
+  <arg name="y_abs_m" default="8.0" />
   <arg name="odometry_topic" default="/localization/odometry" />
   <!-- Accepted for compatibility with the shared bringup; this pipeline does not publish them. -->
   <arg name="merge_available_topic" default="/perception/merge_gap/available" />
@@ -25,6 +27,8 @@
     <arg name="host_port" value="$(arg host_port)" />
     <arg name="destination_port" value="$(arg destination_port)" />
     <arg name="x_max_m" value="$(arg x_max_m)" />
+    <arg name="x_min_m" value="$(arg x_min_m)" />
+    <arg name="y_abs_m" value="$(arg y_abs_m)" />
     <arg name="odometry_topic" value="$(arg odometry_topic)" />
     <arg name="lidar_x_m" value="$(arg lidar_x_m)" />
     <arg name="lidar_y_m" value="$(arg lidar_y_m)" />

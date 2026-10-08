@@ -12,6 +12,8 @@
   <arg name="lidar_host_port" default="2000" />
   <arg name="lidar_port" default="2001" />
   <arg name="lidar_forward_range_m" default="40.0" />
+  <arg name="lidar_rear_min_m" default="-40.0" />
+  <arg name="lidar_lateral_range_m" default="8.0" />
   <arg name="morai_host_ip" default="192.168.0.148" />
   <arg name="control_remote_port" default="9093" />
   <arg name="control_source_port" default="9094" />
@@ -65,5 +67,7 @@
     <arg name="lidar_y_m" value="$(arg lidar_y_m)" />
     <arg name="lidar_yaw_deg" value="$(arg lidar_yaw_deg)" />
     <arg name="x_max_m" value="$(arg lidar_forward_range_m)" />
+    <arg name="x_min_m" value="$(arg lidar_rear_min_m)" />
+    <arg name="y_abs_m" value="$(arg lidar_lateral_range_m)" />
   </include>
 </launch>

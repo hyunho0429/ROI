@@ -32,11 +32,11 @@ class EgoProtocolTest(unittest.TestCase):
         self.assertEqual(values[10], 0.0)
         self.assertEqual(values[11], 1.0)
 
-    def test_highway_no_brake_policy_reaches_udp_packet(self):
+    def test_legacy_highway_no_brake_flag_cannot_suppress_braking(self):
         brake = effective_brake_pedal(1.0, True, False)
         packet = build_ego_ctrl_cmd(cmd_type=1, accel=0.0, brake=brake)
         values = struct.unpack("<14s i 3i 3b 5f 2s", packet)
-        self.assertEqual(values[11], 0.0)
+        self.assertEqual(values[11], 1.0)
 
     def test_normal_udp_brake_policy_is_unchanged(self):
         self.assertEqual(effective_brake_pedal(1.0, False, False), 1.0)

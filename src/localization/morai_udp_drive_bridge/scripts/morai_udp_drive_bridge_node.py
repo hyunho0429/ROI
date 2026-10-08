@@ -208,7 +208,6 @@ class MoraiUdpDriveBridge:
     def send_timer_callback(self, _event) -> None:
         message = self.last_command
         is_fresh = message is not None and time.monotonic() - self.last_command_time <= self.command_timeout_sec
-        no_brake = self.highway_active and not self.highway_braking_enabled
 
         if not is_fresh:
             rospy.logwarn_throttle(
@@ -225,11 +224,6 @@ class MoraiUdpDriveBridge:
                     1.0, self.highway_active, self.highway_braking_enabled
                 ),
             )
-            if no_brake:
-                rospy.logwarn_throttle(
-                    1.0,
-                    "EgoCtrlCmd timeout brake suppressed in highway no-brake mode",
-                )
         else:
             requested_cmd_type = int(getattr(message, "longlCmdType", 1))
             if requested_cmd_type != 1:

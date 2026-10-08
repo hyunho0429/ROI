@@ -1,5 +1,12 @@
 # MORAI 대회 자율주행
 
+> **test/rrt 고속도로 제어 개편 (2026-10-08)**: 기존 RRT/누적 끼어들기 제어를
+> 단일 Frenet·5차 다항식 경로와 도로 기준 추종으로 교체했습니다.
+> `roslaunch purepursuit_mgeo highway.launch`의 기본 목표는 **80 km/h**입니다.
+> 현재 실행법·상태·검증 범위는 [고속도로 제어 안내](docs/HIGHWAY_FRENET_80_KO.md)를 확인하세요.
+> 아래의 merged_code 기본 구성 설명과 속도 설정은 일반 주행용입니다.
+
+
 `dev/merged_code` 브랜치는 MORAI 25.S4 대회 환경에서 전역 경로를 추종하는
 UDP 기반 자율주행 코드에 LiDAR와 카메라 인식을 통합한 브랜치이다.
 

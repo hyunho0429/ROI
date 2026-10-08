@@ -60,6 +60,19 @@ Visualization Manager:
       Marker Topic: /morai/lidar/merge_gap/markers
       Name: Left Right Merge Gap Status
       Queue Size: 10
+    - Class: rviz/Marker
+      Enabled: true
+      Marker Topic: /highway_lane_strategy/status_marker
+      Name: Highway Controller State
+      Queue Size: 2
+    - Class: rviz/Path
+      Enabled: true
+      Topic: /highway_lane_strategy/active_path
+      Name: Highway Actual Control Path
+      Line Style: Lines
+      Line Width: 0.12
+      Color: 255; 220; 0
+      Buffer Length: 1
   Enabled: true
   Global Options:
     Background Color: 30; 30; 30

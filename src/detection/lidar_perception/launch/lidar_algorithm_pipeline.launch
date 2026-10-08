@@ -32,6 +32,8 @@
     <arg name="deskew_enabled" value="$(arg deskew_enabled)" />
     <arg name="cluster_enabled" value="$(arg udp_cluster_enabled)" />
     <arg name="x_max_m" value="$(arg x_max_m)" />
+    <arg name="x_min_m" value="$(arg x_min_m)" />
+    <arg name="y_abs_m" value="$(arg y_abs_m)" />
   </include>
 
   <node pkg="lidar_perception"

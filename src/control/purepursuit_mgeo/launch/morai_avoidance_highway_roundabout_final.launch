@@ -3,7 +3,7 @@
        sensor-team canonical stack with the six-class lane camera
        + F6 lane-agnostic obstacle BYPASS
        + proactive highway LEFT lane strategy with persistent inner-lane hold
-       + speed adaptation using tracked front/rear vehicles
+       + road-aligned front-vehicle following and front/rear merge validation
        + roundabout merge gate
        + sensor-team Pure Pursuit geometry / longlCmdType=1.
   -->
@@ -17,9 +17,11 @@
        default="$(find morai_bringup)/../../../data/mgeo/R_KR_PR_K-city_2025/link_set.json" />
   <arg name="enable_control" default="true" />
   <!-- Set target_speed_mps:=15.0 for the competition speed profile. -->
-  <arg name="target_speed_mps" default="2.0" />
+  <arg name="target_speed_mps" default="22.222222" />
   <arg name="managed_timeout_s" default="1.0" />
   <arg name="lidar_forward_range_m" default="80.0" />
+  <arg name="lidar_rear_min_m" default="-80.0" />
+  <arg name="lidar_lateral_range_m" default="16.0" />
 
   <!-- The wrapper launches the six-class lane inference pipeline. -->
   <!-- YOLO vehicle detection determines highway entry; lane geometry guides control. -->
@@ -80,27 +82,13 @@
   <!-- Road-wheel command slew limit. -->
   <param name="/purepursuit_mgeo/steering_rate_limit_rad_s" value="0.20" />
   <param name="/purepursuit_mgeo/steering_rate_limit_active_topic" value="/highway_lane_strategy/active" />
-  <!-- At 9 m/s this limits road-wheel steering to about 5.3 degrees, while
-       leaving the intended 4 m/s lane-change command effectively untouched. -->
+  <!-- Curvature feedforward and road-frame feedback share a 2.5 m/s^2 limit.
+       The legacy fast-change topic is now a state indicator, not a gain switch. -->
   <param name="/purepursuit_mgeo/highway_max_lateral_accel_mps2" value="2.5" />
-  <!-- Use a short preview at the intended 4 m/s, but grow it with actual speed
-       and reduce steering slew so an overspeed entry cannot oscillate. -->
   <param name="/purepursuit_mgeo/fast_change_active_topic" value="/highway_lane_strategy/fast_change_active" />
-  <param name="/purepursuit_mgeo/fast_change_lookahead_m" value="3.5" />
-  <param name="/purepursuit_mgeo/fast_change_lookahead_speed_gain" value="0.75" />
-  <param name="/purepursuit_mgeo/fast_change_steering_rate_rad_s" value="0.50" />
-  <param name="/purepursuit_mgeo/fast_change_reference_speed_mps" value="4.0" />
-  <!-- Preserve highway cruise. Permit speed-PID braking only for a confirmed
-       path-aligned LiDAR lead; an imminent conflict uses the brake pedal while
-       retaining the moving-lead speed target and steering path. -->
   <param name="/purepursuit_mgeo/highway_active_topic" value="/highway_lane_strategy/active" />
-  <param name="/purepursuit_mgeo/highway_braking_enabled" value="true" />
-  <param name="/purepursuit_mgeo/highway_speed_braking_enabled" value="true" />
   <param name="/purepursuit_mgeo/highway_lead_brake_topic" value="/highway_lane_strategy/lead_brake_required" />
-  <param name="/purepursuit_mgeo/highway_lead_emergency_topic" value="/highway_lane_strategy/lead_emergency_brake" />
-  <!-- Let the bridge pass through confirmed-lead braking and brake on timeout. -->
   <param name="/morai_udp_drive_bridge/highway_active_topic" value="/highway_lane_strategy/active" />
-  <param name="/morai_udp_drive_bridge/highway_braking_enabled" value="true" />
 
   <param name="/purepursuit_mgeo/enable_merge_gate" value="$(arg enable_roundabout_merge_gate)" />
   <param name="/purepursuit_mgeo/merge_stop_topic" value="/roundabout_merge_gate/stop_required" />
@@ -116,6 +104,8 @@
     <arg name="morai_host_ip" value="$(arg morai_host_ip)" />
     <arg name="target_speed_mps" value="$(arg target_speed_mps)" />
     <arg name="lidar_forward_range_m" value="$(arg lidar_forward_range_m)" />
+    <arg name="lidar_rear_min_m" value="$(arg lidar_rear_min_m)" />
+    <arg name="lidar_lateral_range_m" value="$(arg lidar_lateral_range_m)" />
     <arg name="enable_control" value="$(arg enable_control)" />
     <!-- One UDP consumer only: the lane camera runner owns MORAI port 1101. -->
     <arg name="enable_lane" value="false" />
@@ -268,15 +258,10 @@
     <param name="threat_clear_max_abs_d_m" value="0.55" />
   </node>
 
-  <!-- Highway strategy:
-       highway detected -> wait for sensor-team LEFT merge gap -> commit local
-       eased diagonal lane change -> blended camera lane-hold -> release only after
-       the inner lane physically converges back to the global route. -->
-  <node pkg="purepursuit_mgeo"
-        type="highway_lane_strategy_node.py"
-        name="highway_lane_strategy"
-        output="screen">
-    <param name="path_file" value="$(arg path_file)" />
+  <!-- One left lane per fixed Frenet/quintic path. Never rejoin the outer
+       global route after activation; hold the measured destination centre. -->
+  <node pkg="purepursuit_mgeo" type="highway_lane_strategy_node.py"
+        name="highway_lane_strategy" output="screen">
     <param name="map_frame" value="map" />
     <param name="base_path_topic" value="/avoidance_path_manager/active_path" />
     <param name="base_stop_topic" value="/avoidance_path_manager/stop_required" />
@@ -285,140 +270,8 @@
     <param name="lane_info_topic" value="$(arg lane_info_topic)" />
     <param name="highway_topic" value="$(arg highway_environment_topic)" />
     <param name="highway_request_topic" value="$(arg highway_request_topic)" />
-    <param name="merge_available_topic" value="/perception/merge_gap/available" />
-    <param name="merge_unavailable_topic" value="/perception/merge_gap/unavailable" />
-    <param name="mission_request_bypass_sensor_merge_gate" value="true" />
-    <!-- The strategy below independently validates current LiDAR front/rear
-         gap, TTC and the complete quintic path. Avoid waiting on the older
-         camera-gated merge decision as a second veto. -->
-    <param name="bypass_sensor_merge_gate" value="true" />
-    <!-- Arm after YOLO detects a road vehicle. -->
-    <param name="force_highway_active" value="false" />
-    <!-- Use measured lane boundaries for the quintic path and post-change hold. -->
-    <param name="rrt_lidar_only_mode" value="false" />
-    <!-- A lane change may start only from fresh measured lane geometry. The
-         committed target line handles short dropouts after a change starts. -->
-    <param name="allow_nominal_lane_fallback" value="false" />
-
     <param name="cruise_speed_mps" value="$(arg target_speed_mps)" />
-    <!-- Keep merge speed within 12.5% of cruise; wait for a faster gap otherwise. -->
-    <param name="lane_change_min_speed_ratio" value="0.875" />
-    <param name="lane_change_min_speed_mps" value="2.5" />
-    <param name="min_lane_hold_before_next_change_m" value="8.0" />
-    <!-- Keep each newly reached lane for five seconds. The next change also
-         requires a fresh, centered camera path and a safe adjacent gap. -->
-    <param name="min_lane_hold_before_next_change_s" value="5.0" />
-    <param name="highway_confirm_s" value="0.5" />
-    <param name="ready_confirm_s" value="0.25" />
-
-    <param name="min_lane_confidence" value="0.45" />
-    <param name="lane_width_min_m" value="2.7" />
-    <param name="lane_width_max_m" value="4.2" />
-    <param name="nominal_lane_width_m" value="3.5" />
-    <!-- Follow the midpoint of the two measured lane boundaries after each change. -->
-    <param name="lane_center_right_offset_m" value="0.0" />
-    <param name="require_left_dashed" value="true" />
-    <!-- Two one-lane changes reach the final permitted lane on this course. -->
-    <param name="max_left_lane_changes" value="2" />
-    <param name="left_divider_expected_tol_m" value="0.55" />
-    <param name="outer_left_min_separation_m" value="2.0" />
-    <param name="outer_left_max_separation_m" value="4.8" />
-    <!-- Accept a valid midpoint even when the car finishes close to a lane
-         boundary; an adjacent-lane centre is still rejected at about 3.5 m. -->
-    <param name="inner_center_max_abs_y_m" value="1.60" />
-    <param name="inner_lane_invalid_grace_s" value="1.20" />
-    <param name="wait_lane_hold_grace_s" value="2.0" />
-    <param name="wait_heading_hold_max_s" value="0.7" />
-    <param name="inner_handover_confirm_s" value="0.20" />
-    <param name="inner_handover_min_s" value="2.0" />
-    <!-- Compare each fresh centre with the immutable planned target lane so
-         repeated camera track switches cannot slowly walk into the next lane. -->
-    <param name="inner_center_switch_max_delta_m" value="0.85" />
-    <param name="inner_handover_max_distance_m" value="6.0" />
-    <param name="inner_fallback_path_length_m" value="60.0" />
-    <!-- End repeated LEFT changes at the final lane, but keep following the
-         midpoint between its nearest left solid and nearest right dashed line. -->
-    <param name="final_lane_confirm_s" value="0.25" />
-    <param name="final_lane_capture_min_ratio" value="0.55" />
-    <param name="final_lane_capture_center_error_m" value="0.55" />
-
-    <param name="change_start_m" value="3.0" />
-    <param name="change_min_length_m" value="18.0" />
-    <param name="change_max_length_m" value="90.0" />
-    <param name="change_max_heading_deg" value="15.0" />
-    <!-- The first and later changes use a smooth quintic diagonal at the
-         actual speed, bounded by heading and lateral acceleration. -->
-    <param name="repeat_change_min_length_m" value="18.0" />
-    <param name="repeat_change_max_length_m" value="90.0" />
-    <param name="repeat_change_time_s" value="3.6" />
-    <param name="repeat_change_max_heading_deg" value="15.0" />
-    <!-- Follow the midpoint of the newly detected left/right boundaries soon
-         after hand-over while retaining a smooth steering transition. -->
-    <param name="inner_path_blend_time_s" value="0.80" />
-    <param name="inner_path_max_jump_m" value="0.60" />
-    <param name="inner_path_join_length_m" value="4.0" />
-    <param name="inner_path_join_time_s" value="1.5" />
-    <param name="inner_path_max_heading_deg" value="4.0" />
-    <param name="inner_path_right_recenter_gain" value="1.0" />
-    <param name="inner_path_force_recenter_error_m" value="0.18" />
-    <param name="inner_boundary_bracket_margin_m" value="0.10" />
-    <!-- Keep the planned vehicle centre at least half a vehicle width plus
-         20 cm from each detected physical lane boundary. -->
-    <param name="inner_boundary_safety_margin_m" value="0.20" />
-    <param name="inner_path_deadband_m" value="0.15" />
-    <!-- A repeat change starts only after both the measured midpoint and the
-         filtered path are within 25 cm of the lane centre. -->
-    <param name="next_change_center_error_m" value="0.25" />
-    <param name="next_change_heading_error_deg" value="2.5" />
-    <param name="next_change_settle_confirm_s" value="0.75" />
-    <!-- Preserve the centred-lane timer across one or two missed camera
-         frames, but never commit a new change on a stale frame. -->
-    <param name="next_change_center_loss_grace_s" value="0.40" />
-    <param name="change_time_s" value="3.6" />
-    <param name="change_post_hold_m" value="10.0" />
-    <param name="change_settle_m" value="3.0" />
-    <param name="repeat_change_settle_m" value="3.0" />
-    <param name="change_endpoint_guard_m" value="6.0" />
-    <param name="change_target_capture_m" value="0.30" />
-    <param name="change_target_capture_min_ratio" value="0.70" />
-    <param name="endpoint_handover_max_error_m" value="1.60" />
-    <param name="endpoint_handover_max_heading_deg" value="15.0" />
-    <param name="max_lateral_accel_mps2" value="2.5" />
-
-    <param name="front_min_gap_m" value="6.0" />
-    <param name="rear_min_gap_m" value="7.0" />
-    <param name="time_headway_s" value="1.5" />
-    <param name="min_ttc_s" value="3.0" />
-    <param name="gap_search_range_m" value="50.0" />
-
-    <param name="follow_standstill_gap_m" value="4.0" />
-    <param name="follow_time_headway_s" value="1.6" />
-    <param name="follow_gain" value="0.35" />
-    <param name="follow_search_m" value="80.0" />
-    <param name="current_lane_center_gate_m" value="1.15" />
-    <param name="target_lane_center_gate_m" value="1.50" />
-    <param name="emergency_gap_m" value="1.5" />
-    <param name="emergency_ttc_s" value="1.0" />
-
-    <param name="vehicle_length_m" value="4.635" />
-    <param name="vehicle_width_m" value="1.892" />
-    <param name="vehicle_center_from_base_m" value="1.50" />
-    <param name="collision_long_margin_m" value="0.50" />
-    <param name="collision_lat_margin_m" value="0.35" />
-    <param name="dynamic_prediction_horizon_s" value="5.0" />
-    <!-- Once a merge is committed, only an imminent conflict can stop the car
-         halfway across a divider. Longer predictions continue to be monitored. -->
-    <param name="committed_stop_horizon_s" value="2.0" />
-    <!-- An imminent predicted collision must stop a committed change. -->
-    <param name="post_commit_collision_stop_enabled" value="true" />
-    <param name="highway_braking_enabled" value="true" />
-
-    <param name="release_global_d_m" value="0.55" />
-    <param name="release_confirm_s" value="0.6" />
-    <param name="min_inner_hold_after_change_m" value="8.0" />
-    <param name="rejoin_start_global_d_m" value="1.80" />
-    <param name="rejoin_length_m" value="18.0" />
-    <param name="rejoin_complete_global_d_m" value="0.45" />
+    <param name="lane_hold_s" value="5.0" />
   </node>
 
   <!-- Roundabout gap logic remains separate from highway lane-change logic. -->

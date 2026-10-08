@@ -1,13 +1,9 @@
 #!/usr/bin/env python3
-"""Sensor-team Pure Pursuit + managed path + merge-gate integration.
+"""Final steering/pedal controller with independent mission-stop inputs.
 
-Preserves the sensor team's steering geometry and longlCmdType=1 pedal control.
-Adds only:
-* Path Manager active-path input with stale fail-safe;
-* Path Manager avoidance stop OR;
-* roundabout/generic merge stop OR;
-* optional scenario-specific suppression of the generic intersection stop only
-  after the merge gate has explicitly committed GO.
+Normal mode retains the sensor team's Pure Pursuit. Highway mode uses the
+single-target planner's rolling path with curvature/heading/cross-track control
+and a separate PI speed controller. No highway mode suppresses safety stops.
 """
 
 from __future__ import annotations
@@ -23,12 +19,11 @@ from nav_msgs.msg import Odometry, Path as RosPath
 from path_planning.longitudinal_controller import PedalSpeedController
 from std_msgs.msg import Bool, Float64
 
+from purepursuit_mgeo.highway import Ego, track_path
 from purepursuit_mgeo.path import MgeoPurePursuit, PathPoint, load_mgeo_path
 from purepursuit_mgeo.motion import (
-    apply_highway_brake_policy,
     lateral_acceleration_steering_limit,
     SteeringRateLimiter,
-    speed_adaptive_steering_profile,
 )
 
 
@@ -59,18 +54,6 @@ class PurePursuitNode:
         if steering_rate_active_topic:
             rospy.Subscriber(steering_rate_active_topic, Bool, self.steering_rate_active_callback, queue_size=1)
         self.fast_change_active = False
-        self.fast_change_lookahead_m = float(
-            rospy.get_param("~fast_change_lookahead_m", 3.5)
-        )
-        self.fast_change_lookahead_speed_gain = float(
-            rospy.get_param("~fast_change_lookahead_speed_gain", 0.75)
-        )
-        self.fast_change_steering_rate_rad_s = float(
-            rospy.get_param("~fast_change_steering_rate_rad_s", 0.50)
-        )
-        self.fast_change_reference_speed_mps = float(
-            rospy.get_param("~fast_change_reference_speed_mps", 4.0)
-        )
         fast_change_topic = rospy.get_param("~fast_change_active_topic", "")
         if fast_change_topic:
             rospy.Subscriber(
@@ -80,30 +63,14 @@ class PurePursuitNode:
                 queue_size=1,
             )
         self.highway_active = False
-        self.highway_braking_enabled = bool(
-            rospy.get_param("~highway_braking_enabled", True)
-        )
-        self.highway_speed_braking_enabled = bool(
-            rospy.get_param("~highway_speed_braking_enabled", False)
-        )
         self.highway_lead_brake_required = False
-        self.highway_lead_emergency_brake = False
-        self.highway_lead_status_at: Optional[rospy.Time] = None
         self.highway_lead_brake_topic = rospy.get_param(
             "~highway_lead_brake_topic", ""
-        )
-        self.highway_lead_emergency_topic = rospy.get_param(
-            "~highway_lead_emergency_topic", ""
         )
         if self.highway_lead_brake_topic:
             rospy.Subscriber(
                 self.highway_lead_brake_topic, Bool,
                 self.highway_lead_brake_callback, queue_size=1,
-            )
-        if self.highway_lead_emergency_topic:
-            rospy.Subscriber(
-                self.highway_lead_emergency_topic, Bool,
-                self.highway_lead_emergency_callback, queue_size=1,
             )
         highway_active_topic = rospy.get_param("~highway_active_topic", "")
         if highway_active_topic:
@@ -128,6 +95,10 @@ class PurePursuitNode:
             max_brake=float(rospy.get_param("~max_brake_pedal", 1.0)),
         )
 
+        # Separate highway PI avoids derivative kicks when the detected lead
+        # or target speed changes. Independent mission stops remain effective.
+        self.highway_speed_controller = PedalSpeedController(
+            kp=0.18, ki=0.02, kd=0.0, nominal_dt=1.0/max(self.rate_hz, 1.0))
         self.wheelbase_m = float(rospy.get_param("~wheelbase_m", 3.0))
         self.highway_max_lateral_accel_mps2 = float(
             rospy.get_param("~highway_max_lateral_accel_mps2", 2.5)
@@ -309,10 +280,6 @@ class PurePursuitNode:
 
     def highway_lead_brake_callback(self, msg: Bool) -> None:
         self.highway_lead_brake_required = bool(msg.data)
-        self.highway_lead_status_at = rospy.Time.now()
-
-    def highway_lead_emergency_callback(self, msg: Bool) -> None:
-        self.highway_lead_emergency_brake = bool(msg.data)
 
     def merge_stop_callback(self, msg: Bool) -> None:
         self.merge_stop_required = bool(msg.data)
@@ -359,41 +326,16 @@ class PurePursuitNode:
         now = rospy.Time.now()
         managed_fault = self._managed_fault_reason(now)
         merge_fresh = self._merge_gate_fresh(now)
-        highway_no_brake = (
-            self.highway_active and not self.highway_braking_enabled
-        )
-        lead_status_stale = (
-            highway_no_brake and self.highway_lead_brake_topic
-            and (
-                self.highway_lead_status_at is None
-                or (now-self.highway_lead_status_at).to_sec() > 0.5
-            )
-        )
-        if lead_status_stale:
-            self.steering_limiter.reset(now.to_sec())
+        if managed_fault is not None or not merge_fresh:
             if self.enable_control:
                 self.speed_controller.reset()
-                self.command_pub.publish(self.make_command(0.0, True, 0.0, 1.0))
-            rospy.logwarn_throttle(1.0, "PP highway lead-safety status stale")
+                self.highway_speed_controller.reset()
+                # Preserve the bounded last wheel angle while stopping in a
+                # turn; abruptly straightening the wheels leaves the corridor.
+                self.command_pub.publish(self.make_command(self.steering_limiter.angle, True, 0.0, 1.0))
+            rospy.logwarn_throttle(1.0, "Pure Pursuit FAIL-SAFE STOP: %s",
+                                   managed_fault or "merge_gate_stale")
             return
-        if (managed_fault is not None or not merge_fresh) and not highway_no_brake:
-            self.steering_limiter.reset(now.to_sec())
-            if self.enable_control:
-                self.speed_controller.reset()
-                self.command_pub.publish(self.make_command(0.0, True, 0.0, 1.0))
-            self.steering_preview_pub.publish(Float64(0.0))
-            rospy.logwarn_throttle(
-                1.0,
-                "Pure Pursuit FAIL-SAFE STOP: %s",
-                managed_fault if managed_fault is not None else "merge_gate_stale",
-            )
-            return
-        if highway_no_brake and (managed_fault is not None or not merge_fresh):
-            rospy.logwarn_throttle(
-                1.0,
-                "PP highway no-brake suppressed fail-safe: %s",
-                managed_fault if managed_fault is not None else "merge_gate_stale",
-            )
 
         pose = self.latest_odom.pose.pose
         yaw = quaternion_to_yaw(
@@ -406,26 +348,20 @@ class PurePursuitNode:
             self.latest_odom.twist.twist.linear.x,
             self.latest_odom.twist.twist.linear.y,
         )
-        fast_lookahead = None
-        fast_steering_rate = None
-        if self.fast_change_active:
-            fast_lookahead, fast_steering_rate = speed_adaptive_steering_profile(
-                speed,
-                self.fast_change_lookahead_m,
-                self.fast_change_lookahead_speed_gain,
-                self.fast_change_steering_rate_rad_s,
-                self.fast_change_reference_speed_mps,
-                self.steering_limiter.rate,
-            )
         with self.controller_lock:
-            steering, path_stop, target, target_index, lookahead = self.controller.compute(
-                pose.position.x,
-                pose.position.y,
-                yaw,
-                speed,
-                fast_lookahead,
-            )
             active_count = len(self.controller.points)
+            if self.highway_active and active_count >= 5:
+                steering, target_index, lookahead = track_path(
+                    [(p.x,p.y) for p in self.controller.points],
+                    Ego(pose.position.x, pose.position.y, yaw, speed), self.wheelbase_m)
+                steering *= self.steering_sign
+                target = self.controller.points[target_index]
+                # Highway paths roll forward every tick; their last sample is
+                # not a destination. Input freshness is checked separately.
+                path_stop = False
+            else:
+                steering, path_stop, target, target_index, lookahead = self.controller.compute(
+                    pose.position.x, pose.position.y, yaw, speed)
         requested_steering = steering
         steering_limit = self.max_steering
         if self.steering_rate_active:
@@ -443,9 +379,8 @@ class PurePursuitNode:
         # roundabout. Never suppress it by default. When the mission layer has
         # explicitly asserted merge_request AND the merge gate has latched GO,
         # this optional override lets the dedicated roundabout gap logic own the
-        # entry decision. Outside the explicit highway no-brake competition
-        # mode, pedestrian, traffic-light, avoidance and path stops are never
-        # overridden.
+        # entry decision. Independent pedestrian, traffic-light and strategy
+        # safety stops are never overridden by the highway controller.
         intersection_effective_stop = self.intersection_stop_required
         if (
             self.roundabout_override_intersection_stop
@@ -463,37 +398,10 @@ class PurePursuitNode:
             or avoidance_stop
             or merge_stop
         )
-        suppressed_stop_sources = []
-        if highway_no_brake:
-            suppressed_stop_sources = [
-                name for name, value in (
-                    ("path", path_stop),
-                    ("pedestrian", self.pedestrian_stop_required),
-                    ("traffic_light", self.traffic_light_stop_required),
-                    ("intersection", intersection_effective_stop),
-                    ("avoidance", avoidance_stop),
-                    ("merge", merge_stop),
-                )
-                if value
-            ]
-            stop, _, _ = apply_highway_brake_policy(
-                self.highway_active,
-                self.highway_braking_enabled,
-                stop,
-                0.0,
-                0.0,
-            )
-        # Stop commands still apply immediately. Match the limiter state to the
-        # zero steering actually sent by make_command, so restart is also smooth.
         steering = (
             self.steering_limiter.reset(now.to_sec())
-            if stop
-            else self.steering_limiter.update(
-                steering,
-                now.to_sec(),
-                self.steering_rate_active,
-                fast_steering_rate,
-            )
+            if stop and not self.highway_active
+            else self.steering_limiter.update(steering, now.to_sec(), self.steering_rate_active)
         )
         # The limiter remembers its previous command. Clamp again so a large
         # command from the preceding mode cannot leak into the high-speed
@@ -531,36 +439,12 @@ class PurePursuitNode:
         )
         now_sec = now.to_sec()
         if self.enable_control:
+            speed_controller = self.highway_speed_controller if self.highway_active else self.speed_controller
             if stop:
-                self.speed_controller.reset()
+                speed_controller.reset()
                 accel, brake = 0.0, 1.0
             else:
-                accel, brake = self.speed_controller.compute(effective_target_speed, speed, now_sec)
-                # stop=False alone is insufficient: the pedal-speed PID
-                # commands positive brake whenever actual speed exceeds its
-                # target. In highway no-brake mode the car coasts instead.
-                stop, accel, brake = apply_highway_brake_policy(
-                    self.highway_active,
-                    self.highway_braking_enabled,
-                    stop,
-                    accel,
-                    brake,
-                    allow_speed_brake=(
-                        self.highway_speed_braking_enabled
-                        and self.highway_lead_brake_required
-                    ),
-                )
-                if highway_no_brake and self.highway_lead_emergency_brake:
-                    accel, brake = 0.0, 1.0
-            if highway_no_brake and brake > 0.01:
-                rospy.logwarn_throttle(
-                    1.0,
-                    "PP highway brake source=%s pedal=%.2f actual=%.2f target=%.2f",
-                    "lead_emergency" if self.highway_lead_emergency_brake
-                    else "lead_follow" if self.highway_lead_brake_required
-                    else "other",
-                    brake, speed, effective_target_speed,
-                )
+                accel, brake = speed_controller.compute(effective_target_speed, speed, now_sec)
             if self.highway_active and (stop or brake > 0.1):
                 rospy.logwarn_throttle(
                     1.0,
@@ -577,7 +461,7 @@ class PurePursuitNode:
             1.0,
             "PP idx=%d lookahead=%.2f steer=%.4f stop=%s path=%s ped=%s tl=%s int=%s->%s "
             "avoid=%s merge(request=%s stop=%s allowed=%s) source=%s points=%d target_v=%.2f fast_change=%s "
-            "highway_no_brake=%s suppressed=%s",
+            "highway=%s",
             target_index,
             lookahead,
             steering,
@@ -595,8 +479,7 @@ class PurePursuitNode:
             active_count,
             effective_target_speed,
             self.fast_change_active,
-            highway_no_brake,
-            ",".join(suppressed_stop_sources),
+            self.highway_active,
         )
 
     def make_command(
@@ -610,7 +493,7 @@ class PurePursuitNode:
         if hasattr(command, "longlCmdType"):
             command.longlCmdType = 1
         if hasattr(command, "steering"):
-            command.steering = 0.0 if stop else steering
+            command.steering = 0.0 if stop and not self.highway_active else steering
         if hasattr(command, "brake"):
             command.brake = 1.0 if stop else brake
         if hasattr(command, "accel"):

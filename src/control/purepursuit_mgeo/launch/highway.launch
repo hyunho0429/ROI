@@ -7,9 +7,11 @@
   <arg name="link_set_file"
        default="$(find morai_bringup)/../../../data/mgeo/R_KR_PR_K-city_2025/link_set.json" />
   <arg name="enable_control" default="true" />
-  <arg name="target_speed_mps" default="2.0" />
+  <arg name="target_speed_mps" default="22.222222" />
   <arg name="managed_timeout_s" default="1.0" />
   <arg name="lidar_forward_range_m" default="80.0" />
+  <arg name="lidar_rear_min_m" default="-80.0" />
+  <arg name="lidar_lateral_range_m" default="16.0" />
 
   <arg name="enable_lane_info_publisher" default="true" />
   <arg name="enable_camera_object_detection" default="true" />
@@ -50,6 +52,8 @@
     <arg name="target_speed_mps" value="$(arg target_speed_mps)" />
     <arg name="managed_timeout_s" value="$(arg managed_timeout_s)" />
     <arg name="lidar_forward_range_m" value="$(arg lidar_forward_range_m)" />
+    <arg name="lidar_rear_min_m" value="$(arg lidar_rear_min_m)" />
+    <arg name="lidar_lateral_range_m" value="$(arg lidar_lateral_range_m)" />
     <arg name="enable_lane_info_publisher" value="$(arg enable_lane_info_publisher)" />
     <arg name="enable_camera_object_detection" value="$(arg enable_camera_object_detection)" />
     <arg name="lane_info_topic" value="$(arg lane_info_topic)" />
