@@ -18,14 +18,20 @@
   <arg name="target_speed_mps" default="2.0" />
   <arg name="managed_timeout_s" default="1.0" />
 
+  <!-- LAB A/B test: do not change collision, stop, or lane-change geometry. -->
+  <arg name="lab_lookahead_min_m" default="5.5" />
+  <arg name="lab_lookahead_gain" default="0.25" />
+  <arg name="lab_inner_stitch_keep_m" default="2.5" />
+  <arg name="lab_inner_stitch_blend_m" default="8.0" />
+
   <!-- Camera-team source files remain UNCHANGED.  Our wrapper only launches
        their existing live_lane_info_publisher_v2.py so lane_info is available. -->
   <arg name="enable_lane_info_publisher" default="true" />
   <arg name="lane_info_topic" default="/perception/camera/lane_info" />
   <arg name="lane_info_ip" default="0.0.0.0" />
   <arg name="lane_info_port" default="1101" />
-  <arg name="lane_info_checkpoint" default="$(find camera_perception)/lane/lane_seg_best.pt" />
-  <arg name="lane_info_cam_set" default="$(find camera_perception)/lane/cam_set.json" />
+  <arg name="lane_info_checkpoint" default="" />
+  <arg name="lane_info_cam_set" default="" />
   <arg name="lane_info_device" default="auto" />
   <arg name="lane_info_every" default="1" />
   <arg name="highway_environment_topic" default="/perception/camera/highway_environment" />
@@ -74,12 +80,19 @@
     <arg name="morai_host_ip" value="$(arg morai_host_ip)" />
     <arg name="target_speed_mps" value="$(arg target_speed_mps)" />
     <arg name="enable_control" value="$(arg enable_control)" />
-    <!-- One UDP consumer only: live_lane_info_publisher_v2.py owns MORAI lane port 1101. -->
+    <!-- One UDP consumer: real_lane_node.py owns MORAI lane port 1101. -->
     <arg name="enable_lane" value="false" />
   </include>
 
-  <!-- Launch the camera team's EXISTING lane-info publisher without modifying it.
-       The canonical camera launch above does not publish /perception/camera/lane_info. -->
+  <!-- IMPORTANT: after canonical bringup include so these PP params are
+       not overwritten by the included sensor-team launch. PP reads them once
+       at startup; restart the launch between A/B runs. -->
+  <param name="/purepursuit_mgeo/lookahead_min_m" value="$(arg lab_lookahead_min_m)" />
+  <param name="/purepursuit_mgeo/lookahead_gain" value="$(arg lab_lookahead_gain)" />
+
+  <!-- Launch real_lane_node.py in camera_perception/post_processing.
+       Requires sensor team's checkout and best.pt; uses auto-detection for checkpoint/cam_set.
+       Set enable_lane_info_publisher:=false if a DIFFERENT node already publishes lane_info. -->
   <node if="$(arg enable_lane_info_publisher)"
         pkg="purepursuit_mgeo"
         type="lane_info_runner.py"
@@ -247,9 +260,10 @@
          receding-horizon lane-hold path so a lane-identity jump cannot create
          an instantaneous steering jump. -->
     <!-- V8: spatial smoothing + MAP-frame near-horizon stitching. -->
-    <param name="inner_stitch_keep_m" value="5.0" />
-    <param name="inner_stitch_blend_m" value="12.0" />
-    <param name="inner_spatial_window" value="5" />
+    <param name="inner_stitch_keep_m" value="$(arg lab_inner_stitch_keep_m)" />
+    <param name="inner_stitch_blend_m" value="$(arg lab_inner_stitch_blend_m)" />
+    <param name="inner_spatial_window" value="3" />
+    <param name="inner_max_path_jump_m" value="1.10" />
     <param name="inner_spatial_max_dy_per_m" value="0.22" />
     <param name="inner_recovery_timeout_s" value="3.0" />
     <param name="inner_hold_speed_cap_mps" value="2.5" />
@@ -262,11 +276,11 @@
     <param name="left_change_stable_heading_rad" value="0.1222" />
     <param name="left_change_stable_confirm_s" value="0.8" />
 
-    <param name="change_start_m" value="3.0" />
-    <param name="change_min_length_m" value="28.0" />
-    <param name="change_max_length_m" value="32.0" />
-    <param name="change_time_s" value="7.0" />
-    <param name="change_post_hold_m" value="10.0" />
+    <param name="change_start_m" value="5.0" />
+    <param name="change_min_length_m" value="34.0" />
+    <param name="change_max_length_m" value="40.0" />
+    <param name="change_time_s" value="8.0" />
+    <param name="change_post_hold_m" value="14.0" />
     <param name="change_settle_m" value="6.0" />
     <param name="change_endpoint_guard_m" value="6.0" />
     <param name="max_lateral_accel_mps2" value="2.5" />
