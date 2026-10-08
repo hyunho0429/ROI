@@ -32,8 +32,8 @@
   <arg name="stopline_detected_topic" default="/perception/camera/stopline_detected" />
   <arg name="stopline_distance_topic" default="/perception/camera/stopline_distance_m" />
   <arg name="highway_environment_topic" default="/perception/camera/highway_environment" />
-  <!-- Highway detection uses the lane camera, independently of YOLO. -->
-  <arg name="enable_highway_gate" default="$(arg enable_lane)" />
+  <!-- The first YOLO road-vehicle result activates the highway gate. -->
+  <arg name="enable_highway_gate" default="$(arg enable_yolo)" />
   <arg name="highway_latch_once" default="true" />
   <arg name="lane_info_topic" default="/perception/camera/lane_info" />
   <arg name="enable_pedestrian_crossing" default="$(arg enable_yolo)" />
@@ -85,12 +85,11 @@
         type="highway_environment_gate_node.py"
         name="highway_environment_gate"
         output="screen">
+    <param name="car_detected_topic" value="$(arg car_detected_topic)" />
     <param name="output_topic" value="$(arg highway_environment_topic)" />
     <param name="intersection_detected_topic" value="$(arg intersection_detected_topic)" />
     <param name="latch_once" value="$(arg highway_latch_once)" />
-    <param name="lane_info_topic" value="$(arg lane_info_topic)" />
-    <param name="lane_pattern_confirm_frames" value="3" />
-    <param name="lane_pattern_timeout_s" value="0.6" />
+    <param name="car_timeout_s" value="1.0" />
     <param name="publish_rate_hz" value="10.0" />
   </node>
 

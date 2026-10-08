@@ -50,9 +50,9 @@
   <arg name="stopline_detected_topic" default="/perception/camera/stopline_detected" />
   <arg name="stopline_distance_topic" default="/perception/camera/stopline_distance_m" />
   <arg name="highway_environment_topic" default="/perception/camera/highway_environment" />
-  <arg name="enable_highway_gate" default="$(arg enable_lane)" />
+  <arg name="enable_highway_gate" default="$(arg enable_yolo)" />
   <arg name="merge_highway_gate_required" default="$(arg enable_highway_gate)" />
-  <!-- Highway entry requires a camera-confirmed adjacent-left dashed+solid pair. -->
+  <!-- Highway entry starts from the first YOLO road-vehicle detection. -->
   <arg name="highway_latch_once" default="true" />
   <arg name="lidar_forward_range_m" default="40.0" />
   <arg name="lane_info_topic" default="/perception/camera/lane_info" />

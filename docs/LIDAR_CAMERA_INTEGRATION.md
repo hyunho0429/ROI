@@ -60,7 +60,7 @@ roslaunch morai_bringup morai_udp_ekf_purepursuit_lidar_camera.launch enable_con
 | `yolo_inference_size` | `320` | YOLO 추론 입력 크기(작을수록 빠르지만 소형 객체 정확도 감소) |
 | `camera_display_fps` | `0.0` | `0`은 MORAI 수신 프레임율로 즉시 표시 |
 | `yolo_cpu_threads` | `1` | YOLO에 사용하는 PyTorch CPU 스레드 수 |
-| `enable_highway_gate` | `enable_lane` | 자차 바로 왼쪽 같은 경계의 흰색 실선·점선 중첩을 3개 연속 차선 관측에서 확인하면 고속도로 환경 활성화 |
+| `enable_highway_gate` | `enable_yolo` | YOLO 차량 최초 검출 시 고속도로 환경을 즉시 활성화 |
 | `highway_latch_once` | `true` | 최초 고속도로 인지 후 상태를 노드 종료까지 유지 |
 | `enable_pedestrian_crossing` | `true` | YOLO person 기반 정지·재출발 |
 | `person_clear_confirmation_s` | `0.5` | person 미검출 후 재출발 확정 시간 |

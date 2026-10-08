@@ -22,7 +22,7 @@
   <arg name="lidar_forward_range_m" default="80.0" />
 
   <!-- The wrapper launches the six-class lane inference pipeline. -->
-  <!-- Camera lane geometry determines highway entry; YOLO serves other missions. -->
+  <!-- YOLO vehicle detection determines highway entry; lane geometry guides control. -->
   <arg name="enable_lane_info_publisher" default="true" />
   <arg name="enable_camera_object_detection" default="true" />
   <arg name="lane_info_topic" default="/perception/camera/lane_info" />
@@ -43,7 +43,7 @@
   <arg name="yolo_confidence" default="0.4" />
   <arg name="yolo_inference_size" default="320" />
   <arg name="highway_environment_topic" default="/perception/camera/highway_environment" />
-  <!-- Highway gate: adjacent-left overlapping white dashed+solid only. -->
+  <!-- Highway gate: activate on the first YOLO road-vehicle detection. -->
   <arg name="highway_latch_once" default="true" />
   <arg name="highway_request_topic" default="/planning/highway_lane_change_request" />
   <!-- Upper bound, not a requirement to change twice. -->
@@ -125,7 +125,7 @@
     <arg name="custom_model_path" value="$(arg yolo_custom_model)" />
     <arg name="yolo_confidence" value="$(arg yolo_confidence)" />
     <arg name="yolo_inference_size" value="$(arg yolo_inference_size)" />
-    <arg name="enable_highway_gate" value="true" />
+    <arg name="enable_highway_gate" value="$(arg enable_camera_object_detection)" />
     <!-- Do not show or publish a merge-space decision before the camera has
          confirmed the highway environment. -->
     <arg name="merge_highway_gate_required" value="true" />
@@ -292,7 +292,7 @@
          gap, TTC and the complete quintic path. Avoid waiting on the older
          camera-gated merge decision as a second veto. -->
     <param name="bypass_sensor_merge_gate" value="true" />
-    <!-- Arm only after the adjacent-left dashed+solid pair is confirmed. -->
+    <!-- Arm after YOLO detects a road vehicle. -->
     <param name="force_highway_active" value="false" />
     <!-- Use measured lane boundaries for the quintic path and post-change hold. -->
     <param name="rrt_lidar_only_mode" value="false" />
