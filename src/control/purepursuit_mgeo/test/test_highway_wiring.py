@@ -1,5 +1,6 @@
 """ROS adapter smoke tests without a ROS installation; launch include contracts."""
 import importlib.util
+import math
 import sys
 import time
 import tempfile
@@ -101,6 +102,16 @@ class AdapterTests(unittest.TestCase):
                 node.control_callback(None)
                 self.assertEqual(node.command_pub.messages[-1].brake,1.)
                 self.assertEqual(node.command_pub.messages[-1].accel,0.)
+                # The environment detector can lag behind the moving car.
+                # Physical steering authority is still bounded at road speed.
+                node.pedestrian_stop_required=False
+                node.highway_active=False
+                node.steering_rate_active=False
+                node.controller.points=[PathPoint(float(x),8.,0.) for x in range(100)]
+                odom.twist.twist.linear.x=19.
+                node.control_callback(None)
+                limit=math.atan(2.5*node.wheelbase_m/(19.*19.))
+                self.assertLessEqual(abs(node.command_pub.messages[-1].steering),limit+1e-9)
 
     def test_adapter_publishes_rolling_path_and_final_lane_status(self):
         from purepursuit_mgeo.highway import Ego, Lane, Road

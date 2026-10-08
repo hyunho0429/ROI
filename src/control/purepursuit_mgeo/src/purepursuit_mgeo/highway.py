@@ -289,6 +289,7 @@ class Highway:
         self.road = None
         self.lane = None
         self.change = None
+        self.change_started = None
         self.locked = False
         self.changes = 0
         self.last_stamp = -math.inf
@@ -377,8 +378,10 @@ class Highway:
         records = list(self._objects(change.road, obstacles))
         slow_speed = max(2., ego.speed)
         for obj, s, d, hs, hd, vs, vd in records:
+            # A slower car in the source lane is being passed. Only traffic
+            # in the destination corridor can set the committed merge speed.
             if (0 < s < change.length+40.
-                    and -hd-c.vehicle_width/2 < d < change.target+hd+c.vehicle_width/2):
+                    and abs(d-change.target) < hd+c.vehicle_width/2+.25):
                 slow_speed = min(slow_speed, max(2., vs))
         # A slower lead may prolong the change. Rear clearance must also hold
         # if ACC slows to that lead; constant initial ego speed is insufficient.
@@ -421,16 +424,27 @@ class Highway:
             # Rear objects NEVER become a lead because ego yaw turns left.
             if ds <= 0 or ds > 160:
                 continue
-            # Actual corridor now and near-term swept corridor during a change.
-            lateral = d
-            if self.change is not None:
-                t = clamp(ds/max(ego.speed, 5.), 0., 1.5)
-                lateral = self.change.lateral(s+ego.speed*t)
-            overlap = abs(od-d) < hd+c.vehicle_width/2+.12
-            future_overlap = abs(od+vd*.8-lateral) < hd+c.vehicle_width/2+.12
-            if not overlap and not future_overlap:
-                continue
             gap = ds-hs-c.vehicle_length/2
+            closing = max(0., ego.speed-vs)
+            ttc = gap/closing if closing > .1 else math.inf
+            if self.change is not None:
+                # Source-lane cars that will be behind us only after the
+                # polynomial has moved the ego away must not trigger ACC
+                # braking halfway through a safe pass. Use time-to-contact
+                # and the immutable path, not current yaw or a short lookahead.
+                destination_overlap = abs(od-self.change.target) < hd+c.vehicle_width/2+.12
+                if not destination_overlap:
+                    near_current_front = (gap < c.standstill_gap and
+                                          abs(od-d) < hd+c.vehicle_width/2+.12)
+                    if not near_current_front:
+                        if ttc < 0. or ttc > self.change.length/max(ego.speed,5.)+.5:
+                            continue
+                        predicted_s = s+max(ego.speed,5.)*max(0.,ttc)
+                        predicted_d = self.change.lateral(predicted_s)
+                        if abs(od+vd*max(0.,ttc)-predicted_d) >= hd+c.vehicle_width/2+.12:
+                            continue
+            elif abs(od-d) >= hd+c.vehicle_width/2+.12:
+                continue
             if gap < best:
                 best, lead = gap, (obj.id, max(0.,vs))
         if lead is None:
@@ -510,6 +524,7 @@ class Highway:
                         self.gap_frames += 1
                     if now-self.gap_since >= .25 and self.gap_frames >= 3:
                         self.change = candidate
+                        self.change_started = now
                         self.state = 'CHANGE'
                         self.good_count = 0
                         self.lane = None
@@ -534,7 +549,15 @@ class Highway:
             fault = 'odometry_stale'
         elif lidar_age > c.lidar_timeout:
             fault = 'lidar_stale'
-        elif not fresh:
+        # Crossing a divider deliberately puts the camera into STRADDLING or
+        # INVALID for several frames. The committed path remains world-fixed
+        # and is still checked against fresh odometry/LiDAR. Do not brake to
+        # zero for this *expected* camera gap while traversing the divider.
+        camera_change_grace = (
+            self.change is not None and self.change_started is not None
+            and now-self.change_started <= self.change.length/max(self.change.speed,5.)+1.5
+        )
+        if fault is None and not fresh and not camera_change_grace:
             fault = 'lane_geometry_stale'
         if fault:
             target = 0.
@@ -562,6 +585,7 @@ class Highway:
                       dict(changes=self.changes, locked=self.locked, lateral_error=round(d-goal_d,3),
                            heading_error_deg=round(math.degrees(yaw_error),2),
                            lane_age=round(now-self.last_good,3), lane_association=self.lane_reason,
+                           camera_change_grace=camera_change_grace,
                            blocker=self.blocker,
                            left_type=self.lane.left if self.lane else None,
                            right_type=self.lane.right if self.lane else None,

@@ -147,6 +147,20 @@ class SupervisorTests(unittest.TestCase):
         self.assertEqual(r.state,'WAIT_GAP')
         self.assertEqual(r.reason,'target_rear_gap')
 
+    def test_overtaken_source_lead_does_not_brake_during_safe_change(self):
+        e=Ego(0.,0.,0.,19.)
+        c=Change.create(Road(0.,0.,0.),e,3.5,self.p.cfg)
+        source=object_at(35.,0.,17.,1)
+        rear=object_at(-45.,3.5,21.,2)
+        self.assertTrue(self.p._gap(c,e,[source,rear])[0])
+        self.p.change=c
+        speed,stop,follow=self.p._follow(c.road,e,[source,rear])
+        self.assertEqual(follow,{})
+        self.assertFalse(stop)
+        self.assertAlmostEqual(speed,SPEED)
+        close=object_at(12.,0.,10.,3)
+        self.assertTrue(self.p._follow(c.road,e,[close])[1])
+
     def test_solid_left_keeps_driving_and_never_changes(self):
         r=self.run_ready(left='white_solid')
         self.assertEqual(r.state,'LOCKED')
@@ -206,7 +220,7 @@ class SupervisorTests(unittest.TestCase):
 
 
 class ClosedLoopTests(unittest.TestCase):
-    def simulate(self, seed=0, noise=0., delay=0., actuator_tau=0., curvature=0.):
+    def simulate(self, seed=0, noise=0., delay=0., actuator_tau=0., curvature=0., divider_dropout=False):
         rng=random.Random(seed)
         p=Highway(); e=Ego(0.,0.,0.,SPEED)
         road=Road(0.,0.,0.,curvature)
@@ -217,7 +231,12 @@ class ClosedLoopTests(unittest.TestCase):
             t=i*.05
             s,d=road.project(e.x,e.y)
             n=int(clamp(math.floor((d+1.75)/3.5),0,2))
-            if i%2==0:
+            in_crossing=False
+            # The frozen change path is parameterized in its own road frame.
+            if divider_dropout and p.change is not None:
+                station,_=p.change.road.project(e.x,e.y)
+                in_crossing=.15 < station/p.change.length < .90
+            if i%2==0 and not in_crossing:
                 # Simulate original capture time + delayed delivery, including
                 # occasional false adjacent-lane association and missed frames.
                 if noise and i%47==0:
@@ -246,6 +265,8 @@ class ClosedLoopTests(unittest.TestCase):
                 _,measurement=queue.pop(0)
                 p.observe(measurement,t,e)
             r=p.step(t,e,[],True,lidar_stamp=i)
+            if divider_dropout and p.change is not None and r.diagnostics.get('lane_age',0)>1.:
+                self.assertGreater(r.target_speed,SPEED-.1,(t,r.reason,r.diagnostics))
             if r.state=='CHANGE' and previous!='CHANGE':
                 changes.append((t,d,e.yaw-road.heading(s)))
             if r.reason=='change_complete_parallel':holds.append(t)
@@ -278,6 +299,9 @@ class ClosedLoopTests(unittest.TestCase):
     def test_80kph_gentle_curved_road(self):
         self.simulate(curvature=.001)
 
+    def test_80kph_divider_temporarily_hides_camera(self):
+        self.simulate(divider_dropout=True)
+
     def test_front_follow_converges_without_stop_or_collision(self):
         for initial_gap in (35.,50.,80.):
             p=Highway(); e=Ego(0.,0.,0.,SPEED)
@@ -295,6 +319,36 @@ class ClosedLoopTests(unittest.TestCase):
                 smallest=min(smallest,front-e.x-1.5-4.635/2-2.3)
             self.assertGreater(smallest,10.)
             self.assertAlmostEqual(e.speed,14.,delta=.08)
+
+    def test_video_pattern_source_lead_and_fast_rear_during_camera_gap(self):
+        """A safe pass must not slow into the approaching destination car."""
+        p=Highway(); ego=Ego(0.,0.,0.,19.)
+        p.road=Road(0.,0.,0.)
+        p.change=Change.create(p.road,ego,3.5,p.cfg)
+        p.change_started=0.
+        p.state='CHANGE'
+        p.last_good=0.
+        p.speed_command=19.
+        source_x,rear_x=35.,-45.
+        pid=PedalSpeedController(kp=.18,ki=.02,kd=0.)
+        smallest_rear=math.inf
+        for i in range(111):
+            t=i*.05
+            objects=[object_at(source_x,0.,17.,1),object_at(rear_x,3.5,21.,2)]
+            r=p.step(t,ego,objects,True,lidar_stamp=i)
+            self.assertFalse(r.stop,(t,r.reason))
+            self.assertGreaterEqual(r.target_speed,18.9,(t,r.reason,r.diagnostics))
+            accel,brake=pid.compute(r.target_speed,ego.speed,t)
+            wheel,_,_=track_path(r.path,ego)
+            ego=Ego(ego.x+ego.speed*math.cos(ego.yaw)*.05,
+                    ego.y+ego.speed*math.sin(ego.yaw)*.05,
+                    ego.yaw+ego.speed/3*math.tan(wheel)*.05,
+                    max(0.,ego.speed+(3*accel-8*brake)*.05))
+            source_x+=17*.05
+            rear_x+=21*.05
+            smallest_rear=min(smallest_rear,ego.x-rear_x-6.)
+        self.assertGreater(smallest_rear,20.)
+        self.assertLess(abs(ego.y-3.5),.2)
 
 
 if __name__=='__main__':

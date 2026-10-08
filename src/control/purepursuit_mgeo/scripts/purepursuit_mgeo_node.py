@@ -364,7 +364,10 @@ class PurePursuitNode:
                     pose.position.x, pose.position.y, yaw, speed)
         requested_steering = steering
         steering_limit = self.max_steering
-        if self.steering_rate_active:
+        # The vehicle may reach highway speed before the environment gate
+        # publishes active=True. Keep the physical lateral-acceleration bound
+        # at speed even during that transition.
+        if self.steering_rate_active or speed >= 12.0:
             steering_limit = lateral_acceleration_steering_limit(
                 speed,
                 self.wheelbase_m,
