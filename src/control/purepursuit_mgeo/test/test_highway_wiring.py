@@ -133,6 +133,67 @@ class AdapterTests(unittest.TestCase):
             self.assertGreater(len(node.path_pub.messages[-1].poses),80)
             self.assertIn('LOCKED',node.state_pub.messages[-1].data)
 
+    def test_entry_uses_global_path_until_gap_change_then_lane_centre(self):
+        from purepursuit_mgeo.highway import Ego, Lane, Road
+        modules=ros_modules()
+        with tempfile.TemporaryDirectory() as folder:
+            route=Path(folder)/'route.txt'
+            route.write_text(''.join('%d 0.1 0\n' % x for x in range(-5,110)))
+            modules['rospy'].get_param=lambda name,default=None: (
+                str(route) if name == '~global_path_file' else default)
+            with patch.dict(sys.modules,modules):
+                module=load_script('highway_lane_strategy_node')
+                node=module.HighwayNode()
+                node.ego=Ego(0.,0.,0.,80/3.6)
+                node.enabled=True
+                now=time.time()
+                node.odom_at=node.lidar_at=node.lidar_stamp=now
+                node.planner.observe(Lane(Road(0.,0.,0.),3.5,'white_dashed',
+                                          'white_dashed',now),now,node.ego)
+                with patch.object(module.time,'time',return_value=now):
+                    node.tick(None)
+                self.assertIn('"path_source": "global"',node.state_pub.messages[-1].data)
+                self.assertAlmostEqual(node.path_pub.messages[-1].poses[10].pose.position.y,.1)
+                node.planner.changes=1
+                node.planner.locked=True
+                next_time=now+.05
+                node.odom_at=node.lidar_at=node.lidar_stamp=next_time
+                node.planner.observe(Lane(Road(0.,0.,0.),3.5,'white_solid',
+                                          'white_dashed',next_time),next_time,node.ego)
+                with patch.object(module.time,'time',return_value=next_time):
+                    node.tick(None)
+                self.assertIn('"path_source": "lane_center"',node.state_pub.messages[-1].data)
+                self.assertAlmostEqual(node.path_pub.messages[-1].poses[10].pose.position.y,0.)
+
+    def test_global_diagonal_waits_inside_lane_when_adjacent_car_blocks_gap(self):
+        from purepursuit_mgeo.highway import Ego, Lane, Obstacle, Road
+        modules=ros_modules()
+        with tempfile.TemporaryDirectory() as folder:
+            route=Path(folder)/'route.txt'
+            route.write_text(''.join('%d %.3f 0\n' % (x,max(0.,min(3.5,(x-15)*.1)))
+                                     for x in range(-5,110)))
+            modules['rospy'].get_param=lambda name,default=None: (
+                str(route) if name == '~global_path_file' else default)
+            with patch.dict(sys.modules,modules):
+                module=load_script('highway_lane_strategy_node')
+                node=module.HighwayNode()
+                node.ego=Ego(0.,0.,0.,80/3.6)
+                node.enabled=True
+                node.obstacles=[Obstacle(1,0.,3.5,0.,4.6,1.9,80/3.6,0.)]
+                start=time.time()
+                for i in range(45):
+                    now=start+i*.05
+                    node.odom_at=node.lidar_at=node.lidar_stamp=now
+                    node.planner.observe(Lane(Road(0.,0.,0.),3.5,'white_dashed',
+                                              'white_dashed',now),now,node.ego)
+                    with patch.object(module.time,'time',return_value=now):
+                        node.tick(None)
+                self.assertEqual(node.planner.state,'WAIT_GAP')
+                self.assertIn('"path_source": "global_guarded"',
+                              node.state_pub.messages[-1].data)
+                self.assertLessEqual(max(p.pose.position.y for p in
+                                         node.path_pub.messages[-1].poses),.2+1e-6)
+
     def test_braking_keeps_highway_steering_but_not_throttle(self):
         with patch.dict(sys.modules,ros_modules()):
             module=load_script('purepursuit_mgeo_node')

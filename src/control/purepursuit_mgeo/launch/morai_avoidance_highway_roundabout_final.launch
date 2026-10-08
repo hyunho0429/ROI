@@ -258,11 +258,12 @@
     <param name="threat_clear_max_abs_d_m" value="0.55" />
   </node>
 
-  <!-- One left lane per fixed Frenet/quintic path. Never rejoin the outer
-       global route after activation; hold the measured destination centre. -->
+  <!-- Follow the guarded global route before the first gap-approved change.
+       A committed change uses its fixed Frenet path, then the new lane centre. -->
   <node pkg="purepursuit_mgeo" type="highway_lane_strategy_node.py"
         name="highway_lane_strategy" output="screen">
     <param name="map_frame" value="map" />
+    <param name="global_path_file" value="$(arg path_file)" />
     <param name="base_path_topic" value="/avoidance_path_manager/active_path" />
     <param name="base_stop_topic" value="/avoidance_path_manager/stop_required" />
     <param name="odom_topic" value="/localization/odometry" />

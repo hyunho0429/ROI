@@ -9,8 +9,9 @@ from dataclasses import replace
 
 from purepursuit_mgeo.highway import (
     Change, Config, Ego, Highway, Lane, Obstacle, Road,
-    clamp, lane_from_json, track_path, wrap,
+    clamp, guarded_global_path, lane_from_json, track_path, wrap,
 )
+from purepursuit_mgeo.path import PathPoint
 from purepursuit_mgeo.motion import SteeringRateLimiter
 from path_planning.longitudinal_controller import PedalSpeedController
 
@@ -45,6 +46,23 @@ def camera_message(ego, t, center=0., noise=0., left='white_dashed'):
 
 
 class GeometryTests(unittest.TestCase):
+    def test_global_route_is_used_until_its_unapproved_left_departure(self):
+        ego = Ego(0., 0., 0., SPEED)
+        road = Road(0., 0., 0.)
+        route = [PathPoint(float(x), 0.1 if x < 20 else min(3.5, .1*(x-19)), 0.)
+                 for x in range(-5, 101)]
+        path, clipped = guarded_global_path(route, ego, road, 3.5, Config(), 75.)
+        self.assertTrue(clipped)
+        self.assertAlmostEqual(next(y for x,y in path if x == 10.), .1)
+        self.assertLessEqual(max(y for _,y in path), .20+1e-6)
+        self.assertGreater(len(path), 75)
+
+    def test_distant_global_route_is_not_spliced_into_steering(self):
+        route = [PathPoint(float(x), 8., 0.) for x in range(100)]
+        self.assertEqual(guarded_global_path(route, Ego(0.,0.,0.,SPEED),
+                                             Road(0.,0.,0.), 3.5, Config(), 70.),
+                         ([], False))
+
     def test_composite_entrance_does_not_unlock_final_solid_lane(self):
         m=camera_message(Ego(0.,0.,0.,SPEED),0.,left='white_solid')
         m['right_lane']['type']='white_solid'

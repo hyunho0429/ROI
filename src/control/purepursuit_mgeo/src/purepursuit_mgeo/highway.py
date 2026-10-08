@@ -102,6 +102,48 @@ class Road:
         return Road(x, y, self.heading(s), self.curvature/(1-self.curvature*d))
 
 
+def guarded_global_path(points, ego, road, lane_width, cfg, horizon):
+    """Follow the map until it leaves the measured source-lane corridor.
+
+    A map route may contain its own diagonal merge. Before the LiDAR gap check
+    commits a lane change, that diagonal must not steer into the next lane.
+    Keep the map's longitudinal course and cap only its lateral departure.
+    """
+    if road is None or len(points) < 2:
+        return [], False
+    clearance = lane_width/2 - cfg.vehicle_width/2 - .30
+    if clearance <= 0:
+        return [], False
+    lateral_limit = min(.20, clearance)
+    nearest = min(range(len(points)),
+                  key=lambda i: (points[i].x-ego.x)**2+(points[i].y-ego.y)**2)
+    if math.hypot(points[nearest].x-ego.x, points[nearest].y-ego.y) > 3.:
+        return [], False
+    start = nearest
+    while start > 0 and math.hypot(points[start].x-points[nearest].x,
+                                   points[start].y-points[nearest].y) < 6.:
+        start -= 1
+    path, clipped = [], False
+    distance = 0.
+    for i in range(start, len(points)):
+        point = points[i]
+        if i > start:
+            previous = points[i-1]
+            distance += math.hypot(point.x-previous.x, point.y-previous.y)
+        station, lateral = road.project(point.x, point.y)
+        bounded = clamp(lateral, -lateral_limit, lateral_limit)
+        if abs(bounded-lateral) > 1e-3:
+            clipped = True
+            path.append(road.point(station, bounded))
+        else:
+            path.append((point.x, point.y))
+        if distance >= horizon+6.:
+            break
+    if len(path) < 5 or distance < min(25., horizon*.5):
+        return [], False
+    return path, clipped
+
+
 @dataclass
 class Lane:
     road: Road

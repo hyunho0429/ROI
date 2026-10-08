@@ -18,8 +18,11 @@ from nav_msgs.msg import Odometry, Path
 from std_msgs.msg import Bool, Float64, String
 from visualization_msgs.msg import Marker
 from lidar_perception.msg import LidarObstacleArray
-from purepursuit_mgeo.highway import Config, Ego, Highway, Obstacle, lane_from_json
+from purepursuit_mgeo.highway import (
+    Config, Ego, Highway, Obstacle, guarded_global_path, lane_from_json,
+)
 from purepursuit_mgeo.lane_geometry import pose_at
+from purepursuit_mgeo.path import load_mgeo_path
 
 
 def yaw(q):
@@ -42,6 +45,12 @@ class HighwayNode:
         self.base = None
         self.base_stop = True
         self.frame = rospy.get_param('~map_frame', 'map')
+        route_file = rospy.get_param('~global_path_file', '')
+        try:
+            self.global_route = load_mgeo_path(route_file) if route_file else []
+        except (OSError, ValueError) as exc:
+            self.global_route = []
+            rospy.logwarn('HIGHWAY global route unavailable: %s', exc)
         root = '/highway_lane_strategy/'
         self.path_pub = rospy.Publisher(root+'active_path', Path, queue_size=1)
         self.stop_pub = rospy.Publisher(root+'stop_required', Bool, queue_size=1)
@@ -141,11 +150,21 @@ class HighwayNode:
                                        now-self.odom_at, age, self.lidar_stamp)
             active = result.state != 'OFF'
             stop = result.stop
-            if result.path:
+            points = result.path
+            path_source = 'lane_change' if self.planner.change is not None else 'lane_center'
+            if active and self.planner.changes == 0 and self.planner.change is None and not self.planner.locked:
+                mapped, clipped = guarded_global_path(
+                    self.global_route, self.ego, self.planner.road,
+                    self.planner.lane.width if self.planner.lane is not None else 0.,
+                    self.planner.cfg, max(65., self.ego.speed*3.))
+                if mapped:
+                    points = mapped
+                    path_source = 'global_guarded' if clipped else 'global'
+            if points:
                 path = Path()
                 path.header.frame_id = self.frame
                 path.header.stamp = rospy.Time.now()
-                for x,y in result.path:
+                for x,y in points:
                     p = PoseStamped()
                     p.header = path.header
                     p.pose.position.x, p.pose.position.y = x,y
@@ -154,6 +173,7 @@ class HighwayNode:
                 self.path_pub.publish(path)
             elif self.base is not None and now-self.base_at <= 1.:
                 self.path_pub.publish(self.base)
+                path_source = 'base'
             if not active:
                 stop = self.base_stop or now-self.base_at > 1. or now-self.base_stop_at > 1.
             self.stop_pub.publish(Bool(stop))
@@ -163,9 +183,12 @@ class HighwayNode:
             self.lead_pub.publish(Bool(bool(result.diagnostics.get('follow'))))
             self.emergency_pub.publish(Bool(result.reason == 'front_collision_emergency'))
             status = dict(state=result.state, reason=result.reason, active=active, stop=stop,
+                          path_source=path_source,
                           target_speed_mps=result.target_speed, **result.diagnostics)
             self.state_pub.publish(String(json.dumps(status)))
-            label = '%s: %s\nchanges=%d target=%.1f km/h' % (result.state,result.reason,self.planner.changes,3.6*result.target_speed)
+            label = '%s: %s\npath=%s changes=%d target=%.1f km/h' % (
+                result.state, result.reason, path_source,
+                self.planner.changes, 3.6*result.target_speed)
             marker = Marker()
             marker.header.frame_id = self.frame
             marker.header.stamp = rospy.Time.now()
@@ -178,8 +201,8 @@ class HighwayNode:
             marker.color.r, marker.color.g, marker.color.a = (1. if stop else .2), (0. if stop else 1.), 1.
             marker.text = label
             self.marker_pub.publish(marker)
-            rospy.loginfo_throttle(1., 'HIGHWAY state=%s reason=%s change=%d stop=%s d=%s yaw=%s lane=%s',
-                                   result.state,result.reason,self.planner.changes,stop,
+            rospy.loginfo_throttle(1., 'HIGHWAY state=%s reason=%s path=%s change=%d stop=%s d=%s yaw=%s lane=%s',
+                                   result.state,result.reason,path_source,self.planner.changes,stop,
                                    result.diagnostics.get('lateral_error'),result.diagnostics.get('heading_error_deg'),self.planner.lane_reason)
 
 
