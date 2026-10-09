@@ -17,11 +17,6 @@
   <!-- First validation: 2 m/s. Raise to 6 m/s only after CONTROL-OFF + low-speed checks. -->
   <arg name="target_speed_mps" default="2.0" />
   <arg name="managed_timeout_s" default="1.0" />
-  <!-- Optional controller A/B tuning. Default values reproduce verified v8 behavior. -->
-  <arg name="v8_lookahead_min_m" default="5.5" />
-  <arg name="v8_lookahead_gain" default="0.35" />
-  <arg name="v8_stitch_keep_m" default="7.0" />
-  <arg name="v8_stitch_blend_m" default="10.0" />
 
   <!-- Camera-team source files remain UNCHANGED.  Our wrapper only launches
        their existing live_lane_info_publisher_v2.py so lane_info is available. -->
@@ -82,10 +77,6 @@
     <!-- One UDP consumer only: live_lane_info_publisher_v2.py owns MORAI lane port 1101. -->
     <arg name="enable_lane" value="false" />
   </include>
-
-  <!-- These match working v8 by default. Place after bringup include so we override its PP defaults. -->
-  <param name="/purepursuit_mgeo/lookahead_min_m" value="$(arg v8_lookahead_min_m)" />
-  <param name="/purepursuit_mgeo/lookahead_gain" value="$(arg v8_lookahead_gain)" />
 
   <!-- Launch the camera team's EXISTING lane-info publisher without modifying it.
        The canonical camera launch above does not publish /perception/camera/lane_info. -->
@@ -256,8 +247,8 @@
          receding-horizon lane-hold path so a lane-identity jump cannot create
          an instantaneous steering jump. -->
     <!-- V8: spatial smoothing + MAP-frame near-horizon stitching. -->
-    <param name="inner_stitch_keep_m" value="$(arg v8_stitch_keep_m)" />
-    <param name="inner_stitch_blend_m" value="$(arg v8_stitch_blend_m)" />
+    <param name="inner_stitch_keep_m" value="7.0" />
+    <param name="inner_stitch_blend_m" value="10.0" />
     <param name="inner_spatial_window" value="3" />
     <param name="inner_spatial_max_dy_per_m" value="0.22" />
     <param name="inner_recovery_timeout_s" value="3.0" />
